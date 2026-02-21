@@ -30,3 +30,5 @@ tmpFiles/
 logs/
 lastupdate.tmp
 commentsRouter*.go
+visor
+casvisor

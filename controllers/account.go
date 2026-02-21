@@ -1,4 +1,4 @@
-// Copyright 2023 The casbin Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,13 +29,13 @@ func init() {
 }
 
 func InitAuthConfig() {
-	casdoorEndpoint := beego.AppConfig.String("casdoorEndpoint")
+	iamEndpoint := beego.AppConfig.String("iamEndpoint")
 	clientId := beego.AppConfig.String("clientId")
 	clientSecret := beego.AppConfig.String("clientSecret")
-	casdoorOrganization := beego.AppConfig.String("casdoorOrganization")
-	casdoorApplication := beego.AppConfig.String("casdoorApplication")
+	iamOrganization := beego.AppConfig.String("iamOrganization")
+	iamApplication := beego.AppConfig.String("iamApplication")
 
-	casdoorsdk.InitConfig(casdoorEndpoint, clientId, clientSecret, JwtPublicKey, casdoorOrganization, casdoorApplication)
+	casdoorsdk.InitConfig(iamEndpoint, clientId, clientSecret, JwtPublicKey, iamOrganization, iamApplication)
 }
 
 func (c *ApiController) Signin() {

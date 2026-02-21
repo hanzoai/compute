@@ -1,4 +1,4 @@
-// Copyright 2023 The casbin Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ import (
 	"github.com/beego/beego"
 	"github.com/beego/beego/plugins/cors"
 	_ "github.com/beego/beego/session/redis"
-	"github.com/casvisor/casvisor/authz"
-	"github.com/casvisor/casvisor/object"
-	"github.com/casvisor/casvisor/routers"
-	"github.com/casvisor/casvisor/task"
-	"github.com/casvisor/casvisor/util"
+	"github.com/hanzoai/visor/authz"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/routers"
+	"github.com/hanzoai/visor/task"
+	"github.com/hanzoai/visor/util"
 )
 
 func main() {

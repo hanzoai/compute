@@ -1,4 +1,4 @@
-// Copyright 2024 The Casbin Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/beego/beego/logs"
-	"github.com/casvisor/casvisor/autoscaler"
-	"github.com/casvisor/casvisor/billing"
-	"github.com/casvisor/casvisor/conf"
-	"github.com/casvisor/casvisor/object"
+	"github.com/hanzoai/visor/autoscaler"
+	"github.com/hanzoai/visor/billing"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/object"
 )
 
 type Ticker struct{}

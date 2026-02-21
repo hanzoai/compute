@@ -1,4 +1,4 @@
-// Copyright 2023 The casbin Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,19 +22,19 @@ import (
 	"strings"
 
 	"github.com/beego/beego/context"
-	"github.com/casvisor/casvisor/conf"
-	"github.com/casvisor/casvisor/util"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/util"
 )
 
 var (
-	oldCasdoorEndpoint     = "https://door.casdoor.com"
-	newCasdoorEndpoint     = conf.GetConfigString("casdoorEndpoint")
-	oldClientId            = "b108dacba027db36ec26"
-	newClientId            = conf.GetConfigString("clientId")
-	oldCasdoorOrganization = "casbin"
-	newCasdoorOrganization = conf.GetConfigString("casdoorOrganization")
-	oldCasdoorApplication  = "app-casvisor"
-	newCasdoorApplication  = conf.GetConfigString("casdoorApplication")
+	oldIamEndpoint     = "https://door.casdoor.com"
+	newIamEndpoint     = conf.GetConfigString("iamEndpoint")
+	oldClientId        = "PLACEHOLDER_CLIENT_ID"
+	newClientId        = conf.GetConfigString("clientId")
+	oldIamOrganization = "casbin"
+	newIamOrganization = conf.GetConfigString("iamOrganization")
+	oldIamApplication  = "app-casvisor"
+	newIamApplication  = conf.GetConfigString("iamApplication")
 )
 
 func TransparentStatic(ctx *context.Context) {
@@ -70,17 +70,17 @@ func serveFileWithReplace(w http.ResponseWriter, r *http.Request, name string) {
 	}
 
 	content := util.ReadStringFromPath(name)
-	if oldCasdoorEndpoint != newCasdoorEndpoint {
-		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldCasdoorEndpoint), fmt.Sprintf("\"%s\"", newCasdoorEndpoint))
+	if oldIamEndpoint != newIamEndpoint {
+		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldIamEndpoint), fmt.Sprintf("\"%s\"", newIamEndpoint))
 	}
 	if oldClientId != newClientId {
 		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldClientId), fmt.Sprintf("\"%s\"", newClientId))
 	}
-	if oldCasdoorOrganization != newCasdoorOrganization {
-		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldCasdoorOrganization), fmt.Sprintf("\"%s\"", newCasdoorOrganization))
+	if oldIamOrganization != newIamOrganization {
+		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldIamOrganization), fmt.Sprintf("\"%s\"", newIamOrganization))
 	}
-	if oldCasdoorApplication != newCasdoorApplication {
-		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldCasdoorApplication), fmt.Sprintf("\"%s\"", newCasdoorApplication))
+	if oldIamApplication != newIamApplication {
+		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldIamApplication), fmt.Sprintf("\"%s\"", newIamApplication))
 	}
 
 	http.ServeContent(w, r, d.Name(), d.ModTime(), strings.NewReader(content))

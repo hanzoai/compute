@@ -32,6 +32,10 @@ spec:
           env:
             - name: RUNNING_IN_DOCKER
               value: "true"
+          envFrom:
+            - secretRef:
+                name: visor-env
+                optional: true
           volumeMounts:
             - name: config
               mountPath: /conf/app.conf
