@@ -40,6 +40,8 @@ type Provider struct {
 
 	State       string `xorm:"varchar(100)" json:"state"`
 	ProviderUrl string `xorm:"varchar(200)" json:"providerUrl"`
+
+	ClusterID string `xorm:"varchar(100)" json:"clusterId"` // DOKS cluster UUID
 }
 
 func GetProviderCount(owner, field, value string) (int64, error) {

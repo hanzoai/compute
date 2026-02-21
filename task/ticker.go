@@ -15,9 +15,14 @@
 package task
 
 import (
+	"context"
+	"strings"
 	"time"
 
 	"github.com/beego/beego/logs"
+	"github.com/casvisor/casvisor/autoscaler"
+	"github.com/casvisor/casvisor/billing"
+	"github.com/casvisor/casvisor/conf"
 	"github.com/casvisor/casvisor/object"
 )
 
@@ -35,6 +40,56 @@ func (t *Ticker) SetupTicker() {
 			t.deleteUnUsedSession()
 		}
 	}()
+
+	// billing: report node pool usage every hour
+	commerceURL := conf.GetConfigString("commerceUrl")
+	commerceToken := conf.GetConfigString("commerceToken")
+	if commerceURL != "" && commerceToken != "" {
+		reporter := billing.NewBillingReporter(commerceURL, commerceToken)
+		billingTicker := time.NewTicker(time.Hour)
+		go func() {
+			for range billingTicker.C {
+				reporter.ReportAllNodePools()
+			}
+		}()
+		logs.Info("billing: hourly node pool usage reporting enabled")
+	}
+
+	// autoscaler: start pod watcher if cluster configs are set
+	autoscalerClusters := conf.GetConfigString("autoscalerClusters")
+	if autoscalerClusters != "" {
+		go t.startAutoscaler(autoscalerClusters)
+	}
+}
+
+func (t *Ticker) startAutoscaler(clustersConfig string) {
+	// Format: "clusterID:providerName:owner,clusterID:providerName:owner"
+	var clusters []autoscaler.ClusterConfig
+	for _, entry := range strings.Split(clustersConfig, ",") {
+		parts := strings.SplitN(strings.TrimSpace(entry), ":", 3)
+		if len(parts) != 3 {
+			logs.Warning("autoscaler: invalid cluster config entry: %s (expected clusterID:providerName:owner)", entry)
+			continue
+		}
+		clusters = append(clusters, autoscaler.ClusterConfig{
+			ClusterID:    parts[0],
+			ProviderName: parts[1],
+			Owner:        parts[2],
+		})
+	}
+
+	if len(clusters) == 0 {
+		logs.Warning("autoscaler: no valid cluster configs found")
+		return
+	}
+
+	watcher, err := autoscaler.NewPodWatcher(clusters)
+	if err != nil {
+		logs.Warning("autoscaler: failed to initialize pod watcher: %v", err)
+		return
+	}
+
+	watcher.Start(context.Background())
 }
 
 func (t *Ticker) deleteUnUsedSession() {
