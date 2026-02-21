@@ -20,6 +20,7 @@ spec:
       labels:
         app: visor
     spec:
+      serviceAccountName: visor
       imagePullSecrets:
         - name: ghcr-secret
       containers:
