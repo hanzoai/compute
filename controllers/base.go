@@ -18,7 +18,7 @@ import (
 	"encoding/gob"
 
 	"github.com/beego/beego"
-	"github.com/hanzoid/go-sdk/casdoorsdk"
+	"github.com/hanzoid/go-sdk/iam"
 )
 
 type ApiController struct {
@@ -26,10 +26,10 @@ type ApiController struct {
 }
 
 func init() {
-	gob.Register(casdoorsdk.Claims{})
+	gob.Register(iam.Claims{})
 }
 
-func GetUserName(user *casdoorsdk.User) string {
+func GetUserName(user *iam.User) string {
 	if user == nil {
 		return ""
 	}
@@ -47,17 +47,17 @@ func wrapActionResponse(affected bool, e ...error) *Response {
 	}
 }
 
-func (c *ApiController) GetSessionClaims() *casdoorsdk.Claims {
+func (c *ApiController) GetSessionClaims() *iam.Claims {
 	s := c.GetSession("user")
 	if s == nil {
 		return nil
 	}
 
-	claims := s.(casdoorsdk.Claims)
+	claims := s.(iam.Claims)
 	return &claims
 }
 
-func (c *ApiController) SetSessionClaims(claims *casdoorsdk.Claims) {
+func (c *ApiController) SetSessionClaims(claims *iam.Claims) {
 	if claims == nil {
 		c.DelSession("user")
 		return
@@ -66,7 +66,7 @@ func (c *ApiController) SetSessionClaims(claims *casdoorsdk.Claims) {
 	c.SetSession("user", *claims)
 }
 
-func (c *ApiController) GetSessionUser() *casdoorsdk.User {
+func (c *ApiController) GetSessionUser() *iam.User {
 	claims := c.GetSessionClaims()
 	if claims == nil {
 		return nil
@@ -75,7 +75,7 @@ func (c *ApiController) GetSessionUser() *casdoorsdk.User {
 	return &claims.User
 }
 
-func (c *ApiController) SetSessionUser(user *casdoorsdk.User) {
+func (c *ApiController) SetSessionUser(user *iam.User) {
 	if user == nil {
 		c.DelSession("user")
 		return

@@ -19,7 +19,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
-	github.com/hanzoid/go-sdk v1.45.0
+	github.com/hanzoid/go-sdk v1.45.1
 	github.com/hanzoid/xorm-adapter/v3 v3.2.0
 	github.com/lib/pq v1.10.9
 	github.com/luthermonson/go-proxmox v0.2.1

@@ -20,7 +20,7 @@ import (
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
 	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoid/go-sdk/casdoorsdk"
+	"github.com/hanzoid/go-sdk/iam"
 	xormadapter "github.com/hanzoid/xorm-adapter/v3"
 	stringadapter "github.com/qiangmzsx/string-adapter/v2"
 )
@@ -100,7 +100,7 @@ p, *, *, POST, /api/start-session, *, *
 	}
 }
 
-func IsAllowed(user *casdoorsdk.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
+func IsAllowed(user *iam.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
 	if conf.GetConfigBool("IsDemoMode") {
 		if !isAllowedInDemoMode(method, urlPath) {
 			return false

@@ -210,6 +210,8 @@ github.com/h2non/parth v0.0.0-20190131123155-b4df798d6542 h1:2VTzZjLZBgl62/EtslC
 github.com/h2non/parth v0.0.0-20190131123155-b4df798d6542/go.mod h1:Ow0tF8D4Kplbc8s8sSb3V2oUCygFHVp8gC3Dn6U4MNI=
 github.com/hanzoid/go-sdk v1.45.0 h1:rrVCRBCm+GlsHnEHP4OVwPZu28srBU3DNcLmXOHb2ug=
 github.com/hanzoid/go-sdk v1.45.0/go.mod h1:TODWe4MUJtqAbjlm0b6b6avfcPyelSF6DQQibWEHNmE=
+github.com/hanzoid/go-sdk v1.45.1 h1:FGYVSibLr22PUI7otx2e6HMWDh7cEbYFNZ0S9m2vd/U=
+github.com/hanzoid/go-sdk v1.45.1/go.mod h1:TODWe4MUJtqAbjlm0b6b6avfcPyelSF6DQQibWEHNmE=
 github.com/hanzoid/xorm-adapter/v3 v3.2.0 h1:o1/YFJZUzKvhISFLo1PIQvFazemkQ9z5qaMzWWA3NsU=
 github.com/hanzoid/xorm-adapter/v3 v3.2.0/go.mod h1:HqT1zQnJYAa5Dcc6DawEHoH/EgkmbuKlM8tvupULCO8=
 github.com/hashicorp/go-cleanhttp v0.5.2 h1:035FKYIWjmULyFRBKPs8TBQoi0x6d9G4xc9neXJWAZQ=

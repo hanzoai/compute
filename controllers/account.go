@@ -18,7 +18,7 @@ import (
 	_ "embed"
 
 	"github.com/beego/beego"
-	"github.com/hanzoid/go-sdk/casdoorsdk"
+	"github.com/hanzoid/go-sdk/iam"
 )
 
 //go:embed token_jwt_key.pem
@@ -35,19 +35,19 @@ func InitAuthConfig() {
 	iamOrganization := beego.AppConfig.String("iamOrganization")
 	iamApplication := beego.AppConfig.String("iamApplication")
 
-	casdoorsdk.InitConfig(iamEndpoint, clientId, clientSecret, JwtPublicKey, iamOrganization, iamApplication)
+	iam.InitConfig(iamEndpoint, clientId, clientSecret, JwtPublicKey, iamOrganization, iamApplication)
 }
 
 func (c *ApiController) Signin() {
 	code := c.Input().Get("code")
 	state := c.Input().Get("state")
 
-	token, err := casdoorsdk.GetOAuthToken(code, state)
+	token, err := iam.GetOAuthToken(code, state)
 	if err != nil {
 		panic(err)
 	}
 
-	claims, err := casdoorsdk.ParseJwtToken(token.AccessToken)
+	claims, err := iam.ParseJwtToken(token.AccessToken)
 	if err != nil {
 		panic(err)
 	}
