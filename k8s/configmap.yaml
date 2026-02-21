@@ -12,7 +12,7 @@ stringData:
     SessionOn = true
     copyrequestbody = true
     driverName = postgres
-    dataSourceName = "user=hanzo password=CHANGE_ME dbname=hanzo_visor host=postgres.hanzo.svc.cluster.local port=5432 sslmode=disable"
+    dataSourceName = ${DB_DSN}
     dbName = hanzo_visor
     tableNamePrefix =
     isDemoMode = false
@@ -20,8 +20,8 @@ stringData:
     redisEndpoint =
     guacamoleEndpoint = 127.0.0.1:4822
     iamEndpoint = http://iam.hanzo.svc.cluster.local:8000
-    clientId = hanzo-visor-client-id
-    clientSecret = CHANGE_ME
+    clientId = ${IAM_CLIENT_ID}
+    clientSecret = ${IAM_CLIENT_SECRET}
     iamOrganization = "hanzo"
     iamApplication = "app-hanzo-visor"
     redirectPath = /callback
@@ -37,6 +37,41 @@ stringData:
     showGithubCorner = false
     defaultColorPrimary = "#fd4444"
     logConfig = {"adapter":"console"}
-    commerceUrl = http://commerce.hanzo.svc.cluster.local:8001
-    commerceToken = CHANGE_ME
-    autoscalerClusters = 1a153000-90a6-48ad-9375-7ef901a9bf7f:do-hanzo:hanzo,04c46df5-5986-429a-9c7f-3f11a81c8539:do-lux:hanzo
+    commerceUrl = ${COMMERCE_URL}
+    commerceToken = ${COMMERCE_TOKEN}
+    autoscalerClusters = ${AUTOSCALER_CLUSTERS}
+---
+# Credentials should be provisioned via Hanzo KMS or external-secrets operator.
+# Example ExternalSecret (if using external-secrets):
+#
+# apiVersion: external-secrets.io/v1beta1
+# kind: ExternalSecret
+# metadata:
+#   name: visor-credentials
+#   namespace: hanzo
+# spec:
+#   refreshInterval: 1h
+#   secretStoreRef:
+#     name: hanzo-kms
+#     kind: ClusterSecretStore
+#   target:
+#     name: visor-env
+#   data:
+#     - secretKey: DB_DSN
+#       remoteRef:
+#         key: visor/db-dsn
+#     - secretKey: IAM_CLIENT_ID
+#       remoteRef:
+#         key: visor/iam-client-id
+#     - secretKey: IAM_CLIENT_SECRET
+#       remoteRef:
+#         key: visor/iam-client-secret
+#     - secretKey: COMMERCE_URL
+#       remoteRef:
+#         key: visor/commerce-url
+#     - secretKey: COMMERCE_TOKEN
+#       remoteRef:
+#         key: visor/commerce-token
+#     - secretKey: AUTOSCALER_CLUSTERS
+#       remoteRef:
+#         key: visor/autoscaler-clusters

@@ -1,4 +1,4 @@
-// Copyright 2024 The casbin Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@ package controllers
 import (
 	"fmt"
 
-	"github.com/casvisor/casvisor/conf"
-	"github.com/casvisor/casvisor/object"
-	"github.com/casvisor/casvisor/util"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/util"
 )
 
 func addRecord(c *ApiController, userName string, requestUri string) {
@@ -34,7 +34,7 @@ func addRecord(c *ApiController, userName string, requestUri string) {
 		record.RequestUri = requestUri
 	}
 
-	record.Organization = conf.GetConfigString("casdoorOrganization")
+	record.Organization = conf.GetConfigString("iamOrganization")
 
 	object.AddRecord(record)
 }

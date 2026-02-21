@@ -1,4 +1,4 @@
-// Copyright 2025 The casbin Authors. All Rights Reserved.
+// Copyright 2025 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/beego/beego/logs"
-	"github.com/casvisor/casvisor/object"
-	"github.com/casvisor/casvisor/service"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/service"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

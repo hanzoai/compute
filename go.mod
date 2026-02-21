@@ -1,4 +1,4 @@
-module github.com/casvisor/casvisor
+module github.com/hanzoai/visor
 
 go 1.23.0
 
