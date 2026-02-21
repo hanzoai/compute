@@ -37,3 +37,6 @@ stringData:
     showGithubCorner = false
     defaultColorPrimary = "#fd4444"
     logConfig = {"adapter":"console"}
+    commerceUrl = http://commerce.hanzo.svc.cluster.local:8001
+    commerceToken = CHANGE_ME
+    autoscalerClusters = 1a153000-90a6-48ad-9375-7ef901a9bf7f:do-hanzo:hanzo,04c46df5-5986-429a-9c7f-3f11a81c8539:do-lux:hanzo
