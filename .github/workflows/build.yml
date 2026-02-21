@@ -2,28 +2,36 @@ name: Build
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
 
   go-tests:
     name: Running Go tests
     runs-on: ubuntu-latest
     services:
-      mysql:
-        image: mysql:5.7
+      postgres:
+        image: postgres:16-alpine
         env:
-          MYSQL_DATABASE: casvisor
-          MYSQL_ROOT_PASSWORD: 123456
+          POSTGRES_USER: hanzo
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: hanzo_visor
         ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+          - 5432:5432
+        options: --health-cmd="pg_isready -U hanzo" --health-interval=10s --health-timeout=5s --health-retries=3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache-dependency-path: ./go.mod
-      - name: Tests
+      - name: Build
         run: go build ./...
+        working-directory: ./
+      - name: Tests
+        run: go test ./...
         working-directory: ./
 
   frontend:
@@ -78,6 +86,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'hanzoai/visor' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [frontend, backend, linter]
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 

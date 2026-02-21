@@ -1,4 +1,4 @@
-// Copyright 2024 The casbin Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package object
 import (
 	"fmt"
 
-	"github.com/casvisor/casvisor/util"
+	"github.com/hanzoai/visor/util"
 	"xorm.io/core"
 )
 
@@ -40,6 +40,8 @@ type Provider struct {
 
 	State       string `xorm:"varchar(100)" json:"state"`
 	ProviderUrl string `xorm:"varchar(200)" json:"providerUrl"`
+
+	ClusterID string `xorm:"varchar(100)" json:"clusterId"` // DOKS cluster UUID
 }
 
 func GetProviderCount(owner, field, value string) (int64, error) {

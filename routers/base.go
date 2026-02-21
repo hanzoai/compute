@@ -1,4 +1,4 @@
-// Copyright 2024 The Casbin Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import (
 
 	"github.com/beego/beego/context"
 	"github.com/hanzoid/go-sdk/casdoorsdk"
-	"github.com/casvisor/casvisor/conf"
-	"github.com/casvisor/casvisor/util"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/util"
 )
 
 type Response struct {
@@ -76,7 +76,7 @@ func getUsernameByClientIdSecret(ctx *context.Context) (string, error) {
 		return "", nil
 	}
 
-	applicationName := conf.GetConfigString("casdoorApplication")
+	applicationName := conf.GetConfigString("iamApplication")
 	if clientSecret != conf.GetConfigString("clientSecret") {
 		return "", fmt.Errorf("Incorrect client secret for application: %s", applicationName)
 	}

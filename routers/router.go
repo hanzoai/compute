@@ -1,4 +1,4 @@
-// Copyright 2023 The casbin Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ package routers
 
 import (
 	"github.com/beego/beego"
-	"github.com/casvisor/casvisor/controllers"
+	"github.com/hanzoai/visor/controllers"
 )
 
 func init() {
@@ -73,4 +73,11 @@ func initAPI() {
 
 	beego.Router("/api/add-asset-tunnel", &controllers.ApiController{}, "POST:AddAssetTunnel")
 	beego.Router("/api/get-asset-tunnel", &controllers.ApiController{}, "GET:GetAssetTunnel")
+
+	beego.Router("/api/get-node-pools", &controllers.ApiController{}, "GET:GetNodePools")
+	beego.Router("/api/get-node-pool", &controllers.ApiController{}, "GET:GetNodePool")
+	beego.Router("/api/create-node-pool", &controllers.ApiController{}, "POST:CreateNodePool")
+	beego.Router("/api/update-node-pool", &controllers.ApiController{}, "POST:UpdateNodePool")
+	beego.Router("/api/delete-node-pool", &controllers.ApiController{}, "POST:DeleteNodePool")
+	beego.Router("/api/scale-node-pool", &controllers.ApiController{}, "POST:ScaleNodePool")
 }

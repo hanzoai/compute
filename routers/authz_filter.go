@@ -1,4 +1,4 @@
-// Copyright 2024 The Casbin Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import (
 	"net/http"
 
 	"github.com/beego/beego/context"
-	"github.com/casvisor/casvisor/authz"
-	"github.com/casvisor/casvisor/util"
+	"github.com/hanzoai/visor/authz"
+	"github.com/hanzoai/visor/util"
 )
 
 type Object struct {

@@ -29,12 +29,12 @@ RUN adduser -D $USER -u 1000 \
 
 USER 1000
 WORKDIR /
-COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/server ./server
+COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/visor ./visor
 COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/data ./data
 COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/conf/app.conf ./conf/app.conf
 COPY --from=FRONT --chown=$USER:$USER /web/build ./web/build
 
-ENTRYPOINT ["/server"]
+ENTRYPOINT ["/visor"]
 
 
 FROM guacd AS ALLINONE
@@ -51,7 +51,7 @@ RUN apt-get update \
     && update-ca-certificates  \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=BACK /go/src/hanzo-visor/server ./server
+COPY --from=BACK /go/src/hanzo-visor/visor ./visor
 COPY --from=BACK /go/src/hanzo-visor/data ./data
 COPY --from=BACK /go/src/hanzo-visor/docker-entrypoint.sh /docker-entrypoint.sh
 COPY --from=BACK /go/src/hanzo-visor/conf/app.conf ./conf/app.conf

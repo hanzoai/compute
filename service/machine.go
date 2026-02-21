@@ -1,4 +1,4 @@
-// Copyright 2024 The casbin Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,12 @@ import "fmt"
 
 // CreateMachineSpec describes parameters for launching a new cloud instance.
 type CreateMachineSpec struct {
-	Name         string `json:"name"`
-	DisplayName  string `json:"displayName"`
-	InstanceType string `json:"instanceType"` // e.g. "t3.medium", "mac2.metal"
-	ImageID      string `json:"imageId"`      // AMI ID, image name, etc.
-	OS           string `json:"os"`           // "linux", "macos", "windows"
-	Region       string `json:"region"`
+	Name         string            `json:"name"`
+	DisplayName  string            `json:"displayName"`
+	InstanceType string            `json:"instanceType"` // e.g. "t3.medium", "mac2.metal"
+	ImageID      string            `json:"imageId"`      // AMI ID, image name, etc.
+	OS           string            `json:"os"`           // "linux", "macos", "windows"
+	Region       string            `json:"region"`
 	Tags         map[string]string `json:"tags,omitempty"`
 }
 

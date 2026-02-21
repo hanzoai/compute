@@ -1,4 +1,4 @@
-// Copyright 2023 The casbin Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@ import (
 	"runtime"
 
 	"github.com/beego/beego"
-	"github.com/casvisor/casvisor/conf"
-	"github.com/casvisor/casvisor/util"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/util"
+	_ "github.com/lib/pq"
 	"xorm.io/xorm"
 )
 
@@ -40,7 +41,7 @@ func InitAdapter() {
 	adapter = NewAdapter(conf.GetConfigString("driverName"), conf.GetConfigDataSourceName())
 }
 
-// Adapter represents the MySQL adapter for policy storage.
+// Adapter represents the database adapter for policy storage.
 type Adapter struct {
 	driverName     string
 	dataSourceName string
@@ -71,6 +72,31 @@ func NewAdapter(driverName string, dataSourceName string) *Adapter {
 }
 
 func (a *Adapter) createDatabase() error {
+	if a.driverName == "postgres" {
+		// PostgreSQL: connect without dbname to create the database
+		engine, err := xorm.NewEngine(a.driverName, a.dataSourceName)
+		if err != nil {
+			return err
+		}
+		defer engine.Close()
+
+		dbName := beego.AppConfig.String("dbName")
+		// Check if DB exists; create if not (PostgreSQL syntax)
+		var count int64
+		_, err = engine.SQL("SELECT COUNT(*) FROM pg_database WHERE datname = ?", dbName).Get(&count)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			_, err = engine.Exec(fmt.Sprintf("CREATE DATABASE %s", dbName))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// MySQL fallback
 	engine, err := xorm.NewEngine(a.driverName, a.dataSourceName)
 	if err != nil {
 		return err
@@ -86,7 +112,16 @@ func (a *Adapter) open() {
 		panic(err)
 	}
 
-	engine, err := xorm.NewEngine(a.driverName, a.dataSourceName+beego.AppConfig.String("dbName"))
+	var dsn string
+	if a.driverName == "postgres" {
+		// For PostgreSQL, the dataSourceName already contains the dbname
+		dsn = a.dataSourceName
+	} else {
+		// For MySQL, append dbName
+		dsn = a.dataSourceName + beego.AppConfig.String("dbName")
+	}
+
+	engine, err := xorm.NewEngine(a.driverName, dsn)
 	if err != nil {
 		panic(err)
 	}
@@ -122,6 +157,11 @@ func (a *Adapter) createTable() {
 	}
 
 	err = a.engine.Sync2(new(Session))
+	if err != nil {
+		panic(err)
+	}
+
+	err = a.engine.Sync2(new(NodePool))
 	if err != nil {
 		panic(err)
 	}
