@@ -19,9 +19,9 @@ import (
 	"net/http"
 
 	"github.com/beego/beego/context"
-	"github.com/hanzoid/go-sdk/casdoorsdk"
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/util"
+	"github.com/hanzoid/go-sdk/casdoorsdk"
 )
 
 type Response struct {
