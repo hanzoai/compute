@@ -80,4 +80,3 @@ func GetTenantOrgID(ctx *context.Context) string {
 	}
 	return getTenantHeader(ctx, "X-Org-ID")
 }
-
