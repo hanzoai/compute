@@ -153,5 +153,146 @@ func (client MachineDigitalOceanClient) UpdateMachineState(name string, state st
 }
 
 func (client MachineDigitalOceanClient) CreateMachine(spec *CreateMachineSpec) (*Machine, error) {
-	return nil, fmt.Errorf("CreateMachine not yet implemented for DigitalOcean")
+	region := client.region
+	if spec.Region != "" {
+		region = spec.Region
+	}
+	if region == "" {
+		region = "sfo3"
+	}
+
+	size := spec.InstanceType
+	if size == "" {
+		size = "s-2vcpu-4gb"
+	}
+
+	image := spec.ImageID
+	if image == "" {
+		image = "ubuntu-24-04-x64"
+	}
+
+	tags := buildDropletTags(spec)
+
+	createReq := &godo.DropletCreateRequest{
+		Name:     spec.Name,
+		Region:   region,
+		Size:     size,
+		Image:    godo.DropletCreateImage{Slug: image},
+		Tags:     tags,
+		UserData: buildBotUserData(spec),
+	}
+
+	droplet, _, err := client.Client.Droplets.Create(context.TODO(), createReq)
+	if err != nil {
+		return nil, fmt.Errorf("create droplet: %w", err)
+	}
+
+	return getMachineFromDroplet(*droplet), nil
+}
+
+func (client MachineDigitalOceanClient) DeleteMachine(name string) error {
+	id, err := strconv.Atoi(name)
+	if err != nil {
+		return fmt.Errorf("invalid droplet ID: %s", name)
+	}
+
+	_, err = client.Client.Droplets.Delete(context.TODO(), id)
+	if err != nil {
+		return fmt.Errorf("delete droplet %d: %w", id, err)
+	}
+
+	return nil
+}
+
+// buildDropletTags creates DO tags from the spec metadata.
+func buildDropletTags(spec *CreateMachineSpec) []string {
+	tags := []string{"managed-by:hanzo-visor"}
+
+	if spec.DisplayName != "" {
+		tags = append(tags, fmt.Sprintf("display-name:%s", spec.DisplayName))
+	}
+	if spec.OS != "" {
+		tags = append(tags, fmt.Sprintf("os:%s", spec.OS))
+	}
+
+	for k, v := range spec.Tags {
+		tags = append(tags, fmt.Sprintf("%s:%s", k, v))
+	}
+
+	return tags
+}
+
+// buildBotUserData generates a cloud-init script that installs @hanzo/bot
+// on the droplet and configures it as a systemd service connecting to the
+// gateway. Environment variables are passed via spec.Tags with the
+// "env:" prefix (e.g., Tags["env:BOT_NODE_GATEWAY_URL"] = "wss://gw.hanzo.bot").
+func buildBotUserData(spec *CreateMachineSpec) string {
+	gatewayURL := "wss://gw.hanzo.bot"
+	gatewayToken := ""
+	apiKey := ""
+	nodeID := spec.Name
+	displayName := spec.DisplayName
+	if displayName == "" {
+		displayName = spec.Name
+	}
+
+	// Extract env overrides from tags
+	for k, v := range spec.Tags {
+		switch k {
+		case "env:BOT_NODE_GATEWAY_URL":
+			gatewayURL = v
+		case "env:BOT_GATEWAY_TOKEN":
+			gatewayToken = v
+		case "env:HANZO_API_KEY":
+			apiKey = v
+		case "env:AGENT_NODE_ID":
+			nodeID = v
+		}
+	}
+
+	return fmt.Sprintf(`#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+# Install Node.js 22 LTS
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y nodejs
+
+# Install Hanzo Bot
+npm install -g @hanzo/bot
+
+# Write environment configuration
+cat > /etc/hanzo-bot.env << 'ENVEOF'
+BOT_NODE_GATEWAY_URL=%s
+BOT_GATEWAY_TOKEN=%s
+HANZO_API_KEY=%s
+AGENT_NODE_ID=%s
+AGENT_DISPLAY_NAME=%s
+HANZO_PLAYGROUND_CLOUD_NODE=true
+ENVEOF
+
+# Create systemd service
+cat > /etc/systemd/system/hanzo-bot.service << 'SVCEOF'
+[Unit]
+Description=Hanzo Bot Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/hanzo-bot.env
+ExecStart=/usr/bin/npx @hanzo/bot node run --name %s
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+# Enable and start the service
+systemctl daemon-reload
+systemctl enable --now hanzo-bot
+`, gatewayURL, gatewayToken, apiKey, nodeID, displayName, nodeID)
 }
