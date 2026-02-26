@@ -216,6 +216,11 @@ func buildDropletTags(spec *CreateMachineSpec) []string {
 	}
 
 	for k, v := range spec.Tags {
+		// Skip env: prefix tags — they are for cloud-init user data only,
+		// not DigitalOcean resource tags (which also get stored in DB).
+		if len(k) > 4 && k[:4] == "env:" {
+			continue
+		}
 		tags = append(tags, fmt.Sprintf("%s:%s", k, v))
 	}
 

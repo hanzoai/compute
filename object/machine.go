@@ -36,7 +36,7 @@ type Machine struct {
 	Category string `xorm:"varchar(100)" json:"category"`
 	Type     string `xorm:"varchar(100)" json:"type"`
 	Size     string `xorm:"varchar(100)" json:"size"`
-	Tag      string `xorm:"varchar(100)" json:"tag"`
+	Tag      string `xorm:"varchar(500)" json:"tag"`
 	State    string `xorm:"varchar(100)" json:"state"`
 
 	Image     string `xorm:"varchar(100)" json:"image"`
