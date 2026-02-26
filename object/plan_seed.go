@@ -29,10 +29,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Starter", Description: "Get started for free. 1 vCPU, 1 GB RAM, 20 GB SSD.",
 			Category: "starter", State: "Active",
 			VCpu: 1, Ram: 1024, Disk: 20, CpuType: "shared",
-			PriceMonthly: 500, // $5/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    500, // $5/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 512,
-			SortOrder:    5,
+			SortOrder:       5,
 			ProviderMapping: `{
 				"us":{"provider":"Lightsail","serverType":"nano_3_0","location":"us-east-1"},
 				"eu":{"provider":"Hetzner","serverType":"cx22","location":"fsn1"},
@@ -44,10 +44,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Builder", Description: "For developers shipping real products. 2 vCPU, 2 GB RAM, 40 GB SSD.",
 			Category: "builder", State: "Active",
 			VCpu: 2, Ram: 2048, Disk: 40, CpuType: "shared",
-			PriceMonthly: 1000, // $10/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    1000, // $10/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 1024,
-			SortOrder:    10,
+			SortOrder:       10,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"cpx11","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"cpx11","location":"fsn1"},
@@ -59,10 +59,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Dev", Description: "The sweet spot. 2 vCPU, 8 GB RAM, 25 GB SSD.",
 			Category: "dev", State: "Active",
 			VCpu: 2, Ram: 8192, Disk: 25, CpuType: "shared",
-			PriceMonthly: 1500, // $15/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    1500, // $15/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 3072,
-			SortOrder:    20,
+			SortOrder:       20,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"cpx31","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"cpx31","location":"fsn1"},
@@ -74,10 +74,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Pro", Description: "Dedicated CPU. Zero noisy neighbors. 2 dedicated vCPU, 8 GB RAM, 80 GB SSD.",
 			Category: "pro", State: "Active",
 			VCpu: 2, Ram: 8192, Disk: 80, CpuType: "dedicated",
-			PriceMonthly: 2500, // $25/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    2500, // $25/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 2048,
-			SortOrder:    30,
+			SortOrder:       30,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"ccx13","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"ccx13","location":"fsn1"},
@@ -89,10 +89,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Turbo", Description: "4x the power. 4 vCPU, 16 GB RAM, 160 GB SSD.",
 			Category: "turbo", State: "Active",
 			VCpu: 4, Ram: 16384, Disk: 160, CpuType: "shared",
-			PriceMonthly: 3900, // $39/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    3900, // $39/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 4096,
-			SortOrder:    40,
+			SortOrder:       40,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"cpx41","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"cpx41","location":"fsn1"},
@@ -104,10 +104,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Turbo Dedicated", Description: "All the power of Turbo with dedicated cores. 4 dedicated vCPU, 16 GB RAM, 160 GB SSD.",
 			Category: "turbo", State: "Active",
 			VCpu: 4, Ram: 16384, Disk: 160, CpuType: "dedicated",
-			PriceMonthly: 4900, // $49/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    4900, // $49/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 4096,
-			SortOrder:    50,
+			SortOrder:       50,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"ccx23","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"ccx23","location":"fsn1"},
@@ -119,10 +119,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Business", Description: "Team-scale compute. 8 dedicated vCPU, 32 GB RAM, 240 GB SSD.",
 			Category: "business", State: "Active",
 			VCpu: 8, Ram: 32768, Disk: 240, CpuType: "dedicated",
-			PriceMonthly: 21900, // $219/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    21900, // $219/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 20480,
-			SortOrder:    60,
+			SortOrder:       60,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"ccx33","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"ccx33","location":"fsn1"},
@@ -134,10 +134,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Enterprise", Description: "Mission-critical infrastructure. 16 dedicated vCPU, 64 GB RAM, 360 GB SSD.",
 			Category: "enterprise", State: "Active",
 			VCpu: 16, Ram: 65536, Disk: 360, CpuType: "dedicated",
-			PriceMonthly: 42900, // $429/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    42900, // $429/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 40960,
-			SortOrder:    70,
+			SortOrder:       70,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"ccx43","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"ccx43","location":"fsn1"},
@@ -149,10 +149,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Scale", Description: "Platform-scale compute. 32 dedicated vCPU, 128 GB RAM, 600 GB SSD.",
 			Category: "scale", State: "Active",
 			VCpu: 32, Ram: 131072, Disk: 600, CpuType: "dedicated",
-			PriceMonthly: 84900, // $849/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    84900, // $849/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 51200,
-			SortOrder:    80,
+			SortOrder:       80,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"ccx53","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"ccx53","location":"fsn1"},
@@ -164,10 +164,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Mega", Description: "Maximum single-node power. 48 dedicated vCPU, 192 GB RAM, 960 GB SSD.",
 			Category: "mega", State: "Active",
 			VCpu: 48, Ram: 196608, Disk: 960, CpuType: "dedicated",
-			PriceMonthly: 129900, // $1,299/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    129900, // $1,299/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 61440,
-			SortOrder:    90,
+			SortOrder:       90,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"ccx63","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"ccx63","location":"fsn1"},
@@ -179,10 +179,10 @@ func DefaultPlans(owner string) []*Plan {
 			DisplayName: "Ultra", Description: "Extreme compute cluster. 96 dedicated vCPU, 384 GB RAM, 1.9 TB SSD.",
 			Category: "ultra", State: "Active",
 			VCpu: 96, Ram: 393216, Disk: 1920, CpuType: "dedicated",
-			PriceMonthly: 399900, // $3,999/mo
-			Regions:      "us,eu,sg",
+			PriceMonthly:    399900, // $3,999/mo
+			Regions:         "us,eu,sg",
 			TrafficIncluded: 122880,
-			SortOrder:    100,
+			SortOrder:       100,
 			ProviderMapping: `{
 				"us":{"provider":"Hetzner","serverType":"2x-ccx63","location":"ash"},
 				"eu":{"provider":"Hetzner","serverType":"2x-ccx63","location":"fsn1"},

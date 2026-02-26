@@ -25,12 +25,12 @@ type Volume struct {
 
 	DisplayName string `xorm:"varchar(100)" json:"displayName"`
 	Id          string `xorm:"varchar(100)" json:"id"`       // Cloud provider volume ID
-	Provider    string `xorm:"varchar(100)" json:"provider"`  // Provider name
-	Machine     string `xorm:"varchar(100)" json:"machine"`   // Attached machine name (empty if detached)
+	Provider    string `xorm:"varchar(100)" json:"provider"` // Provider name
+	Machine     string `xorm:"varchar(100)" json:"machine"`  // Attached machine name (empty if detached)
 	Region      string `xorm:"varchar(100)" json:"region"`
-	Size        int    `json:"size"`                          // GB
-	State       string `xorm:"varchar(100)" json:"state"`     // "Available", "Attached", "Creating"
-	Format      string `xorm:"varchar(50)" json:"format"`     // "ext4", "xfs", etc.
+	Size        int    `json:"size"`                           // GB
+	State       string `xorm:"varchar(100)" json:"state"`      // "Available", "Attached", "Creating"
+	Format      string `xorm:"varchar(50)" json:"format"`      // "ext4", "xfs", etc.
 	MountPoint  string `xorm:"varchar(200)" json:"mountPoint"` // e.g. "/mnt/data"
 }
 

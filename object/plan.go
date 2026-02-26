@@ -30,8 +30,8 @@ type Plan struct {
 
 	// Specs advertised to the customer
 	VCpu    int    `json:"vCpu"`
-	Ram     int    `json:"ram"`     // MB
-	Disk    int    `json:"disk"`    // GB
+	Ram     int    `json:"ram"`                        // MB
+	Disk    int    `json:"disk"`                       // GB
 	CpuType string `xorm:"varchar(50)" json:"cpuType"` // "shared", "dedicated"
 
 	// Pricing (cents/mo)

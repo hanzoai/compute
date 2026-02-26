@@ -219,11 +219,11 @@ func (client MachineLightsailClient) CreateMachine(spec *CreateMachineSpec) (*Ma
 	}
 
 	input := &lightsail.CreateInstancesInput{
-		InstanceNames:  []string{spec.Name},
+		InstanceNames:    []string{spec.Name},
 		AvailabilityZone: aws.String(region + "a"),
-		BlueprintId:    aws.String(spec.ImageID),
-		BundleId:       aws.String(bundleId),
-		Tags:           tags,
+		BlueprintId:      aws.String(spec.ImageID),
+		BundleId:         aws.String(bundleId),
+		Tags:             tags,
 	}
 
 	output, err := client.Client.CreateInstances(context.TODO(), input)

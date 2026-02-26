@@ -30,10 +30,10 @@ type Volume struct {
 type CreateVolumeSpec struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
-	Size        int    `json:"size"`       // GB
+	Size        int    `json:"size"` // GB
 	Region      string `json:"region"`
-	Format      string `json:"format"`     // "ext4", "xfs"
-	MachineID   string `json:"machineId"`  // optional: attach on create
+	Format      string `json:"format"`    // "ext4", "xfs"
+	MachineID   string `json:"machineId"` // optional: attach on create
 }
 
 type VolumeClientInterface interface {
