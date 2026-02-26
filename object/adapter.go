@@ -165,6 +165,16 @@ func (a *Adapter) createTable() {
 	if err != nil {
 		panic(err)
 	}
+
+	err = a.engine.Sync2(new(Plan))
+	if err != nil {
+		panic(err)
+	}
+
+	err = a.engine.Sync2(new(Volume))
+	if err != nil {
+		panic(err)
+	}
 }
 
 func GetSession(owner string, offset, limit int, field, value, sortField, sortOrder string) *xorm.Session {

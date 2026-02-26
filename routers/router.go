@@ -80,4 +80,18 @@ func initAPI() {
 	beego.Router("/api/update-node-pool", &controllers.ApiController{}, "POST:UpdateNodePool")
 	beego.Router("/api/delete-node-pool", &controllers.ApiController{}, "POST:DeleteNodePool")
 	beego.Router("/api/scale-node-pool", &controllers.ApiController{}, "POST:ScaleNodePool")
+
+	beego.Router("/api/get-plans", &controllers.ApiController{}, "GET:GetPlans")
+	beego.Router("/api/get-plan", &controllers.ApiController{}, "GET:GetPlan")
+	beego.Router("/api/add-plan", &controllers.ApiController{}, "POST:AddPlan")
+	beego.Router("/api/update-plan", &controllers.ApiController{}, "POST:UpdatePlan")
+	beego.Router("/api/delete-plan", &controllers.ApiController{}, "POST:DeletePlan")
+
+	beego.Router("/api/get-volumes", &controllers.ApiController{}, "GET:GetVolumes")
+	beego.Router("/api/get-volume", &controllers.ApiController{}, "GET:GetVolume")
+	beego.Router("/api/create-volume", &controllers.ApiController{}, "POST:CreateVolume")
+	beego.Router("/api/delete-volume", &controllers.ApiController{}, "POST:DeleteVolume")
+	beego.Router("/api/attach-volume", &controllers.ApiController{}, "POST:AttachVolume")
+	beego.Router("/api/detach-volume", &controllers.ApiController{}, "POST:DetachVolume")
+	beego.Router("/api/resize-volume", &controllers.ApiController{}, "POST:ResizeVolume")
 }

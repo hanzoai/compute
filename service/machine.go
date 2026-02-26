@@ -53,6 +53,10 @@ func NewMachineClient(providerType string, accessKeyId string, accessKeySecret s
 		res, err = newMachineAwsClient(accessKeyId, accessKeySecret, region)
 	} else if providerType == "DigitalOcean" {
 		res, err = newMachineDigitalOceanClient(accessKeyId, accessKeySecret, region)
+	} else if providerType == "AWS Lightsail" {
+		res, err = newMachineLightsailClient(accessKeyId, accessKeySecret, region)
+	} else if providerType == "Hetzner" {
+		res, err = newMachineHetznerClient(accessKeyId, accessKeySecret, region)
 	} else {
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
