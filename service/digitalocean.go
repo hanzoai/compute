@@ -173,6 +173,13 @@ func (client MachineDigitalOceanClient) CreateMachine(spec *CreateMachineSpec) (
 
 	tags := buildDropletTags(spec)
 
+	var sshKeys []godo.DropletCreateSSHKey
+	for _, id := range spec.SSHKeyIDs {
+		if intID, err := strconv.Atoi(id); err == nil {
+			sshKeys = append(sshKeys, godo.DropletCreateSSHKey{ID: intID})
+		}
+	}
+
 	createReq := &godo.DropletCreateRequest{
 		Name:     spec.Name,
 		Region:   region,
@@ -180,6 +187,7 @@ func (client MachineDigitalOceanClient) CreateMachine(spec *CreateMachineSpec) (
 		Image:    godo.DropletCreateImage{Slug: image},
 		Tags:     tags,
 		UserData: buildBotUserData(spec),
+		SSHKeys:  sshKeys,
 	}
 
 	droplet, _, err := client.Client.Droplets.Create(context.TODO(), createReq)

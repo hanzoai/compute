@@ -25,6 +25,7 @@ type CreateMachineSpec struct {
 	OS           string            `json:"os"`           // "linux", "macos", "windows"
 	Region       string            `json:"region"`
 	Tags         map[string]string `json:"tags,omitempty"`
+	SSHKeyIDs    []string          `json:"sshKeyIds,omitempty"` // Provider SSH key IDs
 }
 
 type MachineClientInterface interface {
