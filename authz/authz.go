@@ -81,6 +81,7 @@ p, *, *, GET, /api/get-account, *, *
 p, *, *, GET, /api/get-asset-tunnel, *, *
 p, *, *, POST, /api/add-asset-tunnel, *, *
 p, *, *, POST, /api/start-session, *, *
+p, *, *, GET, /api/get-whitelabel, *, *
 `
 
 		sa := stringadapter.NewAdapter(ruleText)

@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/beego/beego/context"
+	"github.com/hanzoai/visor/object"
 )
 
 const (
@@ -49,6 +50,14 @@ func TenantContextFilter(ctx *context.Context) {
 	tenantID := getTenantHeader(ctx, "X-Tenant-ID")
 	actorID := getTenantHeader(ctx, "X-Actor-ID")
 	env := getTenantHeader(ctx, "X-Env")
+
+	// If no explicit org header, use the whitelabel hostname's org filter.
+	if orgID == "" {
+		wlConfig := object.GetWhitelabelConfig(ctx.Request.Host)
+		if wlConfig.OrgFilter != "" {
+			orgID = wlConfig.OrgFilter
+		}
+	}
 
 	if tenantID == "" {
 		tenantID = orgID

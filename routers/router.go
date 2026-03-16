@@ -87,6 +87,8 @@ func initAPI() {
 	beego.Router("/api/update-plan", &controllers.ApiController{}, "POST:UpdatePlan")
 	beego.Router("/api/delete-plan", &controllers.ApiController{}, "POST:DeletePlan")
 
+	beego.Router("/api/get-whitelabel", &controllers.ApiController{}, "GET:GetWhitelabel")
+
 	beego.Router("/api/get-volumes", &controllers.ApiController{}, "GET:GetVolumes")
 	beego.Router("/api/get-volume", &controllers.ApiController{}, "GET:GetVolume")
 	beego.Router("/api/create-volume", &controllers.ApiController{}, "POST:CreateVolume")

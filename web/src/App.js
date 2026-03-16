@@ -20,6 +20,7 @@ import {BarsOutlined, DownOutlined, LogoutOutlined, SettingOutlined} from "@ant-
 import "./App.less";
 import * as Setting from "./Setting";
 import * as AccountBackend from "./backend/AccountBackend";
+import * as WhitelabelBackend from "./backend/WhitelabelBackend";
 import AuthCallback from "./AuthCallback";
 import * as Conf from "./Conf";
 import SigninPage from "./SigninPage";
@@ -51,6 +52,7 @@ class App extends Component {
       uri: location.pathname,
       themeData: Conf.ThemeDefault,
       menuVisible: false,
+      whitelabel: null,
     };
 
     Setting.initServerUrl();
@@ -58,6 +60,7 @@ class App extends Component {
   }
 
   UNSAFE_componentWillMount() {
+    this.getWhitelabel();
     this.getAccount();
   }
 
@@ -97,6 +100,43 @@ class App extends Component {
           account: account,
         });
       });
+  }
+
+  getWhitelabel() {
+    WhitelabelBackend.getWhitelabel()
+      .then((res) => {
+        if (res.status === "ok" && res.data) {
+          const wl = res.data;
+          this.setState({
+            whitelabel: wl,
+            themeData: {
+              ...this.state.themeData,
+              colorPrimary: wl.primaryColor || this.state.themeData.colorPrimary,
+            },
+          });
+          this.applyWhitelabel(wl);
+        }
+      });
+  }
+
+  applyWhitelabel(wl) {
+    if (wl.appName) {
+      document.title = wl.appName;
+    }
+    if (wl.faviconUrl) {
+      let link = document.querySelector("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement("link");
+        link.rel = "icon";
+        document.head.appendChild(link);
+      }
+      link.href = wl.faviconUrl;
+
+      let appleLink = document.querySelector("link[rel='apple-touch-icon']");
+      if (appleLink) {
+        appleLink.href = wl.faviconUrl;
+      }
+    }
   }
 
   signout() {
@@ -317,7 +357,11 @@ class App extends Component {
       <Header style={{padding: "0", marginBottom: "3px", backgroundColor: "white"}}>
         {Setting.isMobile() ? null : (
           <Link to={"/"}>
-            <div className="logo" />
+            {this.state.whitelabel?.logoUrl ? (
+              <img src={this.state.whitelabel.logoUrl} alt={this.state.whitelabel.appName || "Logo"} style={{height: "40px", margin: "12px 20px", float: "left"}} />
+            ) : (
+              <div className="logo" />
+            )}
           </Link>
         )}
         {Setting.isMobile() ? (
@@ -367,7 +411,7 @@ class App extends Component {
             textAlign: "center",
           }
         }>
-          Powered by <a target="_blank" href="https://github.com/casvisor/casvisor" rel="noreferrer"><img style={{paddingBottom: "3px"}} height={"20px"} alt={"Casvisor"} src={`${Setting.StaticBaseUrl}/img/casvisor-logo_1200x256.png`} /></a>
+          Powered by <a target="_blank" href={this.state.whitelabel?.docsUrl || "https://hanzo.ai"} rel="noreferrer">{this.state.whitelabel?.appName || "Hanzo Visor"}</a>
         </Footer>
       </React.Fragment>
     );
