@@ -132,7 +132,7 @@ class App extends Component {
       }
       link.href = wl.faviconUrl;
 
-      let appleLink = document.querySelector("link[rel='apple-touch-icon']");
+      const appleLink = document.querySelector("link[rel='apple-touch-icon']");
       if (appleLink) {
         appleLink.href = wl.faviconUrl;
       }
