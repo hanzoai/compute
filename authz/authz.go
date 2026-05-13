@@ -17,15 +17,15 @@ package authz
 import (
 	"strings"
 
-	"github.com/casbin/casbin/v2"
-	"github.com/casbin/casbin/v2/model"
+	authz "github.com/hanzoai/authz"
+	"github.com/hanzoai/authz/model"
 	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoid/go-sdk/iam"
-	xormadapter "github.com/hanzoid/xorm-adapter/v3"
-	stringadapter "github.com/qiangmzsx/string-adapter/v2"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
+	xormadapter "github.com/hanzoai/xorm-adapter/v3"
+	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
 )
 
-var Enforcer *casbin.Enforcer
+var Enforcer *authz.Enforcer
 
 func InitAuthz() {
 	var err error
@@ -66,7 +66,7 @@ m = (r.subOwner == p.subOwner || p.subOwner == "*") && (r.subName == p.subName |
 		panic(err)
 	}
 
-	Enforcer, err = casbin.NewEnforcer(m, a)
+	Enforcer, err = authz.NewEnforcer(m, a)
 	if err != nil {
 		panic(err)
 	}
@@ -101,7 +101,7 @@ p, *, *, GET, /api/get-whitelabel, *, *
 	}
 }
 
-func IsAllowed(user *iam.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
+func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
 	if conf.GetConfigBool("IsDemoMode") {
 		if !isAllowedInDemoMode(method, urlPath) {
 			return false

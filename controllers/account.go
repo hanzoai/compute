@@ -18,7 +18,7 @@ import (
 	_ "embed"
 
 	"github.com/beego/beego"
-	"github.com/hanzoid/go-sdk/iam"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 )
 
 //go:embed token_jwt_key.pem
@@ -35,19 +35,19 @@ func InitAuthConfig() {
 	iamOrganization := beego.AppConfig.String("iamOrganization")
 	iamApplication := beego.AppConfig.String("iamApplication")
 
-	iam.InitConfig(iamEndpoint, clientId, clientSecret, JwtPublicKey, iamOrganization, iamApplication)
+	iamsdk.InitConfig(iamEndpoint, clientId, clientSecret, JwtPublicKey, iamOrganization, iamApplication)
 }
 
 func (c *ApiController) Signin() {
 	code := c.Input().Get("code")
 	state := c.Input().Get("state")
 
-	token, err := iam.GetOAuthToken(code, state)
+	token, err := iamsdk.GetOAuthToken(code, state)
 	if err != nil {
 		panic(err)
 	}
 
-	claims, err := iam.ParseJwtToken(token.AccessToken)
+	claims, err := iamsdk.ParseJwtToken(token.AccessToken)
 	if err != nil {
 		panic(err)
 	}

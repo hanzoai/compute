@@ -21,7 +21,7 @@ import (
 	"github.com/beego/beego/context"
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoid/go-sdk/iam"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 )
 
 type Response struct {
@@ -31,13 +31,13 @@ type Response struct {
 	Data2  interface{} `json:"data2"`
 }
 
-func GetSessionUser(ctx *context.Context) *iam.User {
+func GetSessionUser(ctx *context.Context) *iamsdk.User {
 	s := ctx.Input.Session("user")
 	if s == nil {
 		return nil
 	}
 
-	claims := s.(iam.Claims)
+	claims := s.(iamsdk.Claims)
 	return &claims.User
 }
 
