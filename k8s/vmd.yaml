@@ -16,11 +16,9 @@ spec:
       labels:
         app: vmd
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
       containers:
         - name: vmd
-          image: ghcr.io/hanzovm/vmd:1.5.4
+          image: casbin/guacd:1.5.4
           ports:
             - containerPort: 4822
               protocol: TCP
