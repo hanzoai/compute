@@ -16,8 +16,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hanzoai/authz v1.10.0
+	github.com/hanzoai/authzstore v0.1.0
 	github.com/hanzoai/iamsdk/v2 v2.1.0
-	github.com/hanzoai/xorm-adapter/v3 v3.0.2
+	github.com/hanzoai/xorm v1.1.6
 	github.com/lib/pq v1.12.1
 	github.com/luthermonson/go-proxmox v0.4.0
 	github.com/pkg/errors v0.9.1
@@ -59,7 +60,6 @@ require (
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/hanzoai/builder v0.3.13 // indirect
-	github.com/hanzoai/xorm v1.1.6 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -94,5 +94,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	xorm.io/builder v0.3.13 // indirect
 )
-
-replace github.com/casdoor/casdoor-go-sdk => github.com/hanzoai/iamsdk/v2 v2.1.0
