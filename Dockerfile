@@ -1,11 +1,11 @@
-FROM ghcr.io/hanzovm/vmd:1.5.4 as vmd
+FROM casbin/guacd:1.5.4 AS vmd
 FROM node:18.19.0 AS FRONT
 WORKDIR /web
 COPY ./web .
 RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
 
-FROM golang:1.21 AS BACK
+FROM golang:1.26.3 AS BACK
 WORKDIR /go/src/hanzo-vm
 COPY . .
 RUN chmod +x ./build.sh
