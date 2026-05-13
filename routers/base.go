@@ -19,7 +19,7 @@ import (
 	"net/http"
 
 	"github.com/beego/beego/context"
-	iamsdk "github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+	iamsdk "github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/vm/util"
 )
