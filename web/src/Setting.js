@@ -16,7 +16,7 @@ import React from "react";
 import {Tooltip, message} from "antd";
 import {isMobile as isMobileDevice} from "react-device-detect";
 import i18next from "i18next";
-import Sdk from "casdoor-js-sdk";
+import Sdk from "@hanzo/iam";
 import {QuestionCircleTwoTone} from "@ant-design/icons";
 import {v4 as uuidv4} from "uuid";
 
