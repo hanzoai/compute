@@ -18,7 +18,7 @@ import (
 	_ "embed"
 
 	"github.com/beego/beego"
-	iamsdk "github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+	iamsdk "github.com/hanzoai/iam-go-sdk/casdoorsdk"
 )
 
 //go:embed token_jwt_key.pem

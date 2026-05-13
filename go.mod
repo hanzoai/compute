@@ -12,12 +12,12 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.296.2
 	github.com/beego/beego v1.12.14
 	github.com/casbin/casbin/v2 v2.135.0
-	github.com/casdoor/casdoor-go-sdk v1.45.0
-	github.com/casdoor/xorm-adapter/v3 v3.1.1
 	github.com/digitalocean/go-libvirt v0.0.0-20260217163227-273eaa321819
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hanzoai/iam-go-sdk v1.46.1
+	github.com/hanzoai/xorm-adapter/v3 v3.1.2
 	github.com/lib/pq v1.12.1
 	github.com/luthermonson/go-proxmox v0.4.0
 	github.com/pkg/errors v0.9.1
@@ -93,5 +93,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	xorm.io/builder v0.3.13 // indirect
 )
-
-replace github.com/casdoor/casdoor-go-sdk => github.com/hanzoid/go-sdk v1.44.0
