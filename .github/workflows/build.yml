@@ -14,4 +14,6 @@ jobs:
     with:
       image: ghcr.io/hanzoai/visor
       target: STANDARD
+      # arm64 paused — DOKS has no arm64 droplets. Mirrors kms+flow.
+      platforms: linux/amd64
     secrets: inherit

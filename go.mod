@@ -18,8 +18,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/hanzoai/authz v1.10.0
+	github.com/hanzoai/authzstore v0.1.0
 	github.com/hanzoai/iamsdk/v2 v2.1.0
-	github.com/hanzoai/xorm-adapter/v3 v3.0.2
+	github.com/hanzoai/xorm v1.1.6
 	github.com/hetznercloud/hcloud-go/v2 v2.37.0
 	github.com/lib/pq v1.12.1
 	github.com/luthermonson/go-proxmox v0.4.0
@@ -86,7 +87,6 @@ require (
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hanzoai/builder v0.3.13 // indirect
-	github.com/hanzoai/xorm v1.1.6 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
