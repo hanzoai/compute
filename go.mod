@@ -12,19 +12,18 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.296.2
 	github.com/aws/aws-sdk-go-v2/service/lightsail v1.51.1
 	github.com/beego/beego v1.12.14
-	github.com/casbin/casbin/v2 v2.135.0
 	github.com/digitalocean/go-libvirt v0.0.0-20260217163227-273eaa321819
 	github.com/digitalocean/godo v1.184.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/hanzoid/go-sdk v1.45.1
-	github.com/hanzoid/xorm-adapter/v3 v3.2.0
+	github.com/hanzoai/authz v1.10.0
+	github.com/hanzoai/iamsdk/v2 v2.1.0
+	github.com/hanzoai/xorm-adapter/v3 v3.0.2
 	github.com/hetznercloud/hcloud-go/v2 v2.37.0
 	github.com/lib/pq v1.12.1
 	github.com/luthermonson/go-proxmox v0.4.0
 	github.com/pkg/errors v0.9.1
-	github.com/qiangmzsx/string-adapter/v2 v2.2.0
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.70
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tbaas v1.1.13
 	github.com/ua-parser/uap-go v0.0.0-20251207011819-db9adb27a0b8
@@ -43,6 +42,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.7.0 // indirect
+	github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.13 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
@@ -56,9 +56,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10 // indirect
 	github.com/aws/smithy-go v1.24.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/buger/goterm v1.0.4 // indirect
-	github.com/casbin/govaluate v1.10.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/diskfs/go-diskfs v1.9.1 // indirect
@@ -87,6 +85,8 @@ require (
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
+	github.com/hanzoai/builder v0.3.13 // indirect
+	github.com/hanzoai/xorm v1.1.6 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
@@ -106,9 +106,10 @@ require (
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/shiena/ansicolor v0.0.0-20230509054315-a9deabde6e02 // indirect
 	github.com/syndtr/goleveldb v1.0.0 // indirect
+	github.com/tidwall/gjson v1.14.4 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/xorm-io/builder v0.3.13 // indirect
-	github.com/xorm-io/xorm v1.1.6 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
