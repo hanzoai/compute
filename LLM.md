@@ -10,7 +10,7 @@ Visor is Hanzo's multi-provider cloud VM management platform. It provisions, mon
 - **Service** (`/service/`): Provider adapters implementing `MachineClientInterface`
 - **Object** (`/object/`): Data models, DB operations (XORM), plan seeds
 - **Billing** (`/billing/`): Pricing engine
-- **AuthZ** (`/authz/`): Casbin-based authorization
+- **AuthZ** (`/authz/`): hanzoai/authz-based authorization
 
 ### Provider Adapters (all fully implemented)
 | Provider | Machine | Volume | File |

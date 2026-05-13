@@ -21,7 +21,7 @@ import {QuestionCircleTwoTone} from "@ant-design/icons";
 import {v4 as uuidv4} from "uuid";
 
 export let ServerUrl = "";
-export let CasdoorSdk;
+export let IamSdk;
 
 export function initServerUrl() {
   const hostname = window.location.hostname;
@@ -35,8 +35,8 @@ export function isLocalhost() {
   return hostname === "localhost";
 }
 
-export function initCasdoorSdk(config) {
-  CasdoorSdk = new Sdk(config);
+export function initIamSdk(config) {
+  IamSdk = new Sdk(config);
 }
 
 function getUrlWithLanguage(url) {
@@ -48,23 +48,23 @@ function getUrlWithLanguage(url) {
 }
 
 export function getSignupUrl() {
-  return getUrlWithLanguage(CasdoorSdk.getSignupUrl());
+  return getUrlWithLanguage(IamSdk.getSignupUrl());
 }
 
 export function getSigninUrl() {
-  return getUrlWithLanguage(CasdoorSdk.getSigninUrl());
+  return getUrlWithLanguage(IamSdk.getSigninUrl());
 }
 
 export function getUserProfileUrl(userName, account) {
-  return getUrlWithLanguage(CasdoorSdk.getUserProfileUrl(userName, account));
+  return getUrlWithLanguage(IamSdk.getUserProfileUrl(userName, account));
 }
 
 export function getMyProfileUrl(account) {
-  return getUrlWithLanguage(CasdoorSdk.getMyProfileUrl(account));
+  return getUrlWithLanguage(IamSdk.getMyProfileUrl(account));
 }
 
 export function signin() {
-  return CasdoorSdk.signin(ServerUrl);
+  return IamSdk.signin(ServerUrl);
 }
 
 export function parseJson(s) {
@@ -308,7 +308,7 @@ export function getAcceptLanguage() {
   return i18next.language + ";q=0.9,en;q=0.8";
 }
 
-export const StaticBaseUrl = "https://cdn.casbin.org";
+export const StaticBaseUrl = "https://cdn.hanzo.ai";
 
 export const Countries = [{label: "English", key: "en", country: "US", alt: "English"},
   {label: "Español", key: "es", country: "ES", alt: "Español"},
