@@ -1,4 +1,4 @@
-FROM casbin/guacd:1.5.4 as guacd
+FROM guacamole/guacd:1.5.4 as guacd
 FROM node:18.19.0 AS FRONT
 WORKDIR /web
 COPY ./web .

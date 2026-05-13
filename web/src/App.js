@@ -56,7 +56,7 @@ class App extends Component {
     };
 
     Setting.initServerUrl();
-    Setting.initCasdoorSdk(Conf.AuthConfig);
+    Setting.initIamSdk(Conf.AuthConfig);
   }
 
   UNSAFE_componentWillMount() {
