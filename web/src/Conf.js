@@ -17,7 +17,7 @@ export const AuthConfig = {
   // serverUrl: "http://localhost:7001",
   clientId: "b108dacba027db36ec26",
   appName: "app-hanzo-vm",
-  organizationName: "casbin",
+  organizationName: "hanzo",
   redirectPath: "/callback",
 };
 

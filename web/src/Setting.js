@@ -16,7 +16,7 @@ import React from "react";
 import {Tooltip, message} from "antd";
 import {isMobile as isMobileDevice} from "react-device-detect";
 import i18next from "i18next";
-import Sdk from "@hanzo/iam"; // Hanzo IAM JS SDK (casdoor-compatible)
+import Sdk from "@hanzo/iam"; // Hanzo IAM JS SDK
 import {QuestionCircleTwoTone} from "@ant-design/icons";
 import {v4 as uuidv4} from "uuid";
 
@@ -308,7 +308,7 @@ export function getAcceptLanguage() {
   return i18next.language + ";q=0.9,en;q=0.8";
 }
 
-export const StaticBaseUrl = "https://cdn.casbin.org";
+export const StaticBaseUrl = "https://cdn.hanzo.ai";
 
 export const Countries = [{label: "English", key: "en", country: "US", alt: "English"},
   {label: "Español", key: "es", country: "ES", alt: "Español"},
