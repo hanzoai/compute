@@ -27,11 +27,11 @@ import (
 )
 
 var (
-	oldIamEndpoint     = "https://door.casdoor.com"
+	oldIamEndpoint     = "https://door.example.com"
 	newIamEndpoint     = conf.GetConfigString("iamEndpoint")
 	oldClientId        = "b108dacba027db36ec26"
 	newClientId        = conf.GetConfigString("clientId")
-	oldIamOrganization = "casbin"
+	oldIamOrganization = "upstream"
 	newIamOrganization = conf.GetConfigString("iamOrganization")
 	oldIamApplication  = "app-hanzo-vm"
 	newIamApplication  = conf.GetConfigString("iamApplication")

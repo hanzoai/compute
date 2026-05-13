@@ -17,15 +17,15 @@ package authz
 import (
 	"strings"
 
-	"github.com/casbin/casbin/v2"
-	"github.com/casbin/casbin/v2/model"
-	iamsdk "github.com/casdoor/casdoor-go-sdk/casdoorsdk"
-	xormadapter "github.com/casdoor/xorm-adapter/v3"
+	authz "github.com/hanzoai/authz"
+	"github.com/hanzoai/authz/model"
+	iamsdk "github.com/hanzoai/iamsdk/v2/iamsdk"
+	xormadapter "github.com/hanzoai/xorm-adapter/v3"
 	"github.com/hanzoai/vm/conf"
-	stringadapter "github.com/qiangmzsx/string-adapter/v2"
+	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
 )
 
-var Enforcer *casbin.Enforcer
+var Enforcer *authz.Enforcer
 
 func InitAuthz() {
 	var err error
@@ -71,7 +71,7 @@ m = (r.subOwner == p.subOwner || p.subOwner == "*") && (r.subName == p.subName |
 		panic(err)
 	}
 
-	Enforcer, err = casbin.NewEnforcer(m, a)
+	Enforcer, err = authz.NewEnforcer(m, a)
 	if err != nil {
 		panic(err)
 	}
