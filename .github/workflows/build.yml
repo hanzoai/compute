@@ -9,15 +9,9 @@ permissions:
   packages: write
   id-token: write
 jobs:
-  vm:
+  docker:
     uses: hanzoai/.github/.github/workflows/docker-build.yml@main
     with:
       image: ghcr.io/hanzoai/vm
       target: STANDARD
-    secrets: inherit
-  vm-allinone:
-    uses: hanzoai/.github/.github/workflows/docker-build.yml@main
-    with:
-      image: ghcr.io/hanzoai/vm-allinone
-      target: ALLINONE
     secrets: inherit
