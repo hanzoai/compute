@@ -19,10 +19,11 @@ import (
 
 	authz "github.com/hanzoai/authz"
 	"github.com/hanzoai/authz/model"
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/iamsdk/v2/iamsdk"
-	xormadapter "github.com/hanzoai/xorm-adapter/v3"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
+	"github.com/hanzoai/authzstore"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/xorm"
 )
 
 var Enforcer *authz.Enforcer
@@ -33,11 +34,15 @@ func InitAuthz() {
 	tableNamePrefix := conf.GetConfigString("tableNamePrefix")
 	driverName := conf.GetConfigString("driverName")
 	dataSourceName := conf.GetConfigDataSourceName()
-	if conf.GetConfigString("driverName") == "mysql" {
+	if driverName == "mysql" {
 		dataSourceName = dataSourceName + conf.GetConfigString("dbName")
 	}
 
-	a, err := xormadapter.NewAdapterWithTableName(driverName, dataSourceName, "api_rule", tableNamePrefix, true)
+	eng, err := xorm.NewEngine(driverName, dataSourceName)
+	if err != nil {
+		panic(err)
+	}
+	a, err := authzstore.New(eng, "api_rule", tableNamePrefix)
 	if err != nil {
 		panic(err)
 	}
