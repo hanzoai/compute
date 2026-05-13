@@ -30,7 +30,7 @@ func GetConfigString(key string) string {
 	res := beego.AppConfig.String(key)
 	if res == "" {
 		if key == "staticBaseUrl" {
-			res = "https://cdn.casbin.org"
+			res = "https://cdn.hanzo.ai"
 		} else if key == "logConfig" {
 			res = "{\"filename\": \"logs/iam.log\", \"maxdays\":99999, \"perm\":\"0770\"}"
 		}
