@@ -19,10 +19,11 @@ import (
 
 	authz "github.com/hanzoai/authz"
 	"github.com/hanzoai/authz/model"
-	iamsdk "github.com/hanzoai/iamsdk/v2/iamsdk"
-	xormadapter "github.com/hanzoai/xorm-adapter/v3"
-	"github.com/hanzoai/vm/conf"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
+	"github.com/hanzoai/authzstore"
+	iamsdk "github.com/hanzoai/iamsdk/v2/iamsdk"
+	"github.com/hanzoai/vm/conf"
+	"github.com/hanzoai/xorm"
 )
 
 var Enforcer *authz.Enforcer
@@ -42,7 +43,11 @@ func InitAuthz() {
 		dataSourceName = dataSourceName + dbName
 	}
 
-	a, err := xormadapter.NewAdapterWithTableName(driverName, dataSourceName, "api_rule", tableNamePrefix, true)
+	eng, err := xorm.NewEngine(driverName, dataSourceName)
+	if err != nil {
+		panic(err)
+	}
+	a, err := authzstore.New(eng, "api_rule", tableNamePrefix)
 	if err != nil {
 		panic(err)
 	}
