@@ -5,7 +5,7 @@ COPY ./web .
 RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
 
-FROM golang:1.24 AS BACK
+FROM golang:1.26.3 AS BACK
 WORKDIR /go/src/hanzo-visor
 COPY . .
 RUN chmod +x ./build.sh
