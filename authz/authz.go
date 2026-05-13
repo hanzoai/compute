@@ -19,8 +19,8 @@ import (
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
-	iamsdk "github.com/casdoor/casdoor-go-sdk/casdoorsdk"
-	xormadapter "github.com/casdoor/xorm-adapter/v3"
+	iamsdk "github.com/hanzoai/iam-go-sdk/casdoorsdk"
+	xormadapter "github.com/hanzoai/xorm-adapter/v3"
 	"github.com/hanzoai/vm/conf"
 	stringadapter "github.com/qiangmzsx/string-adapter/v2"
 )
