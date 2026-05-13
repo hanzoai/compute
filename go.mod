@@ -1,6 +1,6 @@
 module github.com/hanzoai/visor
 
-go 1.26.1
+go 1.26.3
 
 require (
 	cloud.google.com/go/compute v1.57.0
