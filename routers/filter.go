@@ -24,7 +24,7 @@ import (
 
 func TransparentStatic(ctx *context.Context) {
 	urlPath := ctx.Request.URL.Path
-	if strings.HasPrefix(urlPath, "/api/") {
+	if strings.HasPrefix(urlPath, "/v1/") {
 		return
 	}
 

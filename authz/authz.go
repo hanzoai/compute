@@ -137,7 +137,7 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 
 func isAllowedInDemoMode(method string, urlPath string) bool {
 	if method == "POST" {
-		if strings.HasPrefix(urlPath, "/api/signin") || urlPath == "/api/signout" || urlPath == "/api/add-asset-tunnel" || urlPath == "/api/start-session" || urlPath == "/api/stop-session" {
+		if strings.HasPrefix(urlPath, "/v1/signin") || urlPath == "/v1/signout" || urlPath == "/v1/add-asset-tunnel" || urlPath == "/v1/start-session" || urlPath == "/v1/stop-session" {
 			return true
 		} else {
 			return false
