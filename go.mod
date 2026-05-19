@@ -14,10 +14,9 @@ require (
 	github.com/digitalocean/go-libvirt v0.0.0-20260217163227-273eaa321819
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/hanzoai/authz v1.10.0
-	github.com/hanzoai/authzstore v0.1.0
-	github.com/hanzoai/iamsdk/v2 v2.1.0
+	github.com/hanzoai/authzstore v0.1.1
 	github.com/hanzoai/xorm v1.1.6
 	github.com/lib/pq v1.12.1
 	github.com/luthermonson/go-proxmox v0.4.0
@@ -25,11 +24,13 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.70
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tbaas v1.1.13
 	github.com/ua-parser/uap-go v0.0.0-20251207011819-db9adb27a0b8
-	golang.org/x/net v0.52.0
+	golang.org/x/net v0.53.0
 	google.golang.org/grpc v1.80.0
 	xorm.io/core v0.7.3
 	xorm.io/xorm v1.3.11
 )
+
+require go.yaml.in/yaml/v3 v3.0.4 // indirect
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -60,6 +61,7 @@ require (
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/hanzoai/builder v0.3.13 // indirect
+	github.com/hanzoai/iam v1.16.2-0.20260519061152-86e34e93edf3
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -67,7 +69,7 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/magefile/mage v1.17.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
-	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
@@ -76,15 +78,15 @@ require (
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/shiena/ansicolor v0.0.0-20230509054315-a9deabde6e02 // indirect
-	github.com/syndtr/goleveldb v1.0.0 // indirect
-	github.com/tidwall/gjson v1.14.4 // indirect
+	github.com/syndtr/goleveldb v1.0.1-0.20220614013038-64ee5596c38a // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.0 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect

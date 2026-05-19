@@ -18,7 +18,7 @@ import (
 	"encoding/gob"
 
 	"github.com/beego/beego"
-	iamsdk "github.com/hanzoai/iamsdk/v2/iamsdk"
+	iam "github.com/hanzoai/iam"
 )
 
 type ApiController struct {
@@ -26,10 +26,10 @@ type ApiController struct {
 }
 
 func init() {
-	gob.Register(iamsdk.Claims{})
+	gob.Register(iam.Claims{})
 }
 
-func GetUserName(user *iamsdk.User) string {
+func GetUserName(user *iam.User) string {
 	if user == nil {
 		return ""
 	}
@@ -47,17 +47,17 @@ func wrapActionResponse(affected bool, e ...error) *Response {
 	}
 }
 
-func (c *ApiController) GetSessionClaims() *iamsdk.Claims {
+func (c *ApiController) GetSessionClaims() *iam.Claims {
 	s := c.GetSession("user")
 	if s == nil {
 		return nil
 	}
 
-	claims := s.(iamsdk.Claims)
+	claims := s.(iam.Claims)
 	return &claims
 }
 
-func (c *ApiController) SetSessionClaims(claims *iamsdk.Claims) {
+func (c *ApiController) SetSessionClaims(claims *iam.Claims) {
 	if claims == nil {
 		c.DelSession("user")
 		return
@@ -66,7 +66,7 @@ func (c *ApiController) SetSessionClaims(claims *iamsdk.Claims) {
 	c.SetSession("user", *claims)
 }
 
-func (c *ApiController) GetSessionUser() *iamsdk.User {
+func (c *ApiController) GetSessionUser() *iam.User {
 	claims := c.GetSessionClaims()
 	if claims == nil {
 		return nil
@@ -75,7 +75,7 @@ func (c *ApiController) GetSessionUser() *iamsdk.User {
 	return &claims.User
 }
 
-func (c *ApiController) SetSessionUser(user *iamsdk.User) {
+func (c *ApiController) SetSessionUser(user *iam.User) {
 	if user == nil {
 		c.DelSession("user")
 		return

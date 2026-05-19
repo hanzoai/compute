@@ -21,7 +21,7 @@ import (
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
 	"github.com/hanzoai/authzstore"
-	iamsdk "github.com/hanzoai/iamsdk/v2/iamsdk"
+	iam "github.com/hanzoai/iam"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/xorm"
 )
@@ -110,7 +110,7 @@ p, *, *, POST, /api/start-session, *, *
 	}
 }
 
-func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
+func IsAllowed(user *iam.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
 	if conf.GetConfigBool("IsDemoMode") {
 		if !isAllowedInDemoMode(method, urlPath) {
 			return false
