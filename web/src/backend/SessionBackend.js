@@ -16,14 +16,14 @@ import * as Setting from "../Setting";
 import {Connected} from "../SessionListPage";
 
 export function getSessions(owner, page = "", pageSize = "", field = "", value = "", sortField = "", sortOrder = "", status = Connected) {
-  return fetch(`${Setting.ServerUrl}/api/get-sessions?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}&status=${status}`, {
+  return fetch(`${Setting.ServerUrl}/v1/get-sessions?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}&status=${status}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
 }
 
 export function getSession(owner, name) {
-  return fetch(`${Setting.ServerUrl}/api/get-session?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${Setting.ServerUrl}/v1/get-session?id=${owner}/${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
@@ -31,7 +31,7 @@ export function getSession(owner, name) {
 
 export function updateSession(owner, name, session) {
   const newSession = Setting.deepCopy(session);
-  return fetch(`${Setting.ServerUrl}/api/update-session?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${Setting.ServerUrl}/v1/update-session?id=${owner}/${encodeURIComponent(name)}`, {
     method: "POST",
     credentials: "include",
     body: JSON.stringify(newSession),
@@ -39,7 +39,7 @@ export function updateSession(owner, name, session) {
 }
 
 export function addAssetTunnel(assetId, mode = "guacd") {
-  return fetch(`${Setting.ServerUrl}/api/add-asset-tunnel?assetId=${assetId}&mode=${mode}`, {
+  return fetch(`${Setting.ServerUrl}/v1/add-asset-tunnel?assetId=${assetId}&mode=${mode}`, {
     method: "POST",
     credentials: "include",
   }).then(res => res.json());
@@ -47,7 +47,7 @@ export function addAssetTunnel(assetId, mode = "guacd") {
 
 export function deleteSession(session) {
   const newSession = Setting.deepCopy(session);
-  return fetch(`${Setting.ServerUrl}/api/delete-session`, {
+  return fetch(`${Setting.ServerUrl}/v1/delete-session`, {
     method: "POST",
     credentials: "include",
     body: JSON.stringify(newSession),
@@ -55,14 +55,14 @@ export function deleteSession(session) {
 }
 
 export function connect(sessionId) {
-  return fetch(`${Setting.ServerUrl}/api/start-session?id=${sessionId}`, {
+  return fetch(`${Setting.ServerUrl}/v1/start-session?id=${sessionId}`, {
     method: "POST",
     credentials: "include",
   }).then(res => res.json());
 }
 
 export function disconnect(sessionId) {
-  return fetch(`${Setting.ServerUrl}/api/stop-session?id=${sessionId}`, {
+  return fetch(`${Setting.ServerUrl}/v1/stop-session?id=${sessionId}`, {
     method: "POST",
     credentials: "include",
   }).then(res => res.json());

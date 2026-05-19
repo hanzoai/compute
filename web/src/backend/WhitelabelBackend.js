@@ -15,7 +15,7 @@
 import * as Setting from "../Setting";
 
 export function getWhitelabel() {
-  return fetch(`${Setting.ServerUrl}/api/get-whitelabel`, {
+  return fetch(`${Setting.ServerUrl}/v1/get-whitelabel`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());

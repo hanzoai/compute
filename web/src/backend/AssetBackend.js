@@ -15,14 +15,14 @@
 import * as Setting from "../Setting";
 
 export function getAssets(owner, page = "", pageSize = "", field = "", value = "", sortField = "", sortOrder = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-assets?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}`, {
+  return fetch(`${Setting.ServerUrl}/v1/get-assets?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
 }
 
 export function getAsset(owner, name) {
-  return fetch(`${Setting.ServerUrl}/api/get-asset?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${Setting.ServerUrl}/v1/get-asset?id=${owner}/${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
@@ -30,7 +30,7 @@ export function getAsset(owner, name) {
 
 export function updateAsset(owner, name, asset) {
   const newAsset = Setting.deepCopy(asset);
-  return fetch(`${Setting.ServerUrl}/api/update-asset?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${Setting.ServerUrl}/v1/update-asset?id=${owner}/${encodeURIComponent(name)}`, {
     method: "POST",
     credentials: "include",
     body: JSON.stringify(newAsset),
@@ -39,7 +39,7 @@ export function updateAsset(owner, name, asset) {
 
 export function addAsset(asset) {
   const newAsset = Setting.deepCopy(asset);
-  return fetch(`${Setting.ServerUrl}/api/add-asset`, {
+  return fetch(`${Setting.ServerUrl}/v1/add-asset`, {
     method: "POST",
     credentials: "include",
     body: JSON.stringify(newAsset),
@@ -48,7 +48,7 @@ export function addAsset(asset) {
 
 export function deleteAsset(asset) {
   const newAsset = Setting.deepCopy(asset);
-  return fetch(`${Setting.ServerUrl}/api/delete-asset`, {
+  return fetch(`${Setting.ServerUrl}/v1/delete-asset`, {
     method: "POST",
     credentials: "include",
     body: JSON.stringify(newAsset),
