@@ -21,7 +21,7 @@ import (
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
 	"github.com/hanzoai/authzstore"
-	"github.com/hanzoai/iamsdk/v2/iamsdk"
+	iam "github.com/hanzoai/iam"
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/xorm"
 )
@@ -106,7 +106,7 @@ p, *, *, GET, /api/get-whitelabel, *, *
 	}
 }
 
-func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
+func IsAllowed(user *iam.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
 	if conf.GetConfigBool("IsDemoMode") {
 		if !isAllowedInDemoMode(method, urlPath) {
 			return false
