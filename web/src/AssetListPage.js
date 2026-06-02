@@ -14,7 +14,8 @@
 
 import React from "react";
 import {Link} from "react-router-dom";
-import {Button, Switch, Table} from "antd";
+import {Button, Switch, Table, Upload} from "antd";
+import {UploadOutlined} from "@ant-design/icons";
 import BaseListPage from "./BaseListPage";
 import moment from "moment";
 import * as Setting from "./Setting";
@@ -50,8 +51,11 @@ class AssetListPage extends BaseListPage {
     };
   }
 
-  addAsset() {
-    const newAsset = this.newAsset();
+  addAsset(newAsset = null) {
+    if (!newAsset) {
+      newAsset = this.newAsset();
+    }
+
     AssetBackend.addAsset(newAsset)
       .then((res) => {
         if (res.status === "ok") {
@@ -85,6 +89,43 @@ class AssetListPage extends BaseListPage {
       .catch(error => {
         Setting.showMessage("error", `Asset failed to delete: ${error}`);
       });
+  }
+
+  renderUpload() {
+    const props = {
+      name: "file",
+      accept: ".rdp",
+      beforeUpload: (file) => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const contents = e.target.result;
+            const fileName = file.name.replace(/\.rdp$/i, "");
+            const asset = Setting.parseRdpFile(contents);
+            if (asset !== null) {
+              asset.name = fileName;
+              asset.displayName = fileName;
+              this.addAsset(asset);
+            }
+
+            if (this.uploadComponentRef.current) {
+              this.uploadComponentRef.current.onRemove(file);
+            }
+
+            resolve();
+          };
+          reader.readAsText(file);
+        });
+      },
+    };
+
+    return (
+      <Upload {...props} ref={(ref) => (this.uploadComponentRef = ref)}>
+        <Button id="upload-button" type="primary" size="small">
+          <UploadOutlined /> {i18next.t("asset:Upload") + "(.rdp)"}
+        </Button>
+      </Upload>
+    );
   }
 
   renderTable(assets) {
@@ -276,7 +317,11 @@ class AssetListPage extends BaseListPage {
           title={() => (
             <div>
               {i18next.t("general:Assets")}&nbsp;&nbsp;&nbsp;&nbsp;
-              <Button type="primary" size="small" onClick={this.addAsset.bind(this)}>{i18next.t("general:Add")}</Button>
+              <Button type="primary" size="small" disabled={!Setting.isAdminUser(this.props.account)} onClick={this.addAsset.bind(this)}>{i18next.t("general:Add")}</Button>
+              &nbsp;&nbsp;
+              {
+                this.renderUpload()
+              }
             </div>
           )}
           loading={this.state.loading}
