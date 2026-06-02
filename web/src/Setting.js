@@ -413,3 +413,122 @@ export function parseRdpFile(content) {
     return null;
   }
 }
+
+export function setOrganization(organization) {
+  localStorage.setItem("organization", organization);
+  window.dispatchEvent(new Event("storageOrganizationChanged"));
+}
+
+export function isDefaultOrganizationSelected(account) {
+  if (isAdminUser(account)) {
+    return getOrganization() === "All";
+  }
+  return false;
+}
+
+export function getOrganization() {
+  const organization = localStorage.getItem("organization");
+  return organization !== null ? organization : "All";
+}
+
+export function getRequestOrganization(account) {
+  if (isAdminUser(account)) {
+    return getOrganization() === "All" ? account.owner : getOrganization();
+  }
+  return account.owner;
+}
+
+export function isLocalAdminUser(account) {
+  if (account === undefined || account === null) {
+    return false;
+  }
+  return account.isAdmin === true || isAdminUser(account);
+}
+
+export function getAcceptLanguage() {
+  if (i18next.language === null || i18next.language === "") {
+    return "en;q=0.9,en;q=0.8";
+  }
+  return i18next.language + ";q=0.9,en;q=0.8";
+}
+
+export const StaticBaseUrl = "https://cdn.casbin.org";
+
+export const Countries = [{label: "English", key: "en", country: "US", alt: "English"},
+  {label: "Español", key: "es", country: "ES", alt: "Español"},
+  {label: "Français", key: "fr", country: "FR", alt: "Français"},
+  {label: "Deutsch", key: "de", country: "DE", alt: "Deutsch"},
+  {label: "中文", key: "zh", country: "CN", alt: "中文"},
+  {label: "Indonesia", key: "id", country: "ID", alt: "Indonesia"},
+  {label: "日本語", key: "ja", country: "JP", alt: "日本語"},
+  {label: "한국어", key: "ko", country: "KR", alt: "한국어"},
+  {label: "Русский", key: "ru", country: "RU", alt: "Русский"},
+  {label: "TiếngViệt", key: "vi", country: "VN", alt: "TiếngViệt"},
+  {label: "Português", key: "pt", country: "BR", alt: "Português"},
+  {label: "Itariano", key: "it", country: "IT", alt: "Itariano"},
+  {label: "Marley", key: "ms", country: "MY", alt: "Marley"},
+  {label: "Tkiš", key: "tr", country: "TR", alt: "Tkiš"},
+  {label: "لغة عربية", key: "ar", country: "DZ", alt: "لغة عربية"},
+  {label: "עִבְרִית", key: "he", country: "IL", alt: "עִבְרִית"},
+  {label: "Filipino", key: "fi", country: "PH", alt: "Filipino"},
+];
+
+export function getLabel(text, tooltip) {
+  return (
+    <React.Fragment>
+      <span style={{marginRight: 4}}>{text}</span>
+      <Tooltip placement="top" title={tooltip}>
+        <QuestionCircleTwoTone twoToneColor="rgb(45,120,213)" />
+      </Tooltip>
+    </React.Fragment>
+  );
+}
+
+export function getItem(label, key, icon, children, type) {
+  return {
+    key,
+    icon,
+    children,
+    label,
+    type,
+  };
+}
+
+export function getOption(label, value) {
+  return {
+    label,
+    value,
+  };
+}
+
+export function isResponseDenied(res) {
+  if (res.msg === "Unauthorized operation" || res.msg === "未授权的操作") {
+    return true;
+  }
+  return false;
+}
+
+export function GenerateId() {
+  return uuidv4();
+}
+
+export function GetIdFromObject(obj) {
+  if (obj === undefined || obj === null) {
+    return "";
+  }
+  return `${obj.owner}/${obj.name}`;
+}
+
+export function getBlockBrowserUrl(providerMap, providerName, block) {
+  const provider = providerMap[providerName];
+  if (!provider || provider.browserUrl === "") {
+    return block;
+  }
+
+  const url = provider.browserUrl.replace("{bh}", block).replace("{chainId}", 1).replace("{clusterId}", provider.network);
+  return (
+    <a target="_blank" rel="noreferrer" href={url}>
+      {block}
+    </a>
+  );
+}
