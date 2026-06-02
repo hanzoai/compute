@@ -375,16 +375,41 @@ export function GetIdFromObject(obj) {
   return `${obj.owner}/${obj.name}`;
 }
 
-export function getBlockBrowserUrl(providerMap, providerName, block) {
-  const provider = providerMap[providerName];
-  if (!provider || provider.browserUrl === "") {
-    return block;
-  }
+export function downLoadRdpFile(asset) {
+  const rdpContent = `
+      full address:s:${asset.endpoint}
+      username:s:${asset.username}
+      prompt for credentials:i:1
+        `;
 
-  const url = provider.browserUrl.replace("{bh}", block).replace("{chainId}", 1).replace("{clusterId}", provider.network);
-  return (
-    <a target="_blank" rel="noreferrer" href={url}>
-      {block}
-    </a>
-  );
+  const blob = new Blob([rdpContent], {type: "application/x-rdp"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${asset.name}.rdp`;
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(url);
+}
+
+export function parseRdpFile(content) {
+  const ipMatch = /full address:s:(.*)/.exec(content);
+  const usernameMatch = /username:s:(.*)/.exec(content);
+
+  const ip = ipMatch ? ipMatch[1].trim() : "";
+  const username = usernameMatch ? usernameMatch[1].trim() : "";
+  if (ip !== "" && username !== "") {
+    const asset = this.newAsset();
+    asset.endpoint = ip;
+    asset.username = username;
+    asset.type = "RDP";
+    asset.port = 3389;
+    return asset;
+  } else {
+    showMessage("error", i18next.t("asset:Invalid RDP file"));
+    return null;
+  }
 }
