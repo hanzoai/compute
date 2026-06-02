@@ -18,7 +18,7 @@ import (
 	"encoding/gob"
 
 	"github.com/beego/beego"
-	iam "github.com/hanzoai/iam"
+	iamsdk "github.com/hanzoai/iam-go-sdk/casdoorsdk"
 )
 
 type ApiController struct {
