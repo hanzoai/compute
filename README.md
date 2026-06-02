@@ -93,6 +93,14 @@ Run vmd (Hanzo VM Daemon) for RDP connection.
 docker run --name vmd -d -p 4822:4822 ghcr.io/hanzovm/vmd
 ```
 
+#### RDP
+
+Run guacd for RDP connection.
+
+```shell
+docker run --name some-guacd -d -p 4822:4822 guacamole/guacd
+```
+
 ## Contribute
 
 For Hanzo VM, if you have any questions, you can give Issues, or you can also directly start Pull Requests(but we recommend giving issues first to communicate with the community).
