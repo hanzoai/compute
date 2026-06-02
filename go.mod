@@ -11,13 +11,13 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.13
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.296.2
 	github.com/beego/beego v1.12.14
+	github.com/casbin/casbin/v2 v2.135.0
 	github.com/digitalocean/go-libvirt v0.0.0-20260217163227-273eaa321819
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/hanzoai/authz v1.10.0
-	github.com/hanzoai/authzstore v0.1.1
-	github.com/hanzoai/xorm v1.1.6
+	github.com/gorilla/websocket v1.5.3
+	github.com/hanzoai/iam-go-sdk v1.46.1
+	github.com/hanzoai/xorm-adapter/v3 v3.1.2
 	github.com/lib/pq v1.12.1
 	github.com/luthermonson/go-proxmox v0.4.0
 	github.com/pkg/errors v0.9.1

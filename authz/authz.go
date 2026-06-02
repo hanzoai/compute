@@ -17,11 +17,10 @@ package authz
 import (
 	"strings"
 
-	authz "github.com/hanzoai/authz"
-	"github.com/hanzoai/authz/model"
-	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
-	"github.com/hanzoai/authzstore"
-	iam "github.com/hanzoai/iam"
+	"github.com/casbin/casbin/v2"
+	"github.com/casbin/casbin/v2/model"
+	iamsdk "github.com/hanzoai/iam-go-sdk/casdoorsdk"
+	xormadapter "github.com/hanzoai/xorm-adapter/v3"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/xorm"
 )
