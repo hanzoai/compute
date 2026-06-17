@@ -1,4 +1,4 @@
-# LLM.md - Hanzo Vm
+# Hanzo Vm
 
 ## Overview
 Go module: github.com/hanzoai/vm
