@@ -176,7 +176,7 @@ class App extends Component {
             </a>
           </Menu.Item>
           <Menu.Item key="/signin" style={{float: "right"}}>
-            <a href={Setting.getSigninUrl()}>
+            <a onClick={() => Setting.signinRedirect()} style={{cursor: "pointer"}}>
               {i18next.t("account:Sign In")}
             </a>
           </Menu.Item>
@@ -225,7 +225,8 @@ class App extends Component {
   renderSigninIfNotSignedIn(component) {
     if (this.state.account === null) {
       sessionStorage.setItem("from", window.location.pathname);
-      window.location.replace(Setting.getSigninUrl());
+      Setting.signinRedirect();
+      return null;
     } else if (this.state.account === undefined) {
       return null;
     } else {
