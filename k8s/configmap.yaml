@@ -12,15 +12,66 @@ stringData:
     SessionOn = true
     copyrequestbody = true
     driverName = postgres
-    dataSourceName = "user=hanzo password=REDACTED dbname=hanzo_vm host=postgres.hanzo.svc port=5432 sslmode=disable"
-    dbName = hanzo_vm
+    dataSourceName = ${DB_DSN}
+    dbName = hanzo_visor
     tableNamePrefix =
     isDemoMode = false
     logPostOnly = true
     redisEndpoint =
-    guacamoleEndpoint = vmd.hanzo.svc:4822
-    iamEndpoint = http://iam.hanzo.svc:8000
-    clientId = b108dacba027db36ec26
-    clientSecret = REDACTED
+    guacamoleEndpoint = 127.0.0.1:4822
+    iamEndpoint = http://iam.hanzo.svc.cluster.local:8000
+    clientId = ${IAM_CLIENT_ID}
+    clientSecret = ${IAM_CLIENT_SECRET}
     iamOrganization = "hanzo"
-    iamApplication = "app-hanzo-vm"
+    iamApplication = "app-hanzo-visor"
+    redirectPath = /callback
+    isLocalIpDb = false
+    publicDomain = ""
+    adminDomain = ""
+    enableExtraPages = false
+    defaultLanguage = "en"
+    staticBaseUrl = "https://cdn.hanzo.ai"
+    htmlTitle = "Hanzo Visor"
+    faviconUrl = "https://cdn.hanzo.ai/static/favicon.png"
+    logoUrl = "https://cdn.hanzo.ai/img/hanzo-visor-logo.png"
+    showGithubCorner = false
+    defaultColorPrimary = "#fd4444"
+    logConfig = {"adapter":"console"}
+    commerceUrl = ${COMMERCE_URL}
+    commerceToken = ${COMMERCE_TOKEN}
+    autoscalerClusters = ${AUTOSCALER_CLUSTERS}
+---
+# Credentials should be provisioned via Hanzo KMS or external-secrets operator.
+# Example ExternalSecret (if using external-secrets):
+#
+# apiVersion: external-secrets.io/v1beta1
+# kind: ExternalSecret
+# metadata:
+#   name: visor-credentials
+#   namespace: hanzo
+# spec:
+#   refreshInterval: 1h
+#   secretStoreRef:
+#     name: hanzo-kms
+#     kind: ClusterSecretStore
+#   target:
+#     name: visor-env
+#   data:
+#     - secretKey: DB_DSN
+#       remoteRef:
+#         key: visor/db-dsn
+#     - secretKey: IAM_CLIENT_ID
+#       remoteRef:
+#         key: visor/iam-client-id
+#     - secretKey: IAM_CLIENT_SECRET
+#       remoteRef:
+#         key: visor/iam-client-secret
+#     - secretKey: COMMERCE_URL
+#       remoteRef:
+#         key: visor/commerce-url
+#     - secretKey: COMMERCE_TOKEN
+#       remoteRef:
+#         key: visor/commerce-token
+#     - secretKey: AUTOSCALER_CLUSTERS
+#       remoteRef:
+#         key: visor/autoscaler-clusters

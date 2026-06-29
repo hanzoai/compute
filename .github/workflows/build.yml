@@ -2,23 +2,15 @@ name: Docker
 on:
   workflow_dispatch:
   push:
-    branches: [main, master, dev, test]
+    branches: [main, dev, test]
     tags: ['v*']
 permissions:
   contents: read
   packages: write
-  id-token: write
 jobs:
   docker:
-    strategy:
-      matrix:
-        include:
-          - image: ghcr.io/hanzoai/visor
-            target: STANDARD
-          - image: ghcr.io/hanzoai/visor-allinone
-            target: ALLINONE
     uses: hanzoai/.github/.github/workflows/docker-build.yml@main
     with:
-      image: ${{ matrix.image }}
-      target: ${{ matrix.target }}
+      image: ghcr.io/hanzoai/visor
+      target: STANDARD
     secrets: inherit

@@ -17,7 +17,7 @@ import * as Setting from "./Setting";
 
 class SigninPage extends React.Component {
   componentDidMount() {
-    Setting.signinRedirect();
+    window.location.replace(Setting.getSigninUrl());
   }
 
   render() {

@@ -1,4 +1,4 @@
-// Copyright 2024 The Hanzo Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -148,4 +148,8 @@ func (client MachineGcpClient) UpdateMachineState(name string, state string) (bo
 	}
 
 	return true, fmt.Sprintf("Instance: [%s]'s state has been successfully updated to: [%s]", name, state), nil
+}
+
+func (client MachineGcpClient) CreateMachine(spec *CreateMachineSpec) (*Machine, error) {
+	return nil, fmt.Errorf("CreateMachine not yet implemented for GCP")
 }

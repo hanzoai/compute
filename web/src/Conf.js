@@ -13,10 +13,10 @@
 // limitations under the License.
 
 export const AuthConfig = {
-  serverUrl: "https://hanzo.id",
+  serverUrl: "https://door.example.com",
   // serverUrl: "http://localhost:7001",
   clientId: "b108dacba027db36ec26",
-  appName: "app-hanzo-vm",
+  appName: "app-visor",
   organizationName: "hanzo",
   redirectPath: "/callback",
 };

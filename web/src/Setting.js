@@ -16,19 +16,12 @@ import React from "react";
 import {Tooltip, message} from "antd";
 import {isMobile as isMobileDevice} from "react-device-detect";
 import i18next from "i18next";
-import {IAM} from "@hanzo/iam/browser"; // Hanzo IAM browser SDK (OIDC Authorization-Code + PKCE)
+import Sdk from "@hanzo/iam-js-sdk";
 import {QuestionCircleTwoTone} from "@ant-design/icons";
 import {v4 as uuidv4} from "uuid";
 
 export let ServerUrl = "";
 export let IamSdk;
-
-// IAM origin + app identifiers captured at init. The IAM is Casdoor-derived, so
-// its account-management pages (account / users / organizations / signup) are
-// server-hosted UI — built as plain deep links, not OIDC/SDK endpoints.
-let IamServerUrl = "";
-let IamAppName = "";
-let IamOrganization = "";
 
 export function initServerUrl() {
   const hostname = window.location.hostname;
@@ -43,16 +36,7 @@ export function isLocalhost() {
 }
 
 export function initIamSdk(config) {
-  IamServerUrl = config.serverUrl;
-  IamAppName = config.appName;
-  IamOrganization = config.organizationName;
-  IamSdk = new IAM({
-    serverUrl: config.serverUrl,
-    clientId: config.clientId,
-    redirectUri: `${window.location.origin}${config.redirectPath}`,
-    organization: config.organizationName,
-    application: config.appName,
-  });
+  IamSdk = new Sdk(config);
 }
 
 function getUrlWithLanguage(url) {
@@ -63,24 +47,24 @@ function getUrlWithLanguage(url) {
   }
 }
 
-// One-way login: redirect to the IAM authorize endpoint (OIDC Authorization-Code
-// + PKCE). Async — it performs the redirect itself; callers fire-and-forget.
-export function signinRedirect() {
-  return IamSdk.signinRedirect({additionalParams: {language: getLanguage()}});
+export function getSignupUrl() {
+  return getUrlWithLanguage(IamSdk.getSignupUrl());
 }
 
-export function getSignupUrl() {
-  return getUrlWithLanguage(`${IamServerUrl}/signup/${IamAppName}`);
+export function getSigninUrl() {
+  return getUrlWithLanguage(IamSdk.getSigninUrl());
 }
 
 export function getUserProfileUrl(userName, account) {
-  const param = (account === undefined || account === null) ? "" : `?access_token=${account.accessToken}`;
-  return getUrlWithLanguage(`${IamServerUrl}/users/${IamOrganization}/${userName}${param}`);
+  return getUrlWithLanguage(IamSdk.getUserProfileUrl(userName, account));
 }
 
 export function getMyProfileUrl(account) {
-  const param = (account === undefined || account === null) ? "" : `?access_token=${account.accessToken}`;
-  return getUrlWithLanguage(`${IamServerUrl}/account${param}`);
+  return getUrlWithLanguage(IamSdk.getMyProfileUrl(account));
+}
+
+export function signin() {
+  return IamSdk.signin(ServerUrl);
 }
 
 export function parseJson(s) {
@@ -389,45 +373,6 @@ export function GetIdFromObject(obj) {
     return "";
   }
   return `${obj.owner}/${obj.name}`;
-}
-
-export function downLoadRdpFile(asset) {
-  const rdpContent = `
-      full address:s:${asset.endpoint}
-      username:s:${asset.username}
-      prompt for credentials:i:1
-        `;
-
-  const blob = new Blob([rdpContent], {type: "application/x-rdp"});
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${asset.name}.rdp`;
-
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  URL.revokeObjectURL(url);
-}
-
-export function parseRdpFile(content) {
-  const ipMatch = /full address:s:(.*)/.exec(content);
-  const usernameMatch = /username:s:(.*)/.exec(content);
-
-  const ip = ipMatch ? ipMatch[1].trim() : "";
-  const username = usernameMatch ? usernameMatch[1].trim() : "";
-  if (ip !== "" && username !== "") {
-    const asset = this.newAsset();
-    asset.endpoint = ip;
-    asset.username = username;
-    asset.type = "RDP";
-    asset.port = 3389;
-    return asset;
-  } else {
-    showMessage("error", i18next.t("asset:Invalid RDP file"));
-    return null;
-  }
 }
 
 export function getBlockBrowserUrl(providerMap, providerName, block) {

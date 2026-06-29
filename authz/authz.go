@@ -1,4 +1,4 @@
-// Copyright 2024 The Hanzo Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ package authz
 import (
 	"strings"
 
-	"github.com/casbin/casbin/v2"
-	"github.com/casbin/casbin/v2/model"
-	iamsdk "github.com/hanzoai/iam-go-sdk/casdoorsdk"
-	xormadapter "github.com/hanzoai/xorm-adapter/v3"
+	authz "github.com/hanzoai/authz"
+	"github.com/hanzoai/authz/model"
+	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
+	"github.com/hanzoai/authzstore"
+	iam "github.com/hanzoai/iam"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/xorm"
 )
@@ -32,14 +33,9 @@ func InitAuthz() {
 
 	tableNamePrefix := conf.GetConfigString("tableNamePrefix")
 	driverName := conf.GetConfigString("driverName")
-	dataSourceName := strings.TrimSpace(conf.GetConfigDataSourceName())
-	dbName := conf.GetConfigString("dbName")
-	if driverName == "postgres" {
-		if !strings.Contains(dataSourceName, "dbname=") {
-			dataSourceName = dataSourceName + " dbname=" + dbName
-		}
-	} else {
-		dataSourceName = dataSourceName + dbName
+	dataSourceName := conf.GetConfigDataSourceName()
+	if driverName == "mysql" {
+		dataSourceName = dataSourceName + conf.GetConfigString("dbName")
 	}
 
 	eng, err := xorm.NewEngine(driverName, dataSourceName)
@@ -90,6 +86,7 @@ p, *, *, GET, /api/get-account, *, *
 p, *, *, GET, /api/get-asset-tunnel, *, *
 p, *, *, POST, /api/add-asset-tunnel, *, *
 p, *, *, POST, /api/start-session, *, *
+p, *, *, GET, /api/get-whitelabel, *, *
 `
 
 		sa := stringadapter.NewAdapter(ruleText)
@@ -140,7 +137,7 @@ func IsAllowed(user *iam.User, subOwner string, subName string, method string, u
 
 func isAllowedInDemoMode(method string, urlPath string) bool {
 	if method == "POST" {
-		if strings.HasPrefix(urlPath, "/api/signin") || urlPath == "/api/signout" || urlPath == "/api/add-asset-tunnel" || urlPath == "/api/start-session" || urlPath == "/api/stop-session" {
+		if strings.HasPrefix(urlPath, "/v1/signin") || urlPath == "/v1/signout" || urlPath == "/v1/add-asset-tunnel" || urlPath == "/v1/start-session" || urlPath == "/v1/stop-session" {
 			return true
 		} else {
 			return false

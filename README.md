@@ -1,111 +1,59 @@
-<p align="center"><img src=".github/hero.svg" alt="vm" width="880"></p>
+<p align="center"><img src=".github/hero.svg" alt="visor" width="880"></p>
 
-<h1 align="center" style="border-bottom: none;">Hanzo VM</h1>
-<h3 align="center">An open-source cloud operating system management platform developed by Go and React.</h3>
-<p align="center">
-  <a href="#badge">
-    <img alt="semantic-release" src="https://img.shields.io/badge/%20%20%F0%9F%93%A6%F0%9F%9A%80-semantic--release-e10079.svg">
-  </a>
-  <a href="https://github.com/hanzoai/vm/releases/latest">
-    <img alt="GitHub Release" src="https://img.shields.io/github/v/release/hanzoai/vm.svg">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://goreportcard.com/report/github.com/hanzoai/vm">
-    <img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/hanzoai/vm?style=flat-square">
-  </a>
-  <a href="https://github.com/hanzoai/vm/blob/master/LICENSE">
-    <img src="https://img.shields.io/github/license/hanzoai/vm?style=flat-square" alt="license">
-  </a>
-  <a href="https://github.com/hanzoai/vm/issues">
-    <img alt="GitHub issues" src="https://img.shields.io/github/issues/hanzoai/vm?style=flat-square">
-  </a>
-  <a href="https://github.com/hanzoai/vm/stargazers">
-    <img alt="GitHub stars" src="https://img.shields.io/github/stars/hanzoai/vm?style=flat-square">
-  </a>
-  <a href="https://github.com/hanzoai/vm/network">
-    <img alt="GitHub forks" src="https://img.shields.io/github/forks/hanzoai/vm?style=flat-square">
-  </a>
-</p>
+<h1 align="center" style="border-bottom: none;">Hanzo Visor</h1>
+<h3 align="center">Cloud operating-system management platform (Go + React).</h3>
 
 ## Architecture
 
-Hanzo VM contains 2 parts:
+Hanzo Visor has two parts:
 
-| Name     | Description                       | Language               | Source code                                       |
-|----------|-----------------------------------|------------------------|---------------------------------------------------|
-| Frontend | Web frontend UI for Hanzo VM      | Javascript + React     | https://github.com/hanzoai/vm/tree/master/web     |
-| Backend  | RESTful API backend for Hanzo VM  | Golang + Beego + MySQL | https://github.com/hanzoai/vm                     |
+| Name     | Description                          | Language               | Source code                                |
+|----------|--------------------------------------|------------------------|--------------------------------------------|
+| Frontend | Web UI                               | JavaScript + React     | https://github.com/hanzoai/visor/tree/main/web |
+| Backend  | RESTful API + Beego                  | Go + Beego + Postgres  | https://github.com/hanzoai/visor           |
 
 ## Installation
 
-Hanzo VM uses Hanzo IAM as the authentication system. So you need to create an organization and an application for Hanzo VM in a Hanzo IAM instance.
+Hanzo Visor uses Hanzo IAM as the authentication system. Create an organization and an application for Visor in your IAM instance, then wire it via `app.conf`.
 
 ### Necessary configuration
 
 #### Get the code
 
 ```shell
-go get github.com/hanzoai/iam
-go get github.com/hanzoai/vm
-```
-
-or
-
-```shell
 git clone https://github.com/hanzoai/iam
-git clone https://github.com/hanzoai/vm
+git clone https://github.com/hanzoai/visor
 ```
 
 #### Setup database
 
-Hanzo VM will store its users, nodes and topics information in a MySQL database named: `hanzo_vm`, will create it if not existed. The DB connection string can be specified at: https://github.com/hanzoai/vm/blob/master/conf/app.conf
+Visor stores users, nodes, and resource information in a Postgres database named `visor` (auto-created). The DB connection string is configured in `conf/app.conf`:
 
 ```ini
-dataSourceName = root:123@tcp(localhost:3306)/
+dataSourceName = postgres://user:pass@localhost:5432/visor
 ```
 
-Hanzo VM uses XORM to connect to DB, so all DBs supported by XORM can also be used.
+#### Configure IAM
 
-#### Configure Hanzo IAM
+After creating an organization and an application in Hanzo IAM, update `clientID`, `clientSecret`, `iamOrganization`, and `iamApplication` in `app.conf`.
 
-After creating an organization and an application for Hanzo VM in Hanzo IAM, you need to update `clientID`, `clientSecret`, `iamOrganization` and `iamApplication` in app.conf.
+#### Run
 
-#### Run Hanzo VM
+```shell
+go run main.go
+```
 
-- Configure and run Hanzo VM by yourself.
-- Open browser: http://localhost:19000/
+Open browser: http://localhost:16001/
 
-### Optional configuration
-
-#### Setup your Hanzo VM to enable some third-party login platform
-
-  Hanzo VM uses Hanzo IAM to manage members. If you want to log in with oauth, you should see [Hanzo IAM oauth configuration](https://hanzo.ai/docs/iam/provider/oauth/overview).
-
-#### OSS, Email, and SMS
-
-  Hanzo VM uses Hanzo IAM to upload files to cloud storage, send Emails and send SMSs. See Hanzo IAM for more details.
+### Optional
 
 #### RDP
 
-Run vmd (Hanzo VM Daemon) for RDP connection.
+Run guacd for RDP connections:
 
 ```shell
-docker run --name vmd -d -p 4822:4822 ghcr.io/hanzovm/vmd
+docker run --name guacd -d -p 4822:4822 guacamole/guacd
 ```
-
-#### RDP
-
-Run guacd for RDP connection.
-
-```shell
-docker run --name some-guacd -d -p 4822:4822 guacamole/guacd
-```
-
-## Contribute
-
-For Hanzo VM, if you have any questions, you can give Issues, or you can also directly start Pull Requests(but we recommend giving issues first to communicate with the community).
 
 ## License
 

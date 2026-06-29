@@ -131,7 +131,7 @@
                         "description": "The details of the permission",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/iamsdk.Permission"
+                            "$ref": "#/definitions/casdoorsdk.Permission"
                         }
                     }
                 ],
@@ -299,7 +299,7 @@
                         "description": "The details of the permission",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/iamsdk.Permission"
+                            "$ref": "#/definitions/casdoorsdk.Permission"
                         }
                     }
                 ],
@@ -601,7 +601,7 @@
                     "200": {
                         "description": "The Response object",
                         "schema": {
-                            "$ref": "#/definitions/iamsdk.Permission"
+                            "$ref": "#/definitions/casdoorsdk.Permission"
                         }
                     }
                 }
@@ -620,7 +620,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/iamsdk.Permission"
+                                "$ref": "#/definitions/casdoorsdk.Permission"
                             }
                         }
                     }
@@ -859,7 +859,7 @@
                         "description": "The details of the permission",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/iamsdk.Permission"
+                            "$ref": "#/definitions/casdoorsdk.Permission"
                         }
                     }
                 ],
@@ -949,7 +949,7 @@
             "title": "Response",
             "type": "object"
         },
-        "iamsdk.Permission": {
+        "casdoorsdk.Permission": {
             "title": "Permission",
             "type": "object"
         },

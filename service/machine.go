@@ -1,4 +1,4 @@
-// Copyright 2024 The Hanzo Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,23 @@ package service
 
 import "fmt"
 
+// CreateMachineSpec describes parameters for launching a new cloud instance.
+type CreateMachineSpec struct {
+	Name         string            `json:"name"`
+	DisplayName  string            `json:"displayName"`
+	InstanceType string            `json:"instanceType"` // e.g. "t3.medium", "mac2.metal"
+	ImageID      string            `json:"imageId"`      // AMI ID, image name, etc.
+	OS           string            `json:"os"`           // "linux", "macos", "windows"
+	Region       string            `json:"region"`
+	Tags         map[string]string `json:"tags,omitempty"`
+	SSHKeyIDs    []string          `json:"sshKeyIds,omitempty"` // Provider SSH key IDs
+}
+
 type MachineClientInterface interface {
 	GetMachines() ([]*Machine, error)
 	GetMachine(name string) (*Machine, error)
 	UpdateMachineState(name string, state string) (bool, string, error)
+	CreateMachine(spec *CreateMachineSpec) (*Machine, error)
 }
 
 func NewMachineClient(providerType string, accessKeyId string, accessKeySecret string, region string) (MachineClientInterface, error) {
@@ -39,6 +52,12 @@ func NewMachineClient(providerType string, accessKeyId string, accessKeySecret s
 		res, err = newMachineGcpClient(accessKeyId, accessKeySecret, region)
 	} else if providerType == "AWS" {
 		res, err = newMachineAwsClient(accessKeyId, accessKeySecret, region)
+	} else if providerType == "DigitalOcean" {
+		res, err = newMachineDigitalOceanClient(accessKeyId, accessKeySecret, region)
+	} else if providerType == "AWS Lightsail" {
+		res, err = newMachineLightsailClient(accessKeyId, accessKeySecret, region)
+	} else if providerType == "Hetzner" {
+		res, err = newMachineHetznerClient(accessKeyId, accessKeySecret, region)
 	} else {
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
