@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="vm" width="880"></p>
+
 <h1 align="center" style="border-bottom: none;">Hanzo VM</h1>
 <h3 align="center">An open-source cloud operating system management platform developed by Go and React.</h3>
 <p align="center">
