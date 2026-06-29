@@ -1,4 +1,4 @@
-// Copyright 2023 The Hanzo Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	_ "embed"
 
 	"github.com/beego/beego"
-	iamsdk "github.com/hanzoai/iam-go-sdk/casdoorsdk"
+	iam "github.com/hanzoai/iam"
 )
 
 //go:embed token_jwt_key.pem

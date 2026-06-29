@@ -1,3 +1,17 @@
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package service
 
 import (
@@ -115,4 +129,62 @@ func (client MachineAwsClient) UpdateMachineState(name string, state string) (bo
 	}
 
 	return true, fmt.Sprintf("Instance: [%s]'s state has been successfully updated to: [%s]", name, state), nil
+}
+
+func (client MachineAwsClient) CreateMachine(spec *CreateMachineSpec) (*Machine, error) {
+	if spec.ImageID == "" {
+		return nil, fmt.Errorf("imageId is required for AWS instance creation")
+	}
+
+	instanceType := ec2Types.InstanceType(spec.InstanceType)
+	if spec.InstanceType == "" {
+		instanceType = ec2Types.InstanceTypeT3Medium
+	}
+
+	// Build tags
+	var tags []ec2Types.Tag
+	tags = append(tags, ec2Types.Tag{
+		Key:   aws.String("Name"),
+		Value: aws.String(spec.DisplayName),
+	})
+	if spec.OS != "" {
+		tags = append(tags, ec2Types.Tag{
+			Key:   aws.String("OS"),
+			Value: aws.String(spec.OS),
+		})
+	}
+	tags = append(tags, ec2Types.Tag{
+		Key:   aws.String("ManagedBy"),
+		Value: aws.String("hanzo-visor"),
+	})
+	for k, v := range spec.Tags {
+		tags = append(tags, ec2Types.Tag{
+			Key:   aws.String(k),
+			Value: aws.String(v),
+		})
+	}
+
+	input := &ec2.RunInstancesInput{
+		ImageId:      aws.String(spec.ImageID),
+		InstanceType: instanceType,
+		MinCount:     aws.Int32(1),
+		MaxCount:     aws.Int32(1),
+		TagSpecifications: []ec2Types.TagSpecification{
+			{
+				ResourceType: ec2Types.ResourceTypeInstance,
+				Tags:         tags,
+			},
+		},
+	}
+
+	output, err := client.Client.RunInstances(context.TODO(), input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to launch EC2 instance: %w", err)
+	}
+
+	if len(output.Instances) == 0 {
+		return nil, fmt.Errorf("RunInstances returned no instances")
+	}
+
+	return getMachineFromAwsInstance(output.Instances[0]), nil
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 The Hanzo Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -128,7 +128,7 @@ func UpdateRecord(id string, record *Record) (bool, error) {
 
 func NewRecord(ctx *context.Context) (*Record, error) {
 	ip := strings.Replace(util.GetIPFromRequest(ctx.Request), ": ", "", -1)
-	action := strings.Replace(ctx.Request.URL.Path, "/api/", "", -1)
+	action := strings.Replace(ctx.Request.URL.Path, "/v1/", "", -1)
 	requestUri := util.FilterQuery(ctx.Request.RequestURI, []string{"accessToken"})
 	if len(requestUri) > 1000 {
 		requestUri = requestUri[0:1000]

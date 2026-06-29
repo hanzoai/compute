@@ -1,4 +1,4 @@
-// Copyright 2024 The Hanzo Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ import (
 	"net/http"
 
 	"github.com/beego/beego/context"
-	iamsdk "github.com/hanzoai/iam-go-sdk/casdoorsdk"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/vm/util"
+	iam "github.com/hanzoai/iam"
 )
 
 type Response struct {

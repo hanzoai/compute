@@ -2,13 +2,12 @@
   "name": "web",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@9.15.0",
   "dependencies": {
     "@ant-design/cssinjs": "^1.12.0",
     "@ant-design/icons": "4.6.2",
     "@craco/craco": "6.4.5",
     "antd": "5.2.3",
-    "@hanzo/iam": "^0.13.1",
+    "@hanzo/iam-js-sdk": "^0.19.1",
     "codemirror": "^5.61.1",
     "craco-less": "2.0.0",
     "guacamole-common-js": "1.4.0-a",
@@ -17,7 +16,6 @@
     "moment": "^2.29.1",
     "qs": "6.10.3",
     "react": "^18.2.0",
-    "react-app-polyfill": "^3.0.0",
     "react-codemirror2": "^7.2.1",
     "react-device-detect": "1.17.0",
     "react-dom": "^18.2.0",
@@ -25,8 +23,7 @@
     "react-i18next": "^11.8.7",
     "react-router-dom": "^5.3.3",
     "react-scripts": "5.0.1",
-    "react-highlight-words": "^0.20.0",
-    "uuid": "^14.0.1"
+    "react-highlight-words": "^0.20.0"
   },
   "scripts": {
     "start": "set PORT=18001 && craco start",
@@ -34,7 +31,7 @@
     "test": "craco test",
     "eject": "craco eject",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
-    "preinstall": "node -e \"if (process.env.npm_execpath.indexOf('pnpm') === -1) throw new Error('Use pnpm for installing: https://pnpm.io/installation')\"",
+    "preinstall": "node -e \"if (process.env.npm_execpath.indexOf('yarn') === -1) throw new Error('Use yarn for installing: https://yarnpkg.com/en/docs/install')\"",
     "fix": "eslint --fix src/**/*.{js,jsx,ts,tsx}",
     "lint:css": "stylelint src/**/*.{css,less} --fix"
   },

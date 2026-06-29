@@ -30,4 +30,6 @@ tmpFiles/
 logs/
 lastupdate.tmp
 commentsRouter*.go
+visor
+casvisor
 .DS_Store

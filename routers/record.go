@@ -1,4 +1,4 @@
-// Copyright 2024 The Hanzo Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 )
 
 func RecordMessage(ctx *context.Context) {
-	if ctx.Request.URL.Path == "/api/login" || ctx.Request.URL.Path == "/api/signup" || ctx.Request.URL.Path == "/api/get-assets" {
+	if ctx.Request.URL.Path == "/v1/login" || ctx.Request.URL.Path == "/v1/signup" || ctx.Request.URL.Path == "/v1/get-assets" {
 		return
 	}
 

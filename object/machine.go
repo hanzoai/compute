@@ -1,4 +1,4 @@
-// Copyright 2024 The Hanzo Authors. All Rights Reserved.
+// Copyright 2024 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ type Machine struct {
 	Category string `xorm:"varchar(100)" json:"category"`
 	Type     string `xorm:"varchar(100)" json:"type"`
 	Size     string `xorm:"varchar(100)" json:"size"`
-	Tag      string `xorm:"varchar(100)" json:"tag"`
+	Tag      string `xorm:"varchar(500)" json:"tag"`
 	State    string `xorm:"varchar(100)" json:"state"`
 
 	Image     string `xorm:"varchar(100)" json:"image"`

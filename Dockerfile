@@ -1,4 +1,4 @@
-FROM casbin/guacd:1.5.4 AS vmd
+FROM guacamole/guacd:1.5.4 as guacd
 FROM node:18.19.0 AS FRONT
 WORKDIR /web
 COPY ./web .
@@ -6,15 +6,23 @@ RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
 
 FROM golang:1.26.4 AS BACK
-WORKDIR /go/src/hanzo-vm
+WORKDIR /go/src/hanzo-visor
 COPY . .
+
+# Per SCALE_STANDARD.md §2 — every Go production Dockerfile that
+# emits JSON to a client builds with GOEXPERIMENT=jsonv2. Verified
+# -12% time / -23% allocs on the edge POST roundtrip vs encoding/json
+# v1 (json_bench_test.go in hanzoai/zip).
+ARG GO_EXPERIMENT=jsonv2
+ENV GOEXPERIMENT=${GO_EXPERIMENT}
+
 RUN chmod +x ./build.sh
 RUN ./build.sh
 
 
 FROM alpine:latest AS STANDARD
-LABEL MAINTAINER="https://github.com/hanzovm/vm"
-ARG USER=vm
+LABEL MAINTAINER="https://hanzo.ai/"
+ARG USER=hanzo-visor
 
 RUN sed -i 's/https/http/' /etc/apk/repositories
 RUN apk add --update sudo
@@ -29,16 +37,16 @@ RUN adduser -D $USER -u 1000 \
 
 USER 1000
 WORKDIR /
-COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-vm/server ./server
-COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-vm/data ./data
-COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-vm/conf/app.conf ./conf/app.conf
+COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/visor ./visor
+COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/data ./data
+COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/conf/app.conf ./conf/app.conf
 COPY --from=FRONT --chown=$USER:$USER /web/build ./web/build
 
-ENTRYPOINT ["/server"]
+ENTRYPOINT ["/visor"]
 
 
-FROM vmd AS ALLINONE
-LABEL MAINTAINER="https://github.com/hanzovm/vm"
+FROM guacd AS ALLINONE
+LABEL MAINTAINER="https://hanzo.ai/"
 
 WORKDIR /
 
@@ -51,10 +59,10 @@ RUN apt-get update \
     && update-ca-certificates  \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=BACK /go/src/hanzo-vm/server ./server
-COPY --from=BACK /go/src/hanzo-vm/data ./data
-COPY --from=BACK /go/src/hanzo-vm/docker-entrypoint.sh /docker-entrypoint.sh
-COPY --from=BACK /go/src/hanzo-vm/conf/app.conf ./conf/app.conf
+COPY --from=BACK /go/src/hanzo-visor/visor ./visor
+COPY --from=BACK /go/src/hanzo-visor/data ./data
+COPY --from=BACK /go/src/hanzo-visor/docker-entrypoint.sh /docker-entrypoint.sh
+COPY --from=BACK /go/src/hanzo-visor/conf/app.conf ./conf/app.conf
 COPY --from=FRONT /web/build ./web/build
 
 EXPOSE 19000

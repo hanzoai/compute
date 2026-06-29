@@ -1,4 +1,4 @@
-// Copyright 2023 The Hanzo Authors. All Rights Reserved.
+// Copyright 2023 Hanzo Industries Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,31 +15,16 @@
 package routers
 
 import (
-	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/beego/beego/context"
-	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/vm/util"
-)
-
-var (
-	oldIamEndpoint     = "https://door.example.com"
-	newIamEndpoint     = conf.GetConfigString("iamEndpoint")
-	oldClientId        = "b108dacba027db36ec26"
-	newClientId        = conf.GetConfigString("clientId")
-	oldIamOrganization = "upstream"
-	newIamOrganization = conf.GetConfigString("iamOrganization")
-	oldIamApplication  = "app-hanzo-vm"
-	newIamApplication  = conf.GetConfigString("iamApplication")
 )
 
 func TransparentStatic(ctx *context.Context) {
 	urlPath := ctx.Request.URL.Path
-	if strings.HasPrefix(urlPath, "/api/") {
+	if strings.HasPrefix(urlPath, "/v1/") {
 		return
 	}
 
@@ -54,34 +39,5 @@ func TransparentStatic(ctx *context.Context) {
 		path = "web/build/index.html"
 	}
 
-	serveFileWithReplace(ctx.ResponseWriter, ctx.Request, path)
-}
-
-func serveFileWithReplace(w http.ResponseWriter, r *http.Request, name string) {
-	f, err := os.Open(filepath.Clean(name))
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	d, err := f.Stat()
-	if err != nil {
-		panic(err)
-	}
-
-	content := util.ReadStringFromPath(name)
-	if oldIamEndpoint != newIamEndpoint {
-		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldIamEndpoint), fmt.Sprintf("\"%s\"", newIamEndpoint))
-	}
-	if oldClientId != newClientId {
-		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldClientId), fmt.Sprintf("\"%s\"", newClientId))
-	}
-	if oldIamOrganization != newIamOrganization {
-		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldIamOrganization), fmt.Sprintf("\"%s\"", newIamOrganization))
-	}
-	if oldIamApplication != newIamApplication {
-		content = strings.ReplaceAll(content, fmt.Sprintf("\"%s\"", oldIamApplication), fmt.Sprintf("\"%s\"", newIamApplication))
-	}
-
-	http.ServeContent(w, r, d.Name(), d.ModTime(), strings.NewReader(content))
+	http.ServeFile(ctx.ResponseWriter, ctx.Request, path)
 }
