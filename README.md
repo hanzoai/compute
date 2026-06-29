@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="visor" width="880"></p>
+
 <h1 align="center" style="border-bottom: none;">Hanzo Visor</h1>
 <h3 align="center">Cloud operating-system management platform (Go + React).</h3>
 
