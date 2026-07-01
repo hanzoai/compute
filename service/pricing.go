@@ -18,15 +18,16 @@ import "math"
 
 // Resell markup — the ONE place Hanzo's compute margin over DigitalOcean's
 // list price is defined. DigitalOcean is the wholesale cost; Hanzo resells at
-// list * markup. GPU compute carries a gentler multiplier (already high
-// absolute cost, thinner competitive margin); everything else uses the base.
+// list * markup. Current policy is a single FLAT markup (+30%) across all SKUs
+// — standard droplets and GPU alike — for one honest, predictable price.
 //
-// Keep this as the single source of truth for compute pricing. If pricing ever
-// needs per-SKU tiers, extend HanzoPrice here — never scatter markups across
-// controllers or the dashboard.
+// Keep this as the single source of truth for compute pricing. The base/GPU
+// split is retained (currently equal) so pricing can return to per-SKU tiers by
+// changing a constant here — never scatter markups across controllers or the
+// dashboard.
 const (
-	resellMarkupBase = 1.40
-	resellMarkupGPU  = 1.25
+	resellMarkupBase = 1.30
+	resellMarkupGPU  = 1.30
 )
 
 // HanzoPrice converts a DigitalOcean list price (USD) into Hanzo's resale
