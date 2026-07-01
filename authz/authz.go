@@ -80,13 +80,16 @@ m = (r.subOwner == p.subOwner || p.subOwner == "*") && (r.subName == p.subName |
 		ruleText := `
 p, built-in, *, *, *, *, *
 p, app, *, *, *, *, *
-p, *, *, POST, /api/signin, *, *
-p, *, *, POST, /api/signout, *, *
-p, *, *, GET, /api/get-account, *, *
-p, *, *, GET, /api/get-asset-tunnel, *, *
-p, *, *, POST, /api/add-asset-tunnel, *, *
-p, *, *, POST, /api/start-session, *, *
-p, *, *, GET, /api/get-whitelabel, *, *
+p, *, *, POST, /v1/signin, *, *
+p, *, *, POST, /v1/signout, *, *
+p, *, *, GET, /v1/get-account, *, *
+p, *, *, GET, /v1/get-asset-tunnel, *, *
+p, *, *, POST, /v1/add-asset-tunnel, *, *
+p, *, *, POST, /v1/start-session, *, *
+p, *, *, GET, /v1/get-whitelabel, *, *
+p, *, *, GET, /v1/regions, *, *
+p, *, *, GET, /v1/sizes, *, *
+p, *, *, GET, /v1/gpus, *, *
 `
 
 		sa := stringadapter.NewAdapter(ruleText)

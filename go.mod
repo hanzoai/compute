@@ -37,6 +37,8 @@ require (
 	xorm.io/xorm v1.3.11
 )
 
+require github.com/hanzoai/commerce/metering v0.1.1-0.20260701031428-81f01202e083
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0 // indirect
