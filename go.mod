@@ -135,5 +135,3 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	xorm.io/builder v0.3.13 // indirect
 )
-
-replace github.com/hanzoai/iam => github.com/hanzoai/iam v1.29.0
