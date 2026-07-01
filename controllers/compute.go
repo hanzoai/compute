@@ -44,7 +44,13 @@ import (
 //
 // Empty result means "no org context" and the caller fails closed.
 func (c *ApiController) resolveComputeOrg() string {
-	if u := c.GetSessionUser(); u != nil && strings.TrimSpace(u.Owner) != "" {
+	// An authenticated principal's org (session or Bearer) is authoritative and
+	// NOT overridable by a client-supplied ?owner. An authenticated user with an
+	// empty Owner claim resolves to "" and the caller fails closed — it does NOT
+	// fall through to ?owner. Only an unauthenticated service/app call (Basic
+	// client-id/secret; no session/Bearer user) may pass ?owner, and ApiFilter
+	// has already authorized it as subOwner=="app".
+	if u := c.GetSessionUser(); u != nil {
 		return strings.TrimSpace(u.Owner)
 	}
 	return strings.TrimSpace(c.Input().Get("owner"))
@@ -255,7 +261,9 @@ func (c *ApiController) LaunchComputeMachine() {
 	defer cancel()
 
 	meter := newMeteringClient(org)
-	firstHourCents := int64(math.Round(si.PriceHourly * 100))
+	// Ceil (never Round) so a sub-cent hourly price still gates on >= 1 cent and
+	// never degrades AmountCents to 0 (which would fall back to the available>0 gate).
+	firstHourCents := int64(math.Ceil(si.PriceHourly * 100))
 
 	// Pre-flight balance gate — fail closed (a paid product does not launch on
 	// an unknown balance) AND require the org can cover at least the first hour,
