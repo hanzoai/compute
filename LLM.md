@@ -41,17 +41,23 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 | POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
 | GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |
 
-- **Auth (IAM-native, per-org):** callers forward an IAM **Bearer JWT**
-  (`object.GetBearerUser`, signature-verified; also bound to `owner ==
-  casdoorOrganization` so a sibling-brand JWKS token can't authenticate, and to
-  `iamIssuer` when set) or a cookie session; `resolveComputeOrg` takes the org
-  from that user's `Owner` claim (spoof-proof, no `?owner` override; empty Owner
-  fails closed). Only an unauthenticated app/service (Basic `clientSecret`) may
-  pass `?owner=`. Catalog GETs are public-read. Isolation is enforced at the DO
-  layer by the `hanzo-org:<org>` tag filter AND Casbin `subOwner==objOwner` —
-  one tenant can never see another's machines. The JWT verify cert is KMS-config
-  (`jwtPublicKeyBase64`); the embedded fallback is a non-cert placeholder so a
-  missing cert fails closed (never trusts a shipped key).
+- **Auth (IAM-native, multi-tenant per-org):** callers forward an IAM **Bearer
+  JWT** (`object.GetBearerUser`, signature-verified) or a cookie session. The
+  token is bound to this **brand by ISSUER** (`iamIssuer`, slash- and
+  comma-list-tolerant via `matchIssuer`; empty fails closed) — a sibling brand's
+  JWKS token (lux.id/zoo.id/pars.id) is rejected — while **every org within the
+  brand is accepted** (`hanzo`, `maxpower`, and every self-service customer), so
+  the surface is truly multi-tenant. `resolveComputeOrg` takes the org from that
+  user's `Owner` claim (spoof-proof, no `?owner` override; empty Owner fails
+  closed). Only an unauthenticated app/service (Basic `clientSecret`) may pass
+  `?owner=`. Catalog GETs are public-read; the machines routes are admitted for
+  any authenticated brand user by `authz.isResellComputePath` (org-scoping is in
+  the controller), so a customer can **list/launch/destroy their OWN** machines,
+  not just browse the catalog. Isolation is enforced at the DO layer by the
+  `hanzo-org:<org>` tag filter AND in the controller — one tenant can never see
+  another's machines. The JWT verify cert is KMS-config (`jwtPublicKeyBase64`);
+  the embedded fallback is a non-cert placeholder so a missing cert fails closed
+  (never trusts a shipped key).
 - **Pricing:** ONE knob in `service/pricing.go` (`HanzoPrice`, base ×1.40, GPU
   ×1.25 over DO list). Wholesale + provider never surfaced (brand policy).
 - **Metering:** canonical `github.com/hanzoai/commerce/metering` (Authorize
