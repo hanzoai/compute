@@ -27,8 +27,35 @@ Plans are seeded on first boot via `SeedDefaultPlans()`. Pricing is in cents (e.
 
 Provider mapping is internal JSON per plan — customers never see backend provider names.
 
+### Resell Compute (canonical `/v1`, house DigitalOcean account)
+The `/v1` resell surface (`service/compute.go`, `controllers/compute.go`) sells
+compute over ONE Hanzo house DO account (distinct from the per-owner BYOC
+Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/v1/regions` | Cached DO regions catalog |
+| GET | `/v1/sizes` | Cached sizes, Hanzo resale price only |
+| GET | `/v1/gpus` | GPU sizes (H100/H200/MI300X/L40S/…), resale-priced |
+| GET | `/v1/machines` | Caller org's machines (DO tag `hanzo-org:<org>`) |
+| POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
+| GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |
+
+- **Auth (IAM-native, per-org):** `resolveComputeOrg` uses the signed-in user's
+  IAM `Owner` claim (spoof-proof); a trusted app/service call may pass `?owner=`.
+  Catalog GETs are public-read. Isolation is enforced at the DO layer by the
+  `hanzo-org:<org>` tag filter — one tenant can never see another's machines.
+- **Pricing:** ONE knob in `service/pricing.go` (`HanzoPrice`, base ×1.40, GPU
+  ×1.25 over DO list). Wholesale + provider never surfaced (brand policy).
+- **Metering:** canonical `github.com/hanzoai/commerce/metering` (Authorize
+  gate + Record debit, per-org, real launches only).
+- **Secrets (KMS-only):** `houseDOToken()` reads env `DIGITALOCEAN_ACCESS_TOKEN`
+  or the KMS-synced `digitalOceanToken` conf key; commerce token from
+  `COMMERCE_SERVICE_TOKEN`. Never hardcoded; absent ⇒ fail closed.
+
 ### Key Dependencies
-- Go 1.24, Beego 1.12, XORM
+- Go 1.26, Beego 1.12, XORM; `github.com/hanzoai/iam` v1.28.12;
+  `github.com/hanzoai/commerce/metering`; `godo` v1.184
 - `hcloud-go/v2` v2.36, `godo` v1.175, `aws-sdk-go-v2/lightsail` v1.20
 - `hanzoid/go-sdk` v1.45 (IAM integration)
 
