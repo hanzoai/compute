@@ -20,6 +20,7 @@ import (
 
 	"github.com/beego/beego/context"
 	"github.com/hanzoai/vm/conf"
+	"github.com/hanzoai/vm/object"
 	"github.com/hanzoai/vm/util"
 	iam "github.com/hanzoai/iam"
 )
@@ -34,7 +35,9 @@ type Response struct {
 func GetSessionUser(ctx *context.Context) *iam.User {
 	s := ctx.Input.Session("user")
 	if s == nil {
-		return nil
+		// No cookie session: accept a forwarded IAM Bearer JWT (API/console
+		// callers). Signature is verified in object.GetBearerUser.
+		return object.GetBearerUser(ctx.Input.Header("Authorization"))
 	}
 
 	claims := s.(iam.Claims)

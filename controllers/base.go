@@ -19,6 +19,7 @@ import (
 
 	"github.com/beego/beego"
 	iam "github.com/hanzoai/iam"
+	"github.com/hanzoai/vm/object"
 )
 
 type ApiController struct {
@@ -69,7 +70,9 @@ func (c *ApiController) SetSessionClaims(claims *iam.Claims) {
 func (c *ApiController) GetSessionUser() *iam.User {
 	claims := c.GetSessionClaims()
 	if claims == nil {
-		return nil
+		// No cookie session: accept a forwarded IAM Bearer JWT (API/console
+		// callers). Signature is verified in object.GetBearerUser.
+		return object.GetBearerUser(c.Ctx.Input.Header("Authorization"))
 	}
 
 	return &claims.User

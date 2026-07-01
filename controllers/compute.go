@@ -255,10 +255,13 @@ func (c *ApiController) LaunchComputeMachine() {
 	defer cancel()
 
 	meter := newMeteringClient(org)
+	firstHourCents := int64(math.Round(si.PriceHourly * 100))
 
 	// Pre-flight balance gate — fail closed (a paid product does not launch on
-	// an unknown balance).
-	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd"}); err != nil {
+	// an unknown balance) AND require the org can cover at least the first hour,
+	// so a near-zero balance can't green-light an expensive GPU (AmountCents
+	// gate, not the bare available>0).
+	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd", AmountCents: firstHourCents}); err != nil {
 		if err == metering.ErrInsufficientBalance {
 			c.ResponseError("insufficient balance to launch machine")
 			return
@@ -275,9 +278,10 @@ func (c *ApiController) LaunchComputeMachine() {
 		return
 	}
 
-	// Debit the first hour of resale price to the org. Ongoing hourly metering
-	// is handled by the billing ticker, not the launch path.
-	firstHourCents := int64(math.Round(si.PriceHourly * 100))
+	// Debit the first hour of resale price to the org. NOTE: ongoing hourly
+	// metering + suspend-on-nonpayment for house droplets is NOT yet wired (the
+	// billing ticker meters node pools only) — tracked as a follow-up; until
+	// then a launched machine is billed once at launch.
 	if _, err := meter.Record(ctx, metering.Usage{
 		User:        org,
 		Actor:       org,
