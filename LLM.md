@@ -41,10 +41,17 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 | POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
 | GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |
 
-- **Auth (IAM-native, per-org):** `resolveComputeOrg` uses the signed-in user's
-  IAM `Owner` claim (spoof-proof); a trusted app/service call may pass `?owner=`.
-  Catalog GETs are public-read. Isolation is enforced at the DO layer by the
-  `hanzo-org:<org>` tag filter — one tenant can never see another's machines.
+- **Auth (IAM-native, per-org):** callers forward an IAM **Bearer JWT**
+  (`object.GetBearerUser`, signature-verified; also bound to `owner ==
+  casdoorOrganization` so a sibling-brand JWKS token can't authenticate, and to
+  `iamIssuer` when set) or a cookie session; `resolveComputeOrg` takes the org
+  from that user's `Owner` claim (spoof-proof, no `?owner` override; empty Owner
+  fails closed). Only an unauthenticated app/service (Basic `clientSecret`) may
+  pass `?owner=`. Catalog GETs are public-read. Isolation is enforced at the DO
+  layer by the `hanzo-org:<org>` tag filter AND Casbin `subOwner==objOwner` —
+  one tenant can never see another's machines. The JWT verify cert is KMS-config
+  (`jwtPublicKeyBase64`); the embedded fallback is a non-cert placeholder so a
+  missing cert fails closed (never trusts a shipped key).
 - **Pricing:** ONE knob in `service/pricing.go` (`HanzoPrice`, base ×1.40, GPU
   ×1.25 over DO list). Wholesale + provider never surfaced (brand policy).
 - **Metering:** canonical `github.com/hanzoai/commerce/metering` (Authorize
