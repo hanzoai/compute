@@ -125,6 +125,18 @@ func IsAllowed(user *iam.User, subOwner string, subName string, method string, u
 			return false
 		}
 
+		// Resell compute surface (catalog + house-account machines) is org-scoped
+		// IN THE CONTROLLER: resolveComputeOrg pins org = user.Owner for real
+		// users (a client-supplied ?owner is ignored), so a maxpower user can only
+		// ever list/launch/destroy maxpower's machines. Any authenticated user of
+		// this brand may therefore reach these routes; cross-org access is
+		// impossible regardless of objOwner. This is what lets a customer see and
+		// manage their OWN machines (not just browse the catalog) without the
+		// request having to carry a matching ?owner for the subOwner==objOwner rule.
+		if isResellComputePath(method, urlPath) {
+			return true
+		}
+
 		if subOwner == objOwner || (objOwner == "admin") {
 			return true
 		}
@@ -136,6 +148,30 @@ func IsAllowed(user *iam.User, subOwner string, subName string, method string, u
 	}
 
 	return res
+}
+
+// isResellComputePath reports whether (method, urlPath) is a resell-compute
+// route whose org-scoping is enforced downstream in the controller
+// (resolveComputeOrg). These are safe to admit for any authenticated user of the
+// brand:
+//
+//	GET    /v1/regions|/v1/sizes|/v1/gpus     catalog (also public-read)
+//	GET    /v1/machines                       list the caller org's machines
+//	POST   /v1/machines/launch                quote (dryRun) or metered launch
+//	GET    /v1/machines/<id>                  get one of the caller org's machines
+//	DELETE /v1/machines/<id>                  destroy one of the caller org's machines
+func isResellComputePath(method string, urlPath string) bool {
+	switch urlPath {
+	case "/v1/regions", "/v1/sizes", "/v1/gpus", "/v1/machines":
+		return method == "GET"
+	case "/v1/machines/launch":
+		return method == "POST"
+	}
+	// /v1/machines/<id> — get or destroy a specific machine.
+	if strings.HasPrefix(urlPath, "/v1/machines/") {
+		return method == "GET" || method == "DELETE"
+	}
+	return false
 }
 
 func isAllowedInDemoMode(method string, urlPath string) bool {
