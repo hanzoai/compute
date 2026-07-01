@@ -261,9 +261,7 @@ func (c *ApiController) LaunchComputeMachine() {
 	defer cancel()
 
 	meter := newMeteringClient(org)
-	// Ceil (never Round) so a sub-cent hourly price still gates on >= 1 cent and
-	// never degrades AmountCents to 0 (which would fall back to the available>0 gate).
-	firstHourCents := int64(math.Ceil(si.PriceHourly * 100))
+	firstHourCents := priceToCents(si.PriceHourly)
 
 	// Pre-flight balance gate — fail closed (a paid product does not launch on
 	// an unknown balance) AND require the org can cover at least the first hour,
@@ -308,6 +306,18 @@ func (c *ApiController) LaunchComputeMachine() {
 	}
 
 	c.ResponseOk(map[string]interface{}{"machine": machine, "quote": quote})
+}
+
+// priceToCents converts a USD price to whole cents for billing. It Ceils (a
+// paid product never under-gates or under-charges) but subtracts a 1e-9 epsilon
+// first so float64 overshoot on a whole-cent price (0.07*100 = 7.00000000000000089)
+// does not round up to 8. A true sub-cent price still ceils to >= 1; a $0 price
+// yields 0 (free, no gate).
+func priceToCents(price float64) int64 {
+	if price <= 0 {
+		return 0
+	}
+	return int64(math.Ceil(price*100 - 1e-9))
 }
 
 // newMeteringClient builds the commerce metering client for an org. The commerce
