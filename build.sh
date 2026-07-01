@@ -1,11 +1,15 @@
 #!/bin/bash
-#try to connect to google to determine whether user need to use proxy
-curl www.google.com -o /dev/null --connect-timeout 5 2> /dev/null
-if [ $? == 0 ]
-then
-    echo "Successfully connected to Google, no need to use Go proxy"
-else
-    echo "Google is blocked, Go proxy is enabled: GOPROXY=https://goproxy.cn,direct"
-    export GOPROXY="https://goproxy.cn,direct"
+set -e
+
+# Private Hanzo modules (e.g. github.com/hanzoai/commerce/metering) live in
+# private repos; go-mod's direct git fetch is authenticated with the BuildKit
+# secret GIT_AUTH_TOKEN, mounted at /run/secrets/GIT_AUTH_TOKEN by the Dockerfile
+# (RUN --mount=type=secret,id=GIT_AUTH_TOKEN). GOPRIVATE routes those modules
+# direct-to-git (never through a public proxy).
+export GOPRIVATE="github.com/hanzoai,github.com/luxfi,github.com/zooai,github.com/zenlm,github.com/parsdao,github.com/adnexustech"
+if [ -f /run/secrets/GIT_AUTH_TOKEN ]; then
+  git config --global url."https://x-access-token:$(cat /run/secrets/GIT_AUTH_TOKEN)@github.com/".insteadOf "https://github.com/"
 fi
+export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
+
 CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-w -s" -o visor .

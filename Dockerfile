@@ -17,7 +17,7 @@ ARG GO_EXPERIMENT=jsonv2
 ENV GOEXPERIMENT=${GO_EXPERIMENT}
 
 RUN chmod +x ./build.sh
-RUN ./build.sh
+RUN --mount=type=secret,id=GIT_AUTH_TOKEN ./build.sh
 
 
 FROM alpine:latest AS STANDARD
