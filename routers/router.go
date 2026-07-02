@@ -63,6 +63,11 @@ func initAPI() {
 	beego.Router("/v1/delete-machine", &controllers.ApiController{}, "POST:DeleteMachine")
 	beego.Router("/v1/launch-machine", &controllers.ApiController{}, "POST:LaunchMachine")
 
+	beego.Router("/v1/machines/:id/bind-agent", &controllers.ApiController{}, "POST:BindAgent")
+	beego.Router("/v1/machines/:id/agent-binding", &controllers.ApiController{}, "GET:GetAgentBinding")
+	beego.Router("/v1/machines/:id/agent-binding", &controllers.ApiController{}, "DELETE:UnbindAgent")
+	beego.Router("/v1/agent-bindings", &controllers.ApiController{}, "GET:GetAgentBindings")
+
 	beego.Router("/v1/get-sessions", &controllers.ApiController{}, "GET:GetSessions")
 	beego.Router("/v1/get-session", &controllers.ApiController{}, "GET:GetConnSession")
 	beego.Router("/v1/update-session", &controllers.ApiController{}, "POST:UpdateSession")
