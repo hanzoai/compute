@@ -73,6 +73,7 @@ func initAPI() {
 	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "GET:GetComputeMachine")
 	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "DELETE:DeleteComputeMachine")
 	beego.Router("/v1/fleet", &controllers.ApiController{}, "POST:LaunchFleet")
+	beego.Router("/v1/images", &controllers.ApiController{}, "get:ListImages;post:CreateImage")
 	beego.Router("/v1/fleets", &controllers.ApiController{}, "GET:ListFleets")
 	beego.Router("/v1/fleet/:name/scale", &controllers.ApiController{}, "POST:ScaleFleet")
 	beego.Router("/v1/fleet/:name", &controllers.ApiController{}, "GET:GetFleet")

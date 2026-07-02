@@ -168,9 +168,17 @@ func (client MachineDigitalOceanClient) CreateMachine(spec *CreateMachineSpec) (
 		size = "s-2vcpu-4gb"
 	}
 
+	// Image: a numeric ImageID is a custom/user image (select by ID); anything
+	// else is a distribution/application slug. Empty defaults to Ubuntu LTS.
 	image := spec.ImageID
-	if image == "" {
-		image = "ubuntu-24-04-x64"
+	var createImage godo.DropletCreateImage
+	if id, err := strconv.Atoi(image); err == nil && id > 0 {
+		createImage = godo.DropletCreateImage{ID: id}
+	} else {
+		if image == "" {
+			image = "ubuntu-24-04-x64"
+		}
+		createImage = godo.DropletCreateImage{Slug: image}
 	}
 
 	tags := buildDropletTags(spec)
@@ -186,7 +194,7 @@ func (client MachineDigitalOceanClient) CreateMachine(spec *CreateMachineSpec) (
 		Name:     spec.Name,
 		Region:   region,
 		Size:     size,
-		Image:    godo.DropletCreateImage{Slug: image},
+		Image:    createImage,
 		Tags:     tags,
 		UserData: buildBotUserData(spec),
 		SSHKeys:  sshKeys,
