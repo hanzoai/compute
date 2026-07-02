@@ -27,7 +27,7 @@ ENV GOEXPERIMENT=${GO_EXPERIMENT}
 ARG TARGETOS TARGETARCH
 
 RUN chmod +x ./build.sh
-RUN --mount=type=secret,id=GIT_AUTH_TOKEN ./build.sh
+RUN --mount=type=secret,id=gh_token ./build.sh
 
 
 FROM ghcr.io/hanzoai/alpine:3.22 AS STANDARD
