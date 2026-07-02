@@ -24,8 +24,6 @@ package controllers
 import (
 	"context"
 	"encoding/json"
-	"math"
-	"os"
 	"strings"
 	"time"
 
@@ -260,8 +258,8 @@ func (c *ApiController) LaunchComputeMachine() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	meter := newMeteringClient(org)
-	firstHourCents := priceToCents(si.PriceHourly)
+	meter := service.NewMeteringClient(org)
+	firstHourCents := service.PriceToCents(si.PriceHourly)
 
 	// Pre-flight balance gate — fail closed (a paid product does not launch on
 	// an unknown balance) AND require the org can cover at least the first hour,
@@ -284,17 +282,23 @@ func (c *ApiController) LaunchComputeMachine() {
 		return
 	}
 
-	// Debit the first hour of resale price to the org. NOTE: ongoing hourly
-	// metering + suspend-on-nonpayment for house droplets is NOT yet wired (the
-	// billing ticker meters node pools only) — tracked as a follow-up; until
-	// then a launched machine is billed once at launch.
+	// Debit the FIRST hour of resale price to the org at launch. Every SUBSEQUENT
+	// hour a running machine stays up is debited by service.MeterRunningMachines
+	// (the hourly ticker) on the SAME commerce/metering path — so a bound machine
+	// keeps drawing down the org's balance. The launch owns the LAUNCH hour; the
+	// recurring sweep explicitly SKIPS a machine whose create time is in the
+	// current hour (service.meterMachines/createdInHour), so launch + a sweep
+	// landing in the same clock hour never double-bill that hour. (Commerce does
+	// not dedup on requestId, so this skip — not the requestId — is what prevents
+	// the overlap; cross-replica overlap is prevented by the ticker's per-hour
+	// single-flight lease.)
 	if _, err := meter.Record(ctx, metering.Usage{
 		User:        org,
 		Actor:       org,
 		Org:         org,
 		Currency:    "usd",
 		AmountCents: firstHourCents,
-		Provider:    "digitalocean",
+		Provider:    "compute",
 		Model:       size,
 		Status:      "launched",
 		RequestID:   machine.Id,
@@ -306,36 +310,4 @@ func (c *ApiController) LaunchComputeMachine() {
 	}
 
 	c.ResponseOk(map[string]interface{}{"machine": machine, "quote": quote})
-}
-
-// priceToCents converts a USD price to whole cents for billing. It Ceils (a
-// paid product never under-gates or under-charges) but subtracts a 1e-9 epsilon
-// first so float64 overshoot on a whole-cent price (0.07*100 = 7.00000000000000089)
-// does not round up to 8. A true sub-cent price still ceils to >= 1; a $0 price
-// yields 0 (free, no gate).
-func priceToCents(price float64) int64 {
-	if price <= 0 {
-		return 0
-	}
-	return int64(math.Ceil(price*100 - 1e-9))
-}
-
-// newMeteringClient builds the commerce metering client for an org. The commerce
-// base URL and the admin-scoped service token both come from the environment
-// (the operator wires the token from KMS as COMMERCE_SERVICE_TOKEN). When the
-// token is absent the client fails closed on Authorize, so real launches are
-// denied while quotes still work.
-func newMeteringClient(org string) *metering.Client {
-	base := strings.TrimSpace(os.Getenv("COMMERCE_URL"))
-	if base == "" {
-		base = "http://commerce.hanzo.svc.cluster.local:8001"
-	}
-	client, _ := metering.New(metering.Config{
-		BaseURL:   base,
-		Token:     strings.TrimSpace(os.Getenv("COMMERCE_SERVICE_TOKEN")),
-		Org:       org,
-		TierAware: true,
-		Timeout:   5 * time.Second,
-	})
-	return client
 }

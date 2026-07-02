@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/digitalocean/godo"
 	"golang.org/x/oauth2"
@@ -47,6 +48,7 @@ func getMachineFromDroplet(droplet godo.Droplet) *Machine {
 		Name:        strconv.Itoa(droplet.ID),
 		Id:          strconv.Itoa(droplet.ID),
 		DisplayName: droplet.Name,
+		CreatedTime: droplet.Created, // DO's RFC3339 create time — the launch-hour boundary the meter must not re-bill.
 		Region:      droplet.Region.Slug,
 		Size:        droplet.Size.Slug,
 		Image:       droplet.Image.Slug,
@@ -216,10 +218,14 @@ func (client MachineDigitalOceanClient) DeleteMachine(name string) error {
 func buildDropletTags(spec *CreateMachineSpec) []string {
 	tags := []string{"managed-by:hanzo-visor"}
 
-	if spec.DisplayName != "" {
+	// display-name/os are client-controlled too, so they get the SAME read-back
+	// guard as free-form tags: a value with a "," / ":" could smuggle a second
+	// hanzo-org token that orgFromTag would pick up. Drop it rather than emit an
+	// unparseable tag.
+	if spec.DisplayName != "" && safeTagField(spec.DisplayName) {
 		tags = append(tags, fmt.Sprintf("display-name:%s", spec.DisplayName))
 	}
-	if spec.OS != "" {
+	if spec.OS != "" && safeTagField(spec.OS) {
 		tags = append(tags, fmt.Sprintf("os:%s", spec.OS))
 	}
 
@@ -229,10 +235,37 @@ func buildDropletTags(spec *CreateMachineSpec) []string {
 		if len(k) > 4 && k[:4] == "env:" {
 			continue
 		}
+		// The hanzo-org tag is the BILLING ATTRIBUTION key: the hourly meter reads
+		// it back from the droplet to decide which org to debit. A client must
+		// never be able to set/forge/duplicate it. LaunchOrgMachine injects the
+		// authoritative value under the map key, but a value carrying the meter's
+		// "," separator (or a second "hanzo-org:" token) could smuggle a duplicate
+		// attribution token that orgFromTag would pick up on read-back. Drop the
+		// reserved key from client input and refuse any tag whose key/value could
+		// break the read-back parse — deterministic, not reliant on DO's own tag
+		// validation.
+		if k == orgTagKey || !safeTagField(k) || !safeTagField(v) {
+			continue
+		}
 		tags = append(tags, fmt.Sprintf("%s:%s", k, v))
 	}
 
+	// Attribution tag last, from the authoritative injected value, AFTER the
+	// client loop dropped any client attempt — so exactly one hanzo-org token
+	// exists and it is the server-resolved org.
+	if org, ok := spec.Tags[orgTagKey]; ok {
+		tags = append(tags, fmt.Sprintf("%s:%s", orgTagKey, org))
+	}
+
 	return tags
+}
+
+// safeTagField rejects a tag key/value that could corrupt the comma-joined tag
+// read-back the hourly meter parses (getMachineFromDroplet joins with "," and
+// orgFromTag splits on ","). A "," would fabricate a tag boundary; a ":" in a
+// value could fabricate a "key:value" pair. Empty is fine (dropped upstream).
+func safeTagField(s string) bool {
+	return !strings.ContainsAny(s, ",:")
 }
 
 // buildBotUserData generates a cloud-init script that installs @hanzo/bot

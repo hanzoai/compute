@@ -82,6 +82,84 @@ func TestSizeInfoFromDO_GPU(t *testing.T) {
 	}
 }
 
+// TestBuildDropletTags_AttributionUnforgeable proves a tenant cannot forge,
+// strip, or DUPLICATE the hanzo-org billing-attribution tag through the launch
+// body: the authoritative org (injected by LaunchOrgMachine under the reserved
+// map key) is the ONLY hanzo-org token emitted, and any client tag that could
+// smuggle a second attribution token via the meter's "," / ":" separators is
+// dropped — so orgFromTag reads back exactly the server-resolved org.
+func TestBuildDropletTags_AttributionUnforgeable(t *testing.T) {
+	// Simulates the post-LaunchOrgMachine state: server has set the reserved key,
+	// client tried to smuggle a second attribution token and to override the key.
+	spec := &CreateMachineSpec{Tags: map[string]string{
+		orgTagKey:  "acme",                    // authoritative (LaunchOrgMachine overwrote any client value)
+		"note":     "y,hanzo-org:victim",      // comma-smuggle a 2nd attribution token -> must be DROPPED
+		"role":     "svc:admin",               // colon-smuggle a fake key:value -> must be DROPPED
+		"team":     "platform",                // clean -> kept
+		"env:PORT": "8080",                     // env: prefix -> not a DO tag (cloud-init only)
+	}}
+	tags := buildDropletTags(spec)
+
+	joined := ""
+	orgCount := 0
+	for _, tg := range tags {
+		joined += tg + ","
+		if len(tg) >= len(orgTagKey)+1 && tg[:len(orgTagKey)+1] == orgTagKey+":" {
+			orgCount++
+		}
+	}
+	if orgCount != 1 {
+		t.Fatalf("expected exactly one hanzo-org token, got %d in %v", orgCount, tags)
+	}
+	if got := orgFromTag(joined); got != "acme" {
+		t.Fatalf("orgFromTag read back %q, want acme (attribution must be the server org) — tags=%v", got, tags)
+	}
+	for _, tg := range tags {
+		if tg == "note:y,hanzo-org:victim" || tg == "role:svc:admin" || tg == "env:PORT:8080" {
+			t.Fatalf("unsafe/smuggling tag was not dropped: %q in %v", tg, tags)
+		}
+		if tg == "team:platform" {
+			// clean tag preserved — good
+		}
+	}
+}
+
+// display-name and os are also client-controlled; a smuggled attribution token
+// there must not survive the read-back either.
+func TestBuildDropletTags_DisplayNameOSCannotSmuggle(t *testing.T) {
+	spec := &CreateMachineSpec{
+		DisplayName: "box,hanzo-org:victim",
+		OS:          "ubuntu:hanzo-org:victim",
+		Tags:        map[string]string{orgTagKey: "acme"},
+	}
+	tags := buildDropletTags(spec)
+	joined := ""
+	for _, tg := range tags {
+		joined += tg + ","
+		if tg == "display-name:box,hanzo-org:victim" || tg == "os:ubuntu:hanzo-org:victim" {
+			t.Fatalf("smuggling display-name/os tag emitted: %q", tg)
+		}
+	}
+	if got := orgFromTag(joined); got != "acme" {
+		t.Fatalf("orgFromTag = %q, want acme (display-name/os must not smuggle attribution)", got)
+	}
+}
+
+func TestValidOrgSlug(t *testing.T) {
+	ok := []string{"acme", "max-power", "hanzo", "a", "org123"}
+	bad := []string{"", "  ", "acme,evil", "acme:evil", "has space", "hanzo-org:victim", "a\tb"}
+	for _, s := range ok {
+		if !validOrgSlug(s) {
+			t.Fatalf("validOrgSlug(%q) = false, want true", s)
+		}
+	}
+	for _, s := range bad {
+		if validOrgSlug(s) {
+			t.Fatalf("validOrgSlug(%q) = true, want false (billing key / tag must be a clean slug)", s)
+		}
+	}
+}
+
 // TestOrgIsolationPredicate proves the per-tenant isolation invariant: a droplet
 // tagged for one org is visible ONLY to that org. This is the security boundary
 // RED must verify end-to-end; here it is asserted at the data layer.
