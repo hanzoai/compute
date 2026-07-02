@@ -28,6 +28,11 @@ func TestIsResellComputePath(t *testing.T) {
 		{"POST", "/v1/machines/launch"},
 		{"GET", "/v1/machines/abc-123"},
 		{"DELETE", "/v1/machines/abc-123"},
+		// Agent↔machine binding surface.
+		{"GET", "/v1/agent-bindings"},
+		{"GET", "/v1/machines/abc-123/agent-binding"},
+		{"DELETE", "/v1/machines/abc-123/agent-binding"},
+		{"POST", "/v1/machines/abc-123/bind-agent"},
 	}
 	for _, c := range allow {
 		if !isResellComputePath(c.method, c.path) {
@@ -42,7 +47,12 @@ func TestIsResellComputePath(t *testing.T) {
 		{"GET", "/v1/plans"},              // not a resell-compute route
 		{"POST", "/v1/start-session"},     // legacy surface, gated separately
 		{"GET", "/v1/get-account"},
-		{"PUT", "/v1/machines/abc-123"}, // only GET/DELETE by id
+		{"PUT", "/v1/machines/abc-123"},                // only GET/DELETE by id
+		{"POST", "/v1/machines/abc-123"},               // no blanket POST by id
+		{"POST", "/v1/machines/abc-123/agent-binding"}, // agent-binding is GET/DELETE only
+		{"PUT", "/v1/machines/abc-123/bind-agent"},     // bind-agent is POST only
+		{"POST", "/v1/agent-bindings"},                 // bindings list is read-only
+		{"DELETE", "/v1/agent-bindings"},               // bindings list is read-only
 	}
 	for _, c := range deny {
 		if isResellComputePath(c.method, c.path) {
