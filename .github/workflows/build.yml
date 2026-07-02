@@ -14,9 +14,10 @@ jobs:
     with:
       image: ghcr.io/hanzoai/visor
       target: STANDARD
-      platforms: linux/amd64,linux/arm64
-      # runner labels are JSON-array STRINGS (shared workflow decodes via fromJson).
-      # amd64 → the working K8s ARC label (cloud uses this); arm64 → spark's arcd.
+      # amd64-only: DOKS has no arm64 droplets (no deploy target) and no arm64
+      # build runner is currently online, so a queued arm64 job would block the
+      # manifest/deploy jobs. Matches the cloud + kms callers. Re-add
+      # linux/arm64 when an arm64 target + runner exist.
+      platforms: linux/amd64
       runner-amd64: '["hanzo-build-linux-amd64"]'
-      runner-arm64: '["self-hosted","linux","arm64"]'
     secrets: inherit
