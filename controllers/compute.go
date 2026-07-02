@@ -282,6 +282,11 @@ func (c *ApiController) LaunchComputeMachine() {
 		return
 	}
 
+	// Roll a launched event into the analytics datastore (best-effort; never
+	// blocks or fails the launch) - the analytical mirror of the commerce
+	// debit below.
+	service.EmitCompute(org, service.ComputeLaunched, machine, firstHourCents)
+
 	// Debit the FIRST hour of resale price to the org at launch. Every SUBSEQUENT
 	// hour a running machine stays up is debited by service.MeterRunningMachines
 	// (the hourly ticker) on the SAME commerce/metering path — so a bound machine

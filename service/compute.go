@@ -389,6 +389,10 @@ func DeleteOrgMachine(org, id string) error {
 	if _, err := client.Client.Droplets.Delete(context.Background(), dropletID); err != nil {
 		return fmt.Errorf("delete droplet %s: %w", id, err)
 	}
+	// Roll a destroyed event into the analytics datastore (best-effort; never
+	// blocks or fails the delete). m is the ownership-checked machine, so its
+	// size and app/project tags are available.
+	EmitCompute(org, ComputeDestroyed, m, 0)
 	return nil
 }
 

@@ -192,6 +192,9 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			continue
 		}
 		metered++
+		// Roll a running event into the analytics datastore alongside this
+		// hour's debit (best-effort; never blocks or affects the sweep).
+		EmitCompute(org, ComputeRunning, m, cents)
 	}
 	return metered, skipped
 }
@@ -200,13 +203,4 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 // (as getMachineFromDroplet builds it): the value after "hanzo-org:". Empty when
 // the machine carries no org tag — such a machine is unattributable and is
 // skipped rather than billed to a wrong tenant.
-func orgFromTag(tags string) string {
-	want := orgTagKey + ":"
-	for _, t := range strings.Split(tags, ",") {
-		t = strings.TrimSpace(t)
-		if strings.HasPrefix(t, want) {
-			return strings.TrimPrefix(t, want)
-		}
-	}
-	return ""
-}
+func orgFromTag(tags string) string { return tagValue(tags, orgTagKey) }
