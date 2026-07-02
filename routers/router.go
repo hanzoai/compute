@@ -73,6 +73,13 @@ func initAPI() {
 	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "GET:GetComputeMachine")
 	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "DELETE:DeleteComputeMachine")
 
+	// Agent↔machine binding — mark a machine as running the @hanzo/bot runtime for
+	// a cloud Agent (controllers/agent_binding.go). Org-scoped in the controller.
+	beego.Router("/v1/machines/:id/bind-agent", &controllers.ApiController{}, "POST:BindAgent")
+	beego.Router("/v1/machines/:id/agent-binding", &controllers.ApiController{}, "GET:GetAgentBinding")
+	beego.Router("/v1/machines/:id/agent-binding", &controllers.ApiController{}, "DELETE:UnbindAgent")
+	beego.Router("/v1/agent-bindings", &controllers.ApiController{}, "GET:GetAgentBindings")
+
 	beego.Router("/v1/get-sessions", &controllers.ApiController{}, "GET:GetSessions")
 	beego.Router("/v1/get-session", &controllers.ApiController{}, "GET:GetConnSession")
 	beego.Router("/v1/update-session", &controllers.ApiController{}, "POST:UpdateSession")
