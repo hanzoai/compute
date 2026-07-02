@@ -294,6 +294,50 @@ func ListOrgMachines(org string) ([]*Machine, error) {
 	return machines, nil
 }
 
+// ListRunningHouseMachines returns every RUNNING droplet in Hanzo's house
+// account that carries a hanzo-org tag — the set the recurring hourly meter
+// debits. It lists across ALL orgs (no per-org tag filter): the org is recovered
+// per machine from its own tag, so ONE sweep meters every tenant's running
+// machines. Untagged/non-resell droplets (no hanzo-org tag) are excluded, so a
+// non-resell house droplet is never billed to a tenant. Only "Running" machines
+// are returned — a stopped droplet consumes no compute-hour.
+func ListRunningHouseMachines() ([]*Machine, error) {
+	client, err := newHouseDOClient()
+	if err != nil {
+		return nil, err
+	}
+	orgPrefix := orgTagKey + ":"
+	var machines []*Machine
+	opt := &godo.ListOptions{Page: 1, PerPage: 200}
+	for {
+		droplets, resp, err := client.Client.Droplets.List(context.Background(), opt)
+		if err != nil {
+			return nil, fmt.Errorf("list house droplets: %w", err)
+		}
+		for _, d := range droplets {
+			if d.Status != "active" { // godo "active" == running
+				continue
+			}
+			hasOrg := false
+			for _, t := range d.Tags {
+				if strings.HasPrefix(t, orgPrefix) {
+					hasOrg = true
+					break
+				}
+			}
+			if !hasOrg {
+				continue // not a resell machine — never bill it to a tenant
+			}
+			machines = append(machines, getMachineFromDroplet(d))
+		}
+		if resp.Links == nil || resp.Links.IsLastPage() {
+			break
+		}
+		opt.Page++
+	}
+	return machines, nil
+}
+
 func dropletHasOrgTag(d *godo.Droplet, org string) bool {
 	want := orgTag(org)
 	for _, t := range d.Tags {
