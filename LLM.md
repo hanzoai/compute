@@ -96,3 +96,45 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 ## Brand Policy
 Never expose upstream provider names (Hetzner, Lightsail, DO) in public-facing APIs or UI.
 Provider mapping is internal only (`ProviderMapping` JSON field on Plan objects).
+
+## CI / Build & Registry (state as of consolidation)
+
+vm is the consolidated Casvisor fork (visor archived; content adopted under the
+`vm` repo name + module `github.com/hanzoai/vm`). Default branch is `main`
+(master/master_old deleted; nothing lost — the flat-1.30× pricing commit was
+cherry-picked in). Image published as `ghcr.io/hanzoai/visor`.
+
+### Build pipeline
+`.github/workflows/build.yml` calls the shared `hanzoai/.github` docker-build
+workflow. Native per-arch build (no QEMU): amd64 on the `hanzo-build-linux-amd64`
+runner, arm64 on spark's arcd (`self-hosted,linux,arm64`); a multi-arch manifest
+is composed from the per-arch tags. `build.sh` cross-compiles via
+`GOOS=linux GOARCH=${TARGETARCH}` (CGO_ENABLED=0), so each arch builds natively.
+Requires `id-token: write` (cosign/SBOM), else the reusable workflow fails at
+startup.
+
+### Base images — ghcr.io/hanzoai/* (NOT Docker Hub / ECR)
+The Dockerfile pulls golang/node/alpine/guacd from `ghcr.io/hanzoai/*` (mirrored
+there; alpine variants, small/reliable). Docker Hub is rate-limited (429) for
+the shared-egress runners; ECR is not used (not ours).
+
+**OPEN — build is RED until these 4 packages are made public:**
+`golang`, `node`, `alpine`, `guacd` under github.com/orgs/hanzoai/packages →
+each → Package settings → Change visibility → Public. The shared workflow logs
+into ghcr with `GITHUB_TOKEN`, which cannot pull *cross-repo private* packages
+(403 on `FROM ghcr.io/hanzoai/golang`). Making them public fixes it; then
+re-run the build and both arches go green. (Flipping visibility needs a
+packages-scoped token / the org web UI — not doable from the build host.)
+
+### Preferred future: registry.hanzo.ai + platform.hanzo.ai (off GitHub)
+Directive: build on our own platform, images in our own registry, not GitHub.
+- `registry.hanzo.ai` = Docker registry with IAM-backed token auth
+  (`realm=https://iam.hanzo.ai/v1/iam/registry/token`). Push needs an IAM admin
+  user OR the `hanzo-registry` IAM **application** client_id:client_secret
+  (the machine/CI path, distributed via KMS — see
+  `iam/controllers/registry_token.go`). No anonymous pull today.
+- `platform.hanzo.ai` (dokploy fork) has docker-file/nixpacks/paketo builders
+  and can build vm from its Dockerfile → push registry.hanzo.ai → deploy DOKS,
+  removing GitHub Actions from the loop.
+- To wire this: provide the `hanzo-registry` app credential (or a KMS service
+  token), then register vm as a platform app. Blocked on that credential.
