@@ -39,6 +39,11 @@ func InitConfig() {
 
 func InitAdapter() {
 	adapter = NewAdapter(conf.GetConfigString("driverName"), conf.GetConfigDataSourceName())
+
+	// Install the process-wide engine provider (postgres by default; per-org
+	// Base SQLite when storageBackend=base). Additive: the Postgres engine
+	// above is always opened and remains the live query path.
+	InitStore()
 }
 
 // Adapter represents the database adapter for policy storage.
@@ -136,54 +141,12 @@ func (a *Adapter) close() {
 }
 
 func (a *Adapter) createTable() {
-	err := a.engine.Sync2(new(Asset))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(Provider))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(Machine))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(Record))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(Session))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(NodePool))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(Plan))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(Volume))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(AgentBinding))
-	if err != nil {
-		panic(err)
-	}
-
-	err = a.engine.Sync2(new(MeterLease))
-	if err != nil {
-		panic(err)
+	// models() is the single table registry, shared with the Base backend and
+	// the Postgres->Base migration. Same DDL, one source of truth.
+	for _, m := range models() {
+		if err := a.engine.Sync2(m); err != nil {
+			panic(err)
+		}
 	}
 }
 
