@@ -22,7 +22,7 @@ import (
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
 	"github.com/hanzoai/authzstore"
 	iam "github.com/hanzoai/iam"
-	"github.com/hanzoai/vm/conf"
+	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/xorm"
 )
 

@@ -20,11 +20,11 @@ import (
 	"time"
 
 	"github.com/beego/beego/logs"
-	"github.com/hanzoai/vm/autoscaler"
-	"github.com/hanzoai/vm/billing"
-	"github.com/hanzoai/vm/conf"
-	"github.com/hanzoai/vm/object"
-	"github.com/hanzoai/vm/service"
+	"github.com/hanzoai/visor/autoscaler"
+	"github.com/hanzoai/visor/billing"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/service"
 )
 
 type Ticker struct{}

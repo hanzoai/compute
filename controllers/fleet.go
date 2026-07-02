@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/vm/service"
+	"github.com/hanzoai/visor/service"
 )
 
 const fleetSep = "-"

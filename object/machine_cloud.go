@@ -17,7 +17,7 @@ package object
 import (
 	"fmt"
 
-	"github.com/hanzoai/vm/service"
+	"github.com/hanzoai/visor/service"
 )
 
 func getMachineFromService(owner string, provider string, clientMachine *service.Machine) *Machine {

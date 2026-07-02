@@ -17,7 +17,7 @@ package i18n
 import (
 	"fmt"
 
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/util"
 )
 
 func getI18nFilePath(language string) string {

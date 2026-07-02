@@ -20,8 +20,8 @@ import (
 	"strings"
 
 	"github.com/beego/beego/context"
-	"github.com/hanzoai/vm/conf"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/util"
 )
 
 var logPostOnly bool

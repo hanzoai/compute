@@ -18,8 +18,8 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/hanzoai/vm/util"
-	"github.com/hanzoai/vm/util/guacamole"
+	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/visor/util/guacamole"
 	"xorm.io/core"
 )
 

@@ -20,8 +20,8 @@ import (
 	"net/http"
 
 	"github.com/beego/beego/context"
-	"github.com/hanzoai/vm/authz"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/authz"
+	"github.com/hanzoai/visor/util"
 )
 
 type Object struct {

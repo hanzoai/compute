@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/hanzoai/vm/object"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/util"
 )
 
 // bindAgentRequest is the `POST /v1/machines/:id/bind-agent` body.

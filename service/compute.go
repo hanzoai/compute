@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"github.com/digitalocean/godo"
-	"github.com/hanzoai/vm/conf"
+	"github.com/hanzoai/visor/conf"
 )
 
 // orgTagKey/orgTag namespace droplets by the Hanzo org that owns them. Per-org

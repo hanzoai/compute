@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hanzoai/vm/service"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/visor/util"
 	"xorm.io/core"
 )
 

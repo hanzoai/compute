@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	"github.com/beego/beego/context"
-	"github.com/hanzoai/vm/object"
+	"github.com/hanzoai/visor/object"
 )
 
 const (

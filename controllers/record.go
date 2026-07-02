@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 
 	"github.com/beego/beego/utils/pagination"
-	"github.com/hanzoai/vm/object"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/util"
 )
 
 // GetRecords
