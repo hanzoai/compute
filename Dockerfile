@@ -1,11 +1,16 @@
-FROM guacamole/guacd:1.5.4 as guacd
-FROM public.ecr.aws/docker/library/node:18.19.0 AS FRONT
+FROM ghcr.io/hanzoai/guacd:1.5.4 as guacd
+
+FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/node:18.19.0-alpine AS FRONT
 WORKDIR /web
+# alpine node build toolchain for any node-gyp native deps in `yarn install`
+RUN apk add --no-cache python3 make g++ libc6-compat
 COPY ./web .
 RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
 
-FROM public.ecr.aws/docker/library/golang:1.26.4 AS BACK
+FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/golang:1.26-alpine AS BACK
+# build.sh is #!/bin/bash and fetches private modules over git (GOPRIVATE direct)
+RUN apk add --no-cache bash git
 WORKDIR /go/src/hanzo-visor
 COPY . .
 
@@ -16,11 +21,16 @@ COPY . .
 ARG GO_EXPERIMENT=jsonv2
 ENV GOEXPERIMENT=${GO_EXPERIMENT}
 
+# buildx sets TARGETOS/TARGETARCH per target platform; build.sh compiles to it.
+# Each arch is built on its native runner (amd64=evo, arm64=spark), so this is a
+# native compile per platform — no QEMU.
+ARG TARGETOS TARGETARCH
+
 RUN chmod +x ./build.sh
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN ./build.sh
 
 
-FROM public.ecr.aws/docker/library/alpine:latest AS STANDARD
+FROM ghcr.io/hanzoai/alpine:3.22 AS STANDARD
 LABEL MAINTAINER="https://hanzo.ai/"
 ARG USER=hanzo-visor
 
