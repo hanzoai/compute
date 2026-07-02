@@ -59,7 +59,13 @@ type FleetMember struct {
 }
 
 func memberOf(m *service.Machine) FleetMember {
-	return FleetMember{Name: m.Name, Id: m.Id, State: m.State, PublicIp: m.PublicIp}
+	// The fleet member name ("<fleet>-NNN") is the droplet name, stored as
+	// DisplayName; Machine.Name is the numeric droplet id.
+	name := m.DisplayName
+	if name == "" {
+		name = m.Name
+	}
+	return FleetMember{Name: name, Id: m.Id, State: m.State, PublicIp: m.PublicIp}
 }
 
 type Fleet struct {
@@ -106,7 +112,7 @@ func fleetMembers(org, fleet string) ([]*service.Machine, error) {
 	}
 	var out []*service.Machine
 	for _, m := range all {
-		if fleetOf(m.Name) == fleet {
+		if fleetOf(m.DisplayName) == fleet {
 			out = append(out, m)
 		}
 	}
@@ -125,7 +131,7 @@ func ensureFleet(ctx context.Context, org, name string, want int, base service.C
 		return nil, err
 	}
 	for _, m := range cur {
-		existing[m.Name] = m
+		existing[m.DisplayName] = m
 	}
 	var members []FleetMember
 	for i := 0; i < want; i++ {
@@ -237,7 +243,7 @@ func (c *ApiController) ListFleets() {
 	byName := map[string]*Fleet{}
 	var order []string
 	for _, m := range all {
-		f := fleetOf(m.Name)
+		f := fleetOf(m.DisplayName)
 		if f == "" {
 			continue
 		}
