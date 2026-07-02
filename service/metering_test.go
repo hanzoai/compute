@@ -209,6 +209,60 @@ func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
 	}
 }
 
+// The sweep must NOT re-bill the LAUNCH hour: the launch path already debited the
+// machine one hour at create time. A machine created within the current sweep hour
+// is skipped for that hour; the NEXT hour it is metered normally.
+func TestMeterMachines_SkipsLaunchHour(t *testing.T) {
+	url, recs, mu := fakeCommerce(t)
+	t.Setenv("COMMERCE_URL", url)
+	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
+
+	// Launched at 15:05; the sweep fires later in the SAME clock hour (15:40).
+	launched := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
+	m := []*Machine{{Id: "777", Size: "s", Tag: "hanzo-org:acme", CreatedTime: launched.Format(time.RFC3339)}}
+
+	// Same hour as launch -> skipped (launch already billed hour 15).
+	metered, _ := meterMachines(context.Background(), m, launched.Add(35*time.Minute))
+	if metered != 0 {
+		t.Fatalf("launch-hour sweep metered=%d, want 0 (launch already billed this hour)", metered)
+	}
+	// Next hour -> billed once (the first RECURRING hour).
+	metered, _ = meterMachines(context.Background(), m, launched.Add(time.Hour))
+	if metered != 1 {
+		t.Fatalf("next-hour sweep metered=%d, want 1", metered)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*recs) != 1 {
+		t.Fatalf("recorded %d debits, want 1 (launch hour skipped, next hour billed)", len(*recs))
+	}
+	_, _, _, _, reqID := parseUsage(t, (*recs)[0].body)
+	if reqID != "compute-777-2026070216" {
+		t.Fatalf("requestId = %q, want compute-777-2026070216 (next hour)", reqID)
+	}
+}
+
+func TestCreatedInHour(t *testing.T) {
+	stamp := "2026070215"
+	if !createdInHour("2026-07-02T15:05:00Z", stamp) {
+		t.Fatal("same-hour create time must be in-hour")
+	}
+	if createdInHour("2026-07-02T14:59:00Z", stamp) {
+		t.Fatal("previous-hour create time must NOT be in-hour")
+	}
+	if createdInHour("2026-07-02T16:00:00Z", stamp) {
+		t.Fatal("next-hour create time must NOT be in-hour")
+	}
+	// Empty / unparseable -> never in-hour (metered normally, never wrongly skipped).
+	if createdInHour("", stamp) {
+		t.Fatal("empty create time must not skip metering")
+	}
+	if createdInHour("not-a-time", stamp) {
+		t.Fatal("unparseable create time must not skip metering")
+	}
+}
+
 // An untagged machine (no hanzo-org tag) is skipped, never billed to a wrong
 // tenant; an unknown-size machine is skipped; a $0 size is not debited.
 func TestMeterMachines_SkipsUnattributableUnknownAndFree(t *testing.T) {

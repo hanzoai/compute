@@ -83,10 +83,27 @@ func MeteringConfigured() bool {
 	return strings.TrimSpace(os.Getenv("COMMERCE_SERVICE_TOKEN")) != "" && NewMeteringClient("hanzo").Enabled()
 }
 
-// hourStamp is the per-hour bucket for idempotency: the same running machine
-// metered twice within one wall-clock hour carries the SAME RequestID, so
-// commerce dedups the debit and a ticker overlap / restart cannot double-bill.
+// hourStamp is the per-hour bucket for the RequestID: the same running machine
+// metered twice within one wall-clock hour carries the SAME RequestID (the client
+// dedup hint). The authoritative once-per-hour guarantee is the single-flight
+// lease in the ticker (object.ClaimMeterHour), because commerce does not dedup the
+// withdraw on requestId.
 func hourStamp(now time.Time) string { return now.UTC().Format("2006010215") }
+
+// createdInHour reports whether an RFC3339 create time falls in the same UTC
+// hour bucket as stamp ("YYYYMMDDHH"). An empty or unparseable time is NOT in the
+// hour (metered normally) — we only ever SKIP a machine we can prove the launch
+// path already billed this hour.
+func createdInHour(createdTime, stamp string) bool {
+	if createdTime == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, createdTime)
+	if err != nil {
+		return false
+	}
+	return t.UTC().Format("2006010215") == stamp
+}
 
 // MeterRunningMachines debits every RUNNING house resell machine one hour of its
 // resale price to its OWNING org — the recurring counterpart to the launch debit.
@@ -96,11 +113,16 @@ func hourStamp(now time.Time) string { return now.UTC().Format("2006010215") }
 // Per machine: org is recovered from the machine's own hanzo-org tag (never
 // trusted from a client — it is the tag LaunchOrgMachine injected), the hourly
 // price comes from the resale catalog (SizeBySlug → PriceToCents), and the debit
-// is recorded with RequestID "compute-<machineID>-<YYYYMMDDHH>" so it is
-// idempotent within the hour. Recording is decoupled from gating (the machine
-// already ran that hour, so the cost must be recorded); enforcement/suspend on a
-// depleted balance is a separate control. A per-machine error is logged and does
-// not abort the sweep.
+// carries RequestID "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled
+// from gating (the machine already ran that hour, so the cost must be recorded);
+// enforcement/suspend on a depleted balance is a separate control. A per-machine
+// error is logged and does not abort the sweep.
+//
+// EXACTLY-ONCE PER HOUR is enforced OUTSIDE the RequestID: commerce's RecordUsage
+// does NOT dedup the withdraw on requestId, so the key is only a reconciliation
+// hint. The real once-per-hour guarantees are (1) the ticker's per-hour
+// single-flight lease (object.ClaimMeterHour) so only one replica sweeps, and
+// (2) skipping a machine's LAUNCH hour here (the launch path already billed it).
 //
 // No-op when metering is unconfigured or when compute is unconfigured (no house
 // token) — nothing to enumerate, nothing to debit.
@@ -131,6 +153,16 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		if org == "" {
 			skipped++
 			logs.Warning("compute metering: machine %s has no %s tag; skipping (unattributable)", m.Id, orgTagKey)
+			continue
+		}
+		// Skip the LAUNCH hour: the launch path already debited this machine one
+		// hour at create time (RequestID = machine id). Metering it again for the
+		// same wall-clock hour would double-charge the launch hour (the launch and
+		// sweep RequestIDs differ, and commerce does not dedup across them). A
+		// machine with no parseable create time (older rows / test doubles) is
+		// metered normally — a launch is never billed unless the launch path ran,
+		// so failing to skip only risks the historical status quo, never a miss.
+		if createdInHour(m.CreatedTime, stamp) {
 			continue
 		}
 		si, err := SizeBySlug(m.Size)

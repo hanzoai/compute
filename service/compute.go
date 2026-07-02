@@ -395,9 +395,15 @@ func DeleteOrgMachine(org, id string) error {
 // LaunchOrgMachine provisions a droplet in Hanzo's house account, tagged so it
 // is owned by org. The org tag is injected here (never trusted from the client
 // body) so the machine is always attributable to the right tenant.
+//
+// org is validated as a clean slug first: it becomes BOTH the hanzo-org
+// attribution tag (read back by the hourly meter) AND the commerce billing key,
+// so a value carrying the meter's "," / ":" separators must never reach the tag.
+// A validated IAM owner claim is already a DNS-label slug, so this only rejects a
+// malformed/forged org — it never breaks a real tenant.
 func LaunchOrgMachine(org string, spec *CreateMachineSpec) (*Machine, error) {
-	if org == "" {
-		return nil, fmt.Errorf("org is required")
+	if !validOrgSlug(org) {
+		return nil, fmt.Errorf("invalid org slug %q", org)
 	}
 	client, err := newHouseDOClient()
 	if err != nil {
@@ -408,4 +414,17 @@ func LaunchOrgMachine(org string, spec *CreateMachineSpec) (*Machine, error) {
 	}
 	spec.Tags[orgTagKey] = org
 	return client.CreateMachine(spec)
+}
+
+// validOrgSlug bounds the org used as a billing key + DO attribution tag: a
+// non-empty, bounded string with no separator that the tag read-back
+// (orgFromTag) or DO would misparse. Deliberately permissive on the exact
+// charset (a real owner claim is already a DNS label); it exists to keep the
+// meter attribution surface un-forgeable, not to re-validate IAM.
+func validOrgSlug(org string) bool {
+	org = strings.TrimSpace(org)
+	if org == "" || len(org) > 128 {
+		return false
+	}
+	return !strings.ContainsAny(org, ",: \t\r\n")
 }
