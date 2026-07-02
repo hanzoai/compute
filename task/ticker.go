@@ -24,6 +24,7 @@ import (
 	"github.com/hanzoai/vm/billing"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/vm/object"
+	"github.com/hanzoai/vm/service"
 )
 
 type Ticker struct{}
@@ -53,6 +54,22 @@ func (t *Ticker) SetupTicker() {
 			}
 		}()
 		logs.Info("billing: hourly node pool usage reporting enabled")
+	}
+
+	// compute metering: debit every RUNNING /v1 resell machine one hour of its
+	// resale price to its owning org, every hour, on the canonical commerce/
+	// metering path (same client the launch debit uses). A running bound machine
+	// keeps drawing down the org's credit balance. Enablement is decided inside
+	// MeterRunningMachines (no-op when commerce or compute is unconfigured), so
+	// this is wired unconditionally — no second config gate to drift.
+	if service.MeteringConfigured() {
+		computeTicker := time.NewTicker(time.Hour)
+		go func() {
+			for range computeTicker.C {
+				service.MeterRunningMachines(context.Background())
+			}
+		}()
+		logs.Info("compute metering: hourly running-machine drawdown enabled")
 	}
 
 	// autoscaler: start pod watcher if cluster configs are set
