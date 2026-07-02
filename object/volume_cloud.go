@@ -17,8 +17,8 @@ package object
 import (
 	"fmt"
 
-	"github.com/hanzoai/vm/service"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/visor/util"
 )
 
 func getVolumeFromService(owner string, provider string, sv *service.Volume) *Volume {

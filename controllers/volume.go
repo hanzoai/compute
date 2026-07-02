@@ -17,8 +17,8 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/hanzoai/vm/object"
-	"github.com/hanzoai/vm/service"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/service"
 )
 
 // GetVolumes

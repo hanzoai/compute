@@ -19,9 +19,9 @@ import (
 	"net/http"
 
 	"github.com/beego/beego/context"
-	"github.com/hanzoai/vm/conf"
-	"github.com/hanzoai/vm/object"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/util"
 	iam "github.com/hanzoai/iam"
 )
 

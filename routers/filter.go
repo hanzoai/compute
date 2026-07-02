@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/beego/beego/context"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/util"
 )
 
 func TransparentStatic(ctx *context.Context) {

@@ -12,7 +12,7 @@ jobs:
   docker:
     uses: hanzoai/.github/.github/workflows/docker-build.yml@main
     with:
-      image: ghcr.io/hanzoai/vm
+      image: ghcr.io/hanzoai/visor
       target: STANDARD
       # amd64-only: DOKS has no arm64 droplets (no deploy target) and no arm64
       # build runner is currently online, so a queued arm64 job would block the

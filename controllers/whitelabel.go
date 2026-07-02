@@ -15,7 +15,7 @@
 package controllers
 
 import (
-	"github.com/hanzoai/vm/object"
+	"github.com/hanzoai/visor/object"
 )
 
 // GetWhitelabel returns branding config based on the request Host header.

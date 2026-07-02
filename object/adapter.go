@@ -20,8 +20,8 @@ import (
 
 	"github.com/beego/beego"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/hanzoai/vm/conf"
-	"github.com/hanzoai/vm/util"
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/util"
 	_ "github.com/lib/pq"
 	"xorm.io/xorm"
 )

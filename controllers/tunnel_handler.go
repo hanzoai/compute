@@ -18,7 +18,7 @@ import (
 	"context"
 
 	"github.com/gorilla/websocket"
-	"github.com/hanzoai/vm/util/guacamole"
+	"github.com/hanzoai/visor/util/guacamole"
 )
 
 type GuacamoleHandler struct {

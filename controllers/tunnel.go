@@ -23,9 +23,9 @@ import (
 	"github.com/beego/beego"
 	"github.com/beego/beego/logs"
 	"github.com/gorilla/websocket"
-	"github.com/hanzoai/vm/object"
-	"github.com/hanzoai/vm/util"
-	"github.com/hanzoai/vm/util/guacamole"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/visor/util/guacamole"
 )
 
 const (

@@ -17,7 +17,7 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/hanzoai/vm/object"
+	"github.com/hanzoai/visor/object"
 )
 
 // GetPlans

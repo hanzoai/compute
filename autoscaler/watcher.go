@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/beego/beego/logs"
-	"github.com/hanzoai/vm/object"
-	"github.com/hanzoai/vm/service"
+	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/service"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

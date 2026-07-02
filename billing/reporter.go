@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/beego/beego/logs"
-	"github.com/hanzoai/vm/object"
+	"github.com/hanzoai/visor/object"
 )
 
 type MeterEvent struct {

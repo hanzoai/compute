@@ -1,4 +1,4 @@
-module github.com/hanzoai/vm
+module github.com/hanzoai/visor
 
 go 1.26.4
 

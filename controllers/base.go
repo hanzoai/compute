@@ -19,7 +19,7 @@ import (
 
 	"github.com/beego/beego"
 	iam "github.com/hanzoai/iam"
-	"github.com/hanzoai/vm/object"
+	"github.com/hanzoai/visor/object"
 )
 
 type ApiController struct {
