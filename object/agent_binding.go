@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hanzoai/vm/service"
 	"github.com/hanzoai/vm/util"
 	"xorm.io/core"
 )
@@ -122,6 +123,50 @@ func machineHasBotRuntimeTag(machine *Machine, agentName string) bool {
 	return false
 }
 
+// resolveBoundMachine resolves the machine a binding targets from the RESELL
+// compute surface — the Hanzo house DigitalOcean account, where a machine is a
+// droplet identified by its integer id and owned by an org via the
+// `hanzo-org:<org>` tag. This is the SAME source the bind routes are scoped to
+// (`service.GetOrgMachine` verifies the droplet carries the caller org's tag),
+// NOT the BYOC `object.Machine` table (whose owner semantics and identity are a
+// different machine population). Using the resell source is what makes the
+// binding operate on the machine the operator actually launched, and it enforces
+// tenant isolation a second way: even with the id owner already pinned to the
+// caller org, GetOrgMachine returns nil for a droplet that is not tagged to that
+// org, so a binding can never attach to another tenant's machine.
+//
+// It never panics on caller input: a non-numeric droplet id yields a clean error
+// from GetOrgMachine, and an unowned/absent droplet yields (nil, nil).
+func resolveBoundMachine(owner string, name string) (*Machine, error) {
+	if owner == "" || name == "" {
+		return nil, nil
+	}
+	m, err := service.GetOrgMachine(owner, name)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, nil
+	}
+	// Convert the service view to the object view. Resell machines are always in
+	// the house DigitalOcean account, so Provider is fixed here (getMachineFromDroplet
+	// leaves it empty). Only the fields reconcile + the denormalized snapshot need
+	// are carried.
+	return &Machine{
+		Owner:       owner,
+		Name:        m.Name,
+		Id:          m.Id,
+		Provider:    "digitalocean",
+		DisplayName: m.DisplayName,
+		Region:      m.Region,
+		Size:        m.Size,
+		Tag:         m.Tag,
+		State:       m.State,
+		PublicIp:    m.PublicIp,
+		PrivateIp:   m.PrivateIp,
+	}, nil
+}
+
 // splitMachineId splits an `owner/name` machine id without panicking on
 // malformed input. `util.GetOwnerAndNameFromId` panics unless the id is exactly
 // two tokens, and its NoCheck variant index-panics on a single token; callers
@@ -150,14 +195,6 @@ func getAgentBinding(owner string, name string) (*AgentBinding, error) {
 		return &binding, nil
 	}
 	return nil, nil
-}
-
-// GetAgentBinding returns the binding for a machine id (`owner/name`), or nil if
-// the machine has no binding. A malformed id yields (nil, nil) — it cannot have
-// a binding — rather than a panic.
-func GetAgentBinding(machineId string) (*AgentBinding, error) {
-	owner, name := splitMachineId(machineId)
-	return getAgentBinding(owner, name)
 }
 
 // GetAgentBindings lists every binding owned by `owner`, newest first.
@@ -229,7 +266,7 @@ func BindAgent(machineId string, org string, agentName string, botVersion string
 		return nil, fmt.Errorf("invalid machine id (expected owner/name): %q", machineId)
 	}
 
-	machine, err := GetMachine(machineId)
+	machine, err := resolveBoundMachine(owner, name)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +316,8 @@ func BindAgent(machineId string, org string, agentName string, botVersion string
 // binding against the live machine state. Used by the GET path so a read always
 // reflects current convergence, and returns nil when the machine has no binding.
 func ReconcileAgentBinding(machineId string) (*AgentBinding, error) {
-	binding, err := GetAgentBinding(machineId)
+	owner, name := splitMachineId(machineId)
+	binding, err := getAgentBinding(owner, name)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +325,7 @@ func ReconcileAgentBinding(machineId string) (*AgentBinding, error) {
 		return nil, nil
 	}
 
-	machine, err := GetMachine(machineId)
+	machine, err := resolveBoundMachine(owner, name)
 	if err != nil {
 		return nil, err
 	}
