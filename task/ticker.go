@@ -62,14 +62,23 @@ func (t *Ticker) SetupTicker() {
 	// keeps drawing down the org's credit balance. Enablement is decided inside
 	// MeterRunningMachines (no-op when commerce or compute is unconfigured), so
 	// this is wired unconditionally — no second config gate to drift.
+	//
+	// SINGLE-FLIGHT ACROSS REPLICAS (money safety): visor runs replicas: 2 with
+	// no leader election, and commerce does NOT dedup the withdraw on requestId,
+	// so an unguarded sweep would double-debit every machine every hour. The
+	// per-hour DB lease (object.ClaimMeterHour) makes exactly ONE replica run the
+	// sweep per wall-clock hour; the others skip. It also blocks a mid-hour
+	// restart from re-sweeping the same hour.
 	if service.MeteringConfigured() {
 		computeTicker := time.NewTicker(time.Hour)
 		go func() {
 			for range computeTicker.C {
-				service.MeterRunningMachines(context.Background())
+				if object.ClaimMeterHour(time.Now()) {
+					service.MeterRunningMachines(context.Background())
+				}
 			}
 		}()
-		logs.Info("compute metering: hourly running-machine drawdown enabled")
+		logs.Info("compute metering: hourly running-machine drawdown enabled (single-flight per hour)")
 	}
 
 	// autoscaler: start pod watcher if cluster configs are set

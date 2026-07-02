@@ -285,9 +285,13 @@ func (c *ApiController) LaunchComputeMachine() {
 	// Debit the FIRST hour of resale price to the org at launch. Every SUBSEQUENT
 	// hour a running machine stays up is debited by service.MeterRunningMachines
 	// (the hourly ticker) on the SAME commerce/metering path — so a bound machine
-	// keeps drawing down the org's balance. The launch RequestID is the machine id
-	// and the hourly ones are "compute-<id>-<YYYYMMDDHH>", distinct buckets, so
-	// launch + the first recurring sweep never double-bill the same hour.
+	// keeps drawing down the org's balance. The launch owns the LAUNCH hour; the
+	// recurring sweep explicitly SKIPS a machine whose create time is in the
+	// current hour (service.meterMachines/createdInHour), so launch + a sweep
+	// landing in the same clock hour never double-bill that hour. (Commerce does
+	// not dedup on requestId, so this skip — not the requestId — is what prevents
+	// the overlap; cross-replica overlap is prevented by the ticker's per-hour
+	// single-flight lease.)
 	if _, err := meter.Record(ctx, metering.Usage{
 		User:        org,
 		Actor:       org,
