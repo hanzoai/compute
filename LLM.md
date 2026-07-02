@@ -12,6 +12,36 @@ Visor is Hanzo's multi-provider cloud VM management platform. It provisions, mon
 - **Billing** (`/billing/`): Pricing engine
 - **AuthZ** (`/authz/`): hanzoai/authz-based authorization
 
+### Storage backends (Postgres -> Base, additive)
+Visor persists 10 XORM tables (Asset, Provider, Machine, Record, Session,
+NodePool, Plan, Volume, AgentBinding, MeterLease), all keyed by `Owner` (=org).
+Historically one shared Postgres DB (`hanzo_visor`).
+
+Per Hanzo's storage rule and the tenant-data-hierarchy HIP, visor is moving onto
+hanzoai/base per-org SQLite. The seam is one interface -- `engineProvider` in
+`object/store.go` -- resolving the `*xorm.Engine` that serves an owner:
+- `pgStore` (default): one shared engine for every owner (WHERE owner=?).
+- `baseStore`: one per-org SQLite engine at `DBPath = <dataRoot>/orgs/<org>/visor.db`
+  (HIP-0302 layout, mirrors hanzo/cloud), CGO-free via `modernc.org/sqlite`
+  (xorm driver name `"sqlite"`).
+
+Selected at boot by `storageBackend` (app.conf / `STORAGE_BACKEND`, default
+`postgres`) + `dataRoot` (`DATA_ROOT`, default `/data`). `object.EngineFor(owner)`
+is the single backend-agnostic entry point. `models()` is the one table registry
+feeding both schema sync and migration. `MigratePostgresToBase` (in
+`object/migrate_base.go`, never at boot) copies rows grouped by Owner into the
+per-org DBs. The canonical Base adopter to pattern-match is **hanzo/cloud**
+(HIP-0302/HIP-0106: `internal/org/replica.go`, `internal/storagelock`,
+`migration/pg_to_sqlite.go`).
+
+OPEN for CTO: (1) MeterLease is a cluster-global leader-election lease -- per-org
+SQLite cannot provide a cluster-wide single winner; needs a shared coordination
+store or a different mechanism (routes to `_global` for now). (2) Plan/Provider
+are global catalog data -- per-org duplication vs a shared read-only DB.
+(3) Object-storage replication (S3 hydration / cloud's Replicator) is a follow-up
+slice; slice-1 is local per-org files. (4) Migrating call sites
+`adapter.engine` -> `object.EngineFor(owner)` is slice-2.
+
 ### Provider Adapters (all fully implemented)
 | Provider | Machine | Volume | File |
 |----------|---------|--------|------|
