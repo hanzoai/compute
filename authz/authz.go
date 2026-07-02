@@ -160,14 +160,24 @@ func IsAllowed(user *iam.User, subOwner string, subName string, method string, u
 //	POST   /v1/machines/launch                quote (dryRun) or metered launch
 //	GET    /v1/machines/<id>                  get one of the caller org's machines
 //	DELETE /v1/machines/<id>                  destroy one of the caller org's machines
+//	GET    /v1/machines/<id>/agent-binding    read a machine's agent binding
+//	DELETE /v1/machines/<id>/agent-binding    unbind a machine's agent
+//	POST   /v1/machines/<id>/bind-agent       bind a cloud Agent to a machine
+//	GET    /v1/agent-bindings                 list the caller org's agent bindings
 func isResellComputePath(method string, urlPath string) bool {
 	switch urlPath {
-	case "/v1/regions", "/v1/sizes", "/v1/gpus", "/v1/machines":
+	case "/v1/regions", "/v1/sizes", "/v1/gpus", "/v1/machines", "/v1/agent-bindings":
 		return method == "GET"
 	case "/v1/machines/launch":
 		return method == "POST"
 	}
-	// /v1/machines/<id> — get or destroy a specific machine.
+	// Agent↔machine binding: only the bind-agent write is admitted as POST; every
+	// other POST subpath stays denied (no blanket POST on /v1/machines/).
+	if method == "POST" && strings.HasPrefix(urlPath, "/v1/machines/") && strings.HasSuffix(urlPath, "/bind-agent") {
+		return true
+	}
+	// /v1/machines/<id> and /v1/machines/<id>/agent-binding — read or delete a
+	// specific machine (or its binding).
 	if strings.HasPrefix(urlPath, "/v1/machines/") {
 		return method == "GET" || method == "DELETE"
 	}
