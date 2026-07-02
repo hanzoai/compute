@@ -76,6 +76,31 @@ func TestMachineHasBotRuntimeTag(t *testing.T) {
 	}
 }
 
+// TestSplitMachineIdNeverPanics locks the object-layer id split as fail-closed.
+// The prior code called util.GetOwnerAndNameFromId (panics on != 2 tokens), so a
+// malformed machine id reaching BindAgent/GetAgentBinding/UnbindAgent crashed
+// the request. splitMachineId must return empties instead.
+func TestSplitMachineIdNeverPanics(t *testing.T) {
+	cases := []struct {
+		id    string
+		owner string
+		name  string
+	}{
+		{"hanzoai/m1", "hanzoai", "m1"},
+		{"m1", "", ""},
+		{"", "", ""},
+		{"a/b/c", "", ""},
+		{"/m1", "", ""},
+		{"hanzoai/", "", ""},
+	}
+	for _, tc := range cases {
+		o, n := splitMachineId(tc.id)
+		if o != tc.owner || n != tc.name {
+			t.Errorf("splitMachineId(%q) = (%q,%q), want (%q,%q)", tc.id, o, n, tc.owner, tc.name)
+		}
+	}
+}
+
 func TestReconcileBindingStatus(t *testing.T) {
 	binding := func(agent string) *AgentBinding {
 		return &AgentBinding{Org: "hanzoai", AgentName: agent}

@@ -122,6 +122,19 @@ func machineHasBotRuntimeTag(machine *Machine, agentName string) bool {
 	return false
 }
 
+// splitMachineId splits an `owner/name` machine id without panicking on
+// malformed input. `util.GetOwnerAndNameFromId` panics unless the id is exactly
+// two tokens, and its NoCheck variant index-panics on a single token; callers
+// here take machine ids that ultimately originate from HTTP input, so the split
+// must fail closed (return empties) rather than crash the request.
+func splitMachineId(machineId string) (string, string) {
+	tokens := strings.Split(machineId, "/")
+	if len(tokens) != 2 || tokens[0] == "" || tokens[1] == "" {
+		return "", ""
+	}
+	return tokens[0], tokens[1]
+}
+
 func getAgentBinding(owner string, name string) (*AgentBinding, error) {
 	if owner == "" || name == "" {
 		return nil, nil
@@ -140,9 +153,10 @@ func getAgentBinding(owner string, name string) (*AgentBinding, error) {
 }
 
 // GetAgentBinding returns the binding for a machine id (`owner/name`), or nil if
-// the machine has no binding.
+// the machine has no binding. A malformed id yields (nil, nil) — it cannot have
+// a binding — rather than a panic.
 func GetAgentBinding(machineId string) (*AgentBinding, error) {
-	owner, name := util.GetOwnerAndNameFromId(machineId)
+	owner, name := splitMachineId(machineId)
 	return getAgentBinding(owner, name)
 }
 
@@ -210,6 +224,11 @@ func BindAgent(machineId string, org string, agentName string, botVersion string
 		return nil, fmt.Errorf("org and agentName are required to bind an agent")
 	}
 
+	owner, name := splitMachineId(machineId)
+	if owner == "" || name == "" {
+		return nil, fmt.Errorf("invalid machine id (expected owner/name): %q", machineId)
+	}
+
 	machine, err := GetMachine(machineId)
 	if err != nil {
 		return nil, err
@@ -218,7 +237,6 @@ func BindAgent(machineId string, org string, agentName string, botVersion string
 		return nil, fmt.Errorf("machine not found: %s", machineId)
 	}
 
-	owner, name := util.GetOwnerAndNameFromId(machineId)
 	now := util.GetCurrentTime()
 
 	existing, err := getAgentBinding(owner, name)
@@ -293,7 +311,7 @@ func ReconcileAgentBinding(machineId string) (*AgentBinding, error) {
 // UnbindAgent removes the binding for a machine. Returns whether a binding was
 // present. Orthogonal to the machine lifecycle — it never deletes the machine.
 func UnbindAgent(machineId string) (bool, error) {
-	owner, name := util.GetOwnerAndNameFromId(machineId)
+	owner, name := splitMachineId(machineId)
 	binding, err := getAgentBinding(owner, name)
 	if err != nil {
 		return false, err
