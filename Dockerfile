@@ -1,11 +1,11 @@
 FROM guacamole/guacd:1.5.4 as guacd
-FROM node:18.19.0 AS FRONT
+FROM public.ecr.aws/docker/library/node:18.19.0 AS FRONT
 WORKDIR /web
 COPY ./web .
 RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
 
-FROM golang:1.26.4 AS BACK
+FROM public.ecr.aws/docker/library/golang:1.26.4 AS BACK
 WORKDIR /go/src/hanzo-visor
 COPY . .
 
@@ -20,7 +20,7 @@ RUN chmod +x ./build.sh
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN ./build.sh
 
 
-FROM alpine:latest AS STANDARD
+FROM public.ecr.aws/docker/library/alpine:latest AS STANDARD
 LABEL MAINTAINER="https://hanzo.ai/"
 ARG USER=hanzo-visor
 
