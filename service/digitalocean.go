@@ -182,6 +182,12 @@ func (client MachineDigitalOceanClient) CreateMachine(spec *CreateMachineSpec) (
 	}
 
 	tags := buildDropletTags(spec)
+	// DigitalOcean drops droplet tags that do not already exist, so a NEW org's
+	// first launch would otherwise create an untagged (untracked, unbillable)
+	// droplet. Pre-create each tag (idempotent; an existing tag errors, ignored).
+	for _, t := range tags {
+		_, _, _ = client.Client.Tags.Create(context.TODO(), &godo.TagCreateRequest{Name: t})
+	}
 
 	var sshKeys []godo.DropletCreateSSHKey
 	for _, id := range spec.SSHKeyIDs {
