@@ -78,8 +78,8 @@ func TestMachineHasBotRuntimeTag(t *testing.T) {
 
 // TestSplitMachineIdNeverPanics locks the object-layer id split as fail-closed.
 // The prior code called util.GetOwnerAndNameFromId (panics on != 2 tokens), so a
-// malformed machine id reaching BindAgent/GetAgentBinding/UnbindAgent crashed
-// the request. splitMachineId must return empties instead.
+// malformed machine id reaching BindAgent/UnbindAgent crashed the request.
+// splitMachineId must return empties instead.
 func TestSplitMachineIdNeverPanics(t *testing.T) {
 	cases := []struct {
 		id    string
@@ -201,5 +201,33 @@ func TestReconcileNeverInventsBound(t *testing.T) {
 	status, _ := reconcileBindingStatus(b, &Machine{State: "Running", Tag: "hanzo-bot:researcher,"})
 	if status != AgentBindingBound {
 		t.Errorf("the canonical bound machine did not reconcile to Bound, got %q", status)
+	}
+}
+
+// TestReBindDifferentAgentNoStaleBound is the vector-6 safety property. The
+// binding row is 1:1 with the machine (PK owner/name) and re-binding a DIFFERENT
+// agent fully replaces the prior binding (UpdateAgentBinding AllCols), so no
+// layering. The security-relevant consequence is that reconcile must key on the
+// CURRENT bound agent: a machine still carrying the OLD agent's
+// `hanzo-bot:<oldAgent>` droplet tag (bind never mutates the machine) must NOT
+// reconcile to Bound for the NEW agent. It reports Pending until the new agent's
+// tag lands — never a stale Bound inherited from the replaced binding.
+func TestReBindDifferentAgentNoStaleBound(t *testing.T) {
+	machine := &Machine{State: "Running", Tag: "hanzo-bot:researcher,"} // old agent's tag
+
+	// Re-bound to a different agent; the machine still only carries the old tag.
+	rebound := &AgentBinding{Org: "hanzoai", AgentName: "writer"}
+	status, msg := reconcileBindingStatus(rebound, machine)
+	if status == AgentBindingBound {
+		t.Fatalf("stale Bound leaked to the re-bound agent from the prior agent's tag (msg=%q)", msg)
+	}
+	if status != AgentBindingPending {
+		t.Errorf("re-bound agent status = %q, want Pending (awaiting its own tag)", status)
+	}
+
+	// Once the new agent's tag lands, and only then, it reconciles to Bound.
+	machine.Tag = "hanzo-bot:writer,"
+	if status, _ := reconcileBindingStatus(rebound, machine); status != AgentBindingBound {
+		t.Errorf("re-bound agent with its own tag = %q, want Bound", status)
 	}
 }
