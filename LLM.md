@@ -1,5 +1,17 @@
 # Visor
 
+## Cloud consolidation status (HIP-0106)
+Visor's compute REST surface — `/v1/machines`, `/v1/gpus`, `/v1/clusters` — is
+already served **natively** by the unified `cloud` binary (`hanzoai/cloud`
+`clients/visor`, org-scoped via `principal`); it currently PROXIES this
+standalone service for data. Visor stays standalone (the active compute backend)
+until the native port lands: replacing the XORM `object/*` persistence with a
+Base store and reusing the pure-`godo` `service/{digitalocean,doks}.go` on top of
+cloud's `clients/do` — a bounded consolidation wave sequenced in
+`hanzoai/cloud → docs/consolidation.md`. This is NOT a deprecation; do not
+retire this repo until that wave merges. (`hanzoai/visor-legacy` is the archived
+pre-fork repo — that one IS retired.)
+
 ## Overview
 Visor is Hanzo's multi-provider cloud VM management platform. It provisions, monitors, and manages virtual machines across Hetzner, AWS Lightsail, and DigitalOcean (plus Azure, GCP, Aliyun, Proxmox, VMware, KVM). Originally forked from Casvisor, fully rebranded to `github.com/hanzoai/visor`.
 
