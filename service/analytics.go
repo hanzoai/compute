@@ -143,6 +143,34 @@ func SetKind(spec *CreateMachineSpec, kind string) {
 	spec.Tags[kindTagKey] = CanonicalKind(kind)
 }
 
+// SetScope records the launch's OPTIONAL app/project scope on the spec's tags so
+// it flows onto the droplet and is recovered — via the same tag read-back as
+// org/kind (tagValue) — by the emit, sweep, and destroy paths (EmitCompute reads
+// hanzo-app / hanzo-project into ComputeEvent.App/Project). Beneath org in the
+// org > app > project hierarchy, both are optional: an empty value, or one
+// carrying the tag read-back's "," / ":" separators (guarded by safeTagField
+// exactly as org's attribution tag is), is skipped — so a launch that omits them
+// is never broken and no unparseable tag is ever emitted. Both launch surfaces set
+// scope exactly one way through here, mirroring SetKind.
+func SetScope(spec *CreateMachineSpec, app, project string) {
+	setScopeTag(spec, appTagKey, app)
+	setScopeTag(spec, projectTagKey, project)
+}
+
+// setScopeTag sets one optional scope tag when its value is non-empty and safe for
+// the comma/colon-joined tag read-back; it is the single guarded writer SetScope
+// composes for both app and project.
+func setScopeTag(spec *CreateMachineSpec, key, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" || !safeTagField(value) {
+		return
+	}
+	if spec.Tags == nil {
+		spec.Tags = map[string]string{}
+	}
+	spec.Tags[key] = value
+}
+
 // specIsBot reports whether a launch provisions the @hanzo/bot agent — true only
 // for kind=bot. It is the single source of truth gating both the agent cloud-init
 // (buildBotUserData) and the IAM agent-user registration (LaunchOrgMachine), so a
@@ -158,6 +186,13 @@ func specIsBot(spec *CreateMachineSpec) bool {
 func MachineKind(m *Machine) string {
 	return CanonicalKind(tagValue(m.Tag, kindTagKey))
 }
+
+// MachineApp / MachineProject recover a machine's OPTIONAL app/project scope from
+// its own tags — the read-back counterparts of SetScope, mirroring MachineKind.
+// Empty when the machine carries no such tag (scope is optional). Used by the
+// ?project= list filter and available to any scope-aware read.
+func MachineApp(m *Machine) string     { return tagValue(m.Tag, appTagKey) }
+func MachineProject(m *Machine) string { return tagValue(m.Tag, projectTagKey) }
 
 // datastoreURL is the datastore's ClickHouse HTTP base (e.g.
 // http://datastore.hanzo.svc.cluster.local:8123). It is the single "is the
