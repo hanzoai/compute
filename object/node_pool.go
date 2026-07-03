@@ -379,3 +379,56 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 
 	return nil, fmt.Errorf("node pool %q not found in DB", updatedPool.Name)
 }
+
+// cloudNodePoolDeleter is the minimal cloud-client surface needed to delete a
+// node pool. It is satisfied by *service.DOKSClient and by test fakes.
+type cloudNodePoolDeleter interface {
+	DeleteNodePool(poolID string) error
+}
+
+// confirmCloudPoolDeleted asks the provider to delete the pool and reports
+// whether it is now gone. A nil error means it was deleted; a provider 404 means
+// it was already gone. Any other error (e.g. a 422 while the pool is still
+// provisioning) is returned so the caller can retry without dropping the DB row.
+func confirmCloudPoolDeleted(client cloudNodePoolDeleter, poolID string) error {
+	err := client.DeleteNodePool(poolID)
+	if err == nil || service.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// DeleteNodePoolCloud deletes a node pool from its cloud provider (DOKS) and,
+// only once the provider confirms the pool is gone, removes the DB row. A pool
+// with no cloud linkage is a DB-only record and is removed directly. A provider
+// error other than 404 (e.g. a transient 422 during provisioning) is propagated
+// and the DB row is left intact so a retry can reconcile once the pool settles.
+func DeleteNodePoolCloud(pool *NodePool) (bool, error) {
+	if pool.PoolID != "" && pool.Provider != "" && pool.Owner != "" {
+		dbPool, err := getNodePool(pool.Owner, pool.Name)
+		if err != nil {
+			return false, err
+		}
+		if dbPool != nil && dbPool.ClusterID != "" {
+			provider, err := getProvider(pool.Owner, pool.Provider)
+			if err != nil {
+				return false, err
+			}
+			if provider != nil {
+				token := provider.ClientSecret
+				if token == "" {
+					token = provider.ClientId
+				}
+				client, err := service.NewDOKSClient(token, dbPool.ClusterID)
+				if err != nil {
+					return false, err
+				}
+				if err := confirmCloudPoolDeleted(client, pool.PoolID); err != nil {
+					return false, err
+				}
+			}
+		}
+	}
+
+	return DeleteNodePool(pool)
+}
