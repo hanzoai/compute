@@ -423,7 +423,9 @@ func LaunchOrgMachine(org string, spec *CreateMachineSpec) (*Machine, error) {
 	}
 	// A launched bot is an org member: register it as an IAM agent-user so it
 	// surfaces as a user in hanzo.team (best-effort; never fails the launch).
-	registerBotUser(org, spec.Name, spec.DisplayName)
+	if specIsBot(spec) {
+		registerBotUser(org, spec.Name, spec.DisplayName)
+	}
 	return machine, nil
 }
 

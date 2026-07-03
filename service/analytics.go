@@ -13,10 +13,11 @@
 // limitations under the License.
 
 // analytics.go is the ONE path by which visor rolls compute fleet/spend events
-// into hanzoai/datastore (ClickHouse) — the ANALYTICAL plane that mirrors, but is
-// orthogonal to, the OPERATIONAL commerce ledger (tenant-data-hierarchy HIP).
-// Commerce metering DEBITS an org's balance; this only RECORDS a fleet event for
-// unified, cross-tenant rollups that admin.hanzo.ai reads by org / app / project.
+// into hanzoai/datastore (hanzo.compute_usage, ClickHouse) — the ANALYTICAL plane
+// that mirrors, but is orthogonal to, the OPERATIONAL commerce ledger
+// (tenant-data-hierarchy HIP). Commerce metering DEBITS an org's balance; this
+// only RECORDS a fleet event for unified, cross-tenant rollups that
+// admin.hanzo.ai reads by org / app / project — and by kind (bot vs machine).
 //
 // Every emit is best-effort and fire-and-forget: the write runs in its own
 // goroutine on a short-lived context and swallows all errors, so an unreachable
@@ -39,42 +40,89 @@ import (
 	"github.com/beego/beego/logs"
 )
 
-// Compute event kinds — the values of the `event` LowCardinality column. A
-// launched row is written at provision, a running row each hour a machine stays
-// up (alongside the recurring meter), and a destroyed row at teardown.
+// Compute event kinds — the values of the `event` column. A launched row is
+// written at provision, a running row each hour a machine stays up (alongside the
+// recurring meter), and a destroyed row at teardown.
 const (
 	ComputeLaunched  = "launched"
 	ComputeRunning   = "running"
 	ComputeDestroyed = "destroyed"
 )
 
-// Tenant-hierarchy tag keys carried on a machine's DO tags. hanzo-org (orgTagKey,
-// compute.go) is the authoritative billing/attribution key injected at launch;
-// hanzo-app / hanzo-project are optional finer scoping a caller may set, read back
-// here so analytics is groupable across the full org > app > project hierarchy.
+// Fleet kinds — the values of the `kind` Enum8 lens in hanzo.compute_usage. A BOT
+// is a machine running the @hanzo/bot agent (cloud-init'd to gw.hanzo.bot); a
+// MACHINE is raw compute with no agent. Every bot is a machine; not every machine
+// is a bot. admin.hanzo.ai renders two lenses over the one table on this column.
+const (
+	KindMachine = "machine"
+	KindBot     = "bot"
+)
+
+// Tenant-hierarchy + kind tag keys carried on a machine's DO tags. hanzo-org
+// (orgTagKey, compute.go) is the authoritative billing/attribution key injected
+// at launch; hanzo-app / hanzo-project are optional finer scoping a caller may
+// set; hanzo-kind records bot-vs-machine. All are read back here so a machine
+// self-describes its org > app > project scope and kind on every sweep/destroy —
+// the same tag read-back model as org.
 const (
 	appTagKey     = "hanzo-app"
 	projectTagKey = "hanzo-project"
+	kindTagKey    = "hanzo-kind"
 )
 
-// computeEventsTable is the datastore table analytics.go writes; fully qualified
+// computeUsageTable is the datastore table analytics.go writes; fully qualified
 // with the datastore DB at emit time.
-const computeEventsTable = "compute_events"
+const computeUsageTable = "compute_usage"
 
-// ComputeEvent is one row of hanzo.compute_events. The json tags are the exact
+// ComputeEvent is one row of hanzo.compute_usage. The json tags are the exact
 // ClickHouse column names (JSONEachRow maps by key), making this struct the
 // single Go mirror of the schema in hanzoai/datastore (hanzo/schema.sql). ts is
 // pre-formatted in ClickHouse's default DateTime input format so no per-request
-// parsing setting is needed.
+// parsing setting is needed; kind is inserted by its Enum name.
 type ComputeEvent struct {
 	Org        string `json:"org"`
 	App        string `json:"app"`
 	Project    string `json:"project"`
+	Kind       string `json:"kind"`
 	Event      string `json:"event"`
 	MachineID  string `json:"machine_id"`
 	Size       string `json:"size"`
 	PriceCents int64  `json:"price_cents"`
 	Ts         string `json:"ts"`
+}
+
+// CanonicalKind normalizes an arbitrary kind string to the two-value domain,
+// defaulting to bot: visor installs the @hanzo/bot agent on every launch unless a
+// caller explicitly opts out with kind=machine, and legacy droplets (no hanzo-kind
+// tag) were all launched as bots. Applied on every WRITE (SetKind) and READ
+// (EmitCompute, specIsBot), so a missing or garbage tag safely resolves to bot and
+// only the exact value "machine" yields a machine — the Enum8 insert can never be
+// fed an out-of-domain value.
+func CanonicalKind(kind string) string {
+	if strings.TrimSpace(kind) == KindMachine {
+		return KindMachine
+	}
+	return KindBot
+}
+
+// SetKind records the launch's kind on the spec's tags so it flows onto the
+// droplet and is recovered — via the same tag read-back as org/app/project — by
+// the emit, sweep, and destroy paths. It canonicalizes the value and inits the tag
+// map if needed. Both launch surfaces (single-machine compute.go and fleet.go)
+// call it, so kind is set exactly one way.
+func SetKind(spec *CreateMachineSpec, kind string) {
+	if spec.Tags == nil {
+		spec.Tags = map[string]string{}
+	}
+	spec.Tags[kindTagKey] = CanonicalKind(kind)
+}
+
+// specIsBot reports whether a launch provisions the @hanzo/bot agent — true unless
+// the caller opted out with kind=machine. It is the single source of truth gating
+// both the agent cloud-init (buildBotUserData) and the IAM agent-user registration
+// (LaunchOrgMachine), so a machine is truthfully agent-less end to end.
+func specIsBot(spec *CreateMachineSpec) bool {
+	return CanonicalKind(spec.Tags[kindTagKey]) == KindBot
 }
 
 // datastoreURL is the datastore's ClickHouse HTTP base (e.g.
@@ -113,10 +161,11 @@ func tagValue(tags, key string) string {
 
 // EmitCompute records one fleet event for machine m into the datastore. org is
 // the authoritative owner (from IAM on launch; recovered from the machine's own
-// tag on the recurring/destroy paths); app/project are recovered from m's tags;
-// priceCents is the resale price for this event's hour (0 for destroyed). It is
-// fire-and-forget: a no-op when analytics is unconfigured or m is nil, otherwise
-// the write is handed to a goroutine so it NEVER delays or fails the caller.
+// tag on the recurring/destroy paths); app/project/kind are recovered from m's
+// tags; priceCents is the resale price for this event's hour (0 for destroyed). It
+// is fire-and-forget: a no-op when analytics is unconfigured or m is nil,
+// otherwise the write is handed to a goroutine so it NEVER delays or fails the
+// caller.
 func EmitCompute(org, event string, m *Machine, priceCents int64) {
 	if !AnalyticsConfigured() || m == nil {
 		return
@@ -125,6 +174,7 @@ func EmitCompute(org, event string, m *Machine, priceCents int64) {
 		Org:        org,
 		App:        tagValue(m.Tag, appTagKey),
 		Project:    tagValue(m.Tag, projectTagKey),
+		Kind:       CanonicalKind(tagValue(m.Tag, kindTagKey)),
 		Event:      event,
 		MachineID:  m.Id,
 		Size:       m.Size,
@@ -153,7 +203,7 @@ func writeComputeEvent(ev ComputeEvent) {
 		return
 	}
 	q := req.URL.Query()
-	q.Set("query", "INSERT INTO "+datastoreDB()+"."+computeEventsTable+" FORMAT JSONEachRow")
+	q.Set("query", "INSERT INTO "+datastoreDB()+"."+computeUsageTable+" FORMAT JSONEachRow")
 	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Content-Type", "application/json")
 	// ClickHouse HTTP auth (optional in dev; wired from the datastore secret in
