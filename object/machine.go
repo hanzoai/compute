@@ -60,7 +60,11 @@ func GetMachineCount(owner, field, value string) (int64, error) {
 
 func GetMachines(owner string) ([]*Machine, error) {
 	machines := []*Machine{}
-	err := adapter.engine.Desc("created_time").Find(&machines, &Machine{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return machines, err
+	}
+	err = engine.Desc("created_time").Find(&machines, &Machine{Owner: owner})
 	if err != nil {
 		return machines, err
 	}
@@ -83,8 +87,12 @@ func getMachine(owner string, name string) (*Machine, error) {
 		return nil, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	machine := Machine{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&machine)
+	existed, err := engine.Get(&machine)
 	if err != nil {
 		return &machine, err
 	}
@@ -151,7 +159,11 @@ func UpdateMachine(id string, machine *Machine) (bool, error) {
 		return false, err
 	}
 
-	affected, err := adapter.engine.ID(core.PK{owner, name}).AllCols().Update(machine)
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{owner, name}).AllCols().Update(machine)
 	if err != nil {
 		return false, err
 	}
@@ -160,7 +172,11 @@ func UpdateMachine(id string, machine *Machine) (bool, error) {
 }
 
 func AddMachine(machine *Machine) (bool, error) {
-	affected, err := adapter.engine.Insert(machine)
+	engine, err := EngineFor(machine.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(machine)
 	if err != nil {
 		return false, err
 	}
@@ -168,8 +184,14 @@ func AddMachine(machine *Machine) (bool, error) {
 	return affected != 0, nil
 }
 
-func addMachines(machines []*Machine) (bool, error) {
-	affected, err := adapter.engine.Insert(machines)
+// addMachines batch-inserts machines that all belong to owner (they come from a
+// single owner's cloud sync), so one EngineFor(owner) routes the whole batch.
+func addMachines(owner string, machines []*Machine) (bool, error) {
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(machines)
 	if err != nil {
 		return false, err
 	}
@@ -178,7 +200,11 @@ func addMachines(machines []*Machine) (bool, error) {
 }
 
 func DeleteMachine(machine *Machine) (bool, error) {
-	affected, err := adapter.engine.ID(core.PK{machine.Owner, machine.Name}).Delete(&Machine{})
+	engine, err := EngineFor(machine.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{machine.Owner, machine.Name}).Delete(&Machine{})
 	if err != nil {
 		return false, err
 	}
@@ -187,7 +213,11 @@ func DeleteMachine(machine *Machine) (bool, error) {
 }
 
 func deleteMachines(owner string) (bool, error) {
-	affected, err := adapter.engine.Delete(&Machine{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Delete(&Machine{Owner: owner})
 	if err != nil {
 		return false, err
 	}

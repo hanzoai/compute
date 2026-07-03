@@ -151,7 +151,7 @@ func (a *Adapter) createTable() {
 }
 
 func GetSession(owner string, offset, limit int, field, value, sortField, sortOrder string) *xorm.Session {
-	session := adapter.engine.Prepare()
+	session := mustEngineFor(owner).Prepare()
 	if offset != -1 && limit != -1 {
 		session.Limit(limit, offset)
 	}

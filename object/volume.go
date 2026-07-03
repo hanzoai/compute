@@ -39,8 +39,12 @@ func (v *Volume) GetId() string {
 }
 
 func GetVolumes(owner string) ([]*Volume, error) {
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	volumes := []*Volume{}
-	err := adapter.engine.Where("owner = ?", owner).Desc("created_time").Find(&volumes)
+	err = engine.Where("owner = ?", owner).Desc("created_time").Find(&volumes)
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +52,12 @@ func GetVolumes(owner string) ([]*Volume, error) {
 }
 
 func GetVolume(owner string, name string) (*Volume, error) {
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	volume := Volume{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&volume)
+	existed, err := engine.Get(&volume)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +68,11 @@ func GetVolume(owner string, name string) (*Volume, error) {
 }
 
 func AddVolume(volume *Volume) (bool, error) {
-	affected, err := adapter.engine.Insert(volume)
+	engine, err := EngineFor(volume.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(volume)
 	if err != nil {
 		return false, err
 	}
@@ -68,7 +80,11 @@ func AddVolume(volume *Volume) (bool, error) {
 }
 
 func UpdateVolume(owner string, name string, volume *Volume) (bool, error) {
-	_, err := adapter.engine.ID(core.PK{owner, name}).AllCols().Update(volume)
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	_, err = engine.ID(core.PK{owner, name}).AllCols().Update(volume)
 	if err != nil {
 		return false, err
 	}
@@ -76,7 +92,11 @@ func UpdateVolume(owner string, name string, volume *Volume) (bool, error) {
 }
 
 func DeleteVolume(volume *Volume) (bool, error) {
-	affected, err := adapter.engine.ID(core.PK{volume.Owner, volume.Name}).Delete(&Volume{})
+	engine, err := EngineFor(volume.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{volume.Owner, volume.Name}).Delete(&Volume{})
 	if err != nil {
 		return false, err
 	}

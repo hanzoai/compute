@@ -185,8 +185,12 @@ func getAgentBinding(owner string, name string) (*AgentBinding, error) {
 		return nil, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	binding := AgentBinding{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&binding)
+	existed, err := engine.Get(&binding)
 	if err != nil {
 		return &binding, err
 	}
@@ -200,7 +204,11 @@ func getAgentBinding(owner string, name string) (*AgentBinding, error) {
 // GetAgentBindings lists every binding owned by `owner`, newest first.
 func GetAgentBindings(owner string) ([]*AgentBinding, error) {
 	bindings := []*AgentBinding{}
-	err := adapter.engine.Desc("created_time").Find(&bindings, &AgentBinding{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return bindings, err
+	}
+	err = engine.Desc("created_time").Find(&bindings, &AgentBinding{Owner: owner})
 	if err != nil {
 		return bindings, err
 	}
@@ -230,7 +238,11 @@ func reconcileBindingStatus(binding *AgentBinding, machine *Machine) (status str
 
 // AddAgentBinding inserts a binding. Callers set identity + timestamps first.
 func AddAgentBinding(binding *AgentBinding) (bool, error) {
-	affected, err := adapter.engine.Insert(binding)
+	engine, err := EngineFor(binding.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(binding)
 	if err != nil {
 		return false, err
 	}
@@ -239,7 +251,11 @@ func AddAgentBinding(binding *AgentBinding) (bool, error) {
 
 // UpdateAgentBinding writes all columns of an existing binding by PK.
 func UpdateAgentBinding(binding *AgentBinding) (bool, error) {
-	affected, err := adapter.engine.ID(core.PK{binding.Owner, binding.Name}).AllCols().Update(binding)
+	engine, err := EngineFor(binding.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{binding.Owner, binding.Name}).AllCols().Update(binding)
 	if err != nil {
 		return false, err
 	}
@@ -364,7 +380,11 @@ func UnbindAgent(machineId string) (bool, error) {
 // machine — unbinding severs the agent↔machine record; tearing down the machine
 // is a separate DeleteMachine call so the two lifecycles stay orthogonal.
 func DeleteAgentBinding(binding *AgentBinding) (bool, error) {
-	affected, err := adapter.engine.ID(core.PK{binding.Owner, binding.Name}).Delete(&AgentBinding{})
+	engine, err := EngineFor(binding.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{binding.Owner, binding.Name}).Delete(&AgentBinding{})
 	if err != nil {
 		return false, err
 	}
