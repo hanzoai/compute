@@ -45,10 +45,10 @@ func fleetOf(name string) string {
 
 type fleetLaunchRequest struct {
 	service.CreateMachineSpec        // region, os, imageId, tags (env:BOT_* passthrough), sshKeyIds
-	Name      string `json:"name"`  // fleet name; members are <name>-000, <name>-001, ...
-	Count     int    `json:"count"` // desired number of bots
-	Size      string `json:"size"`  // size slug for every member
-	DryRun    bool   `json:"dryRun"`
+	Name                      string `json:"name"`  // fleet name; members are <name>-000, <name>-001, ...
+	Count                     int    `json:"count"` // desired number of bots
+	Size                      string `json:"size"`  // size slug for every member
+	DryRun                    bool   `json:"dryRun"`
 }
 
 type FleetMember struct {
@@ -83,6 +83,8 @@ type Fleet struct {
 // bot-bootstrap via LaunchOrgMachine, debit the launch hour. Fail-closed — an
 // unknown or insufficient balance launches nothing and spends nothing.
 func launchMetered(ctx context.Context, org string, spec *service.CreateMachineSpec, si *service.SizeInfo) (*service.Machine, error) {
+	// Fleet members are bots (cloud-init installs the @hanzo/bot agent).
+	service.SetKind(spec, service.KindBot)
 	meter := service.NewMeteringClient(org)
 	firstHourCents := service.PriceToCents(si.PriceHourly)
 	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd", AmountCents: firstHourCents}); err != nil {
@@ -95,6 +97,9 @@ func launchMetered(ctx context.Context, org string, spec *service.CreateMachineS
 	if err != nil {
 		return nil, err
 	}
+	// Roll a launched event into the analytics datastore (best-effort; never
+	// blocks or fails the launch).
+	service.EmitCompute(org, service.ComputeLaunched, machine, firstHourCents)
 	// Machine exists; a metering write failure must not fail the launch (the
 	// ticker/reconciler reconciles). Same debit contract as single-machine launch.
 	_, _ = meter.Record(ctx, metering.Usage{
