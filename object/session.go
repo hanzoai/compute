@@ -71,7 +71,11 @@ func GetSessionCount(owner, status, field, value string) (int64, error) {
 
 func GetSessions(owner string) ([]*Session, error) {
 	sessions := []*Session{}
-	err := adapter.engine.Desc("connected_time").Find(&sessions, &Session{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return sessions, err
+	}
+	err = engine.Desc("connected_time").Find(&sessions, &Session{Owner: owner})
 	if err != nil {
 		return sessions, err
 	}
@@ -90,11 +94,22 @@ func GetPaginationSessions(owner, status string, offset, limit int, field, value
 	return sessions, nil
 }
 
+// GetSessionsByStatus lists sessions in any of the given statuses across ALL
+// orgs -- a cluster-wide sweep the stale-session GC ticker runs. Under Postgres
+// this is one query over the single engine; under Base it unions the per-org
+// SQLite DBs (allEngines), since there is no single table spanning tenants.
 func GetSessionsByStatus(statuses []string) ([]*Session, error) {
-	sessions := []*Session{}
-	err := adapter.engine.In("status", statuses).Find(&sessions)
+	engines, err := allEngines()
 	if err != nil {
-		return sessions, err
+		return nil, err
+	}
+	sessions := []*Session{}
+	for _, engine := range engines {
+		batch := []*Session{}
+		if err := engine.In("status", statuses).Find(&batch); err != nil {
+			return sessions, err
+		}
+		sessions = append(sessions, batch...)
 	}
 	return sessions, nil
 }
@@ -104,8 +119,12 @@ func getSession(owner string, name string) (*Session, error) {
 		return nil, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	session := Session{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&session)
+	existed, err := engine.Get(&session)
 	if err != nil {
 		return &session, err
 	}
@@ -130,13 +149,17 @@ func UpdateSession(id string, session *Session, columns ...string) (bool, error)
 		return false, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
 	if len(columns) == 0 {
-		_, err := adapter.engine.ID(core.PK{owner, name}).AllCols().Update(session)
+		_, err := engine.ID(core.PK{owner, name}).AllCols().Update(session)
 		if err != nil {
 			return false, err
 		}
 	} else {
-		_, err := adapter.engine.ID(core.PK{owner, name}).Cols(columns...).Update(session)
+		_, err := engine.ID(core.PK{owner, name}).Cols(columns...).Update(session)
 		if err != nil {
 			return false, err
 		}
@@ -146,7 +169,11 @@ func UpdateSession(id string, session *Session, columns ...string) (bool, error)
 }
 
 func DeleteSession(session *Session) (bool, error) {
-	affected, err := adapter.engine.ID(core.PK{session.Owner, session.Name}).Delete(&Session{})
+	engine, err := EngineFor(session.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{session.Owner, session.Name}).Delete(&Session{})
 	if err != nil {
 		return false, err
 	}
@@ -160,7 +187,11 @@ func DeleteSessionById(id string) (bool, error) {
 }
 
 func AddSession(session *Session) (bool, error) {
-	affected, err := adapter.engine.Insert(session)
+	engine, err := EngineFor(session.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(session)
 	if err != nil {
 		return false, err
 	}

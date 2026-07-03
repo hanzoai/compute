@@ -96,7 +96,11 @@ func GetAssetCount(owner, field, value string) (int64, error) {
 
 func GetAssets(owner string) ([]*Asset, error) {
 	assets := []*Asset{}
-	err := adapter.engine.Desc("created_time").Find(&assets, &Asset{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return assets, err
+	}
+	err = engine.Desc("created_time").Find(&assets, &Asset{Owner: owner})
 	if err != nil {
 		return assets, err
 	}
@@ -120,8 +124,12 @@ func getAsset(owner string, name string) (*Asset, error) {
 		return nil, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	asset := Asset{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&asset)
+	existed, err := engine.Get(&asset)
 	if err != nil {
 		return &asset, err
 	}
@@ -182,7 +190,11 @@ func UpdateAsset(id string, asset *Asset) (bool, error) {
 		asset.RemotePassword = p.RemotePassword
 	}
 
-	affected, err := adapter.engine.ID(core.PK{owner, name}).AllCols().Update(asset)
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{owner, name}).AllCols().Update(asset)
 	if err != nil {
 		return false, err
 	}
@@ -191,7 +203,11 @@ func UpdateAsset(id string, asset *Asset) (bool, error) {
 }
 
 func AddAsset(asset *Asset) (bool, error) {
-	affected, err := adapter.engine.Insert(asset)
+	engine, err := EngineFor(asset.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(asset)
 	if err != nil {
 		return false, err
 	}
@@ -200,7 +216,11 @@ func AddAsset(asset *Asset) (bool, error) {
 }
 
 func DeleteAsset(asset *Asset) (bool, error) {
-	affected, err := adapter.engine.ID(core.PK{asset.Owner, asset.Name}).Delete(&Asset{})
+	engine, err := EngineFor(asset.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{asset.Owner, asset.Name}).Delete(&Asset{})
 	if err != nil {
 		return false, err
 	}
