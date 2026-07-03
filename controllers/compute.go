@@ -16,15 +16,17 @@
 // DigitalOcean catalog (regions/sizes/GPUs, resale-priced) and per-org machine
 // operations backed by Hanzo's house DO account. Every machine endpoint is
 // scoped to the caller's org, which is derived from the authenticated IAM
-// identity (never trusted from a client-supplied field). Launch is metered
-// through commerce (per-org debit); a dryRun returns a price quote and spends
-// nothing.
+// identity (never trusted from a client-supplied field). Beneath org, an OPTIONAL
+// app > project scope (from the gateway-threaded tenant context, or the launch
+// body as a fallback) sharpens the analytics rollup without ever gating a launch.
+// Launch is metered through commerce (per-org debit); a dryRun returns a price
+// quote and spends nothing.
 //
 // A "fleet" is not a separate entity — it is just N machines launched in one
 // batch (count>1) named "<name>-000", "<name>-001", … and grouped by the
-// ?name= (prefix) / ?kind= list filters. There is exactly ONE way a machine is
-// launched, billed and destroyed (launchMetered), whether alone or as one of a
-// batch.
+// ?name= (prefix) / ?kind= / ?project= list filters. There is exactly ONE way a
+// machine is launched, billed and destroyed (launchMetered), whether alone or as
+// one of a batch.
 package controllers
 
 import (
@@ -35,6 +37,7 @@ import (
 	"time"
 
 	"github.com/hanzoai/commerce/metering"
+	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
 
@@ -59,6 +62,28 @@ func (c *ApiController) resolveComputeOrg() string {
 		return strings.TrimSpace(u.Owner)
 	}
 	return strings.TrimSpace(c.Input().Get("owner"))
+}
+
+// resolveComputeApp / resolveComputeProject return the OPTIONAL app / project
+// scope beneath the owning org, resolved the same ONE way: the gateway-threaded
+// tenant context (X-App-ID / X-Project-ID, populated by routers.TenantContextFilter
+// and read back through object's getters) is authoritative; a direct API caller
+// that sends no header may pass the value in the launch body as a fallback. Empty
+// means "no such scope" — unlike org, app and project are optional finer
+// attribution and NEVER gate a launch. The billing key stays org; app/project only
+// sharpen the analytics rollup (org > app > project).
+func (c *ApiController) resolveComputeApp(fallback string) string {
+	if a := object.GetTenantAppID(c.Ctx); a != "" {
+		return a
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func (c *ApiController) resolveComputeProject(fallback string) string {
+	if p := object.GetTenantProjectID(c.Ctx); p != "" {
+		return p
+	}
+	return strings.TrimSpace(fallback)
 }
 
 // ---- Catalog (cached, resale-priced) ----
@@ -123,14 +148,17 @@ func (c *ApiController) GetComputeGPUs() {
 // ---- Machines (per-org, house account) ----
 
 // filterMachines narrows a machine list by an optional kind (exact, matched on
-// the machine's canonical kind) and an optional name prefix (matched on the
-// droplet DisplayName). Empty filters pass everything — so a batch launched as
+// the machine's canonical kind), an optional name prefix (matched on the droplet
+// DisplayName), and an optional project (exact, matched on the machine's
+// hanzo-project scope tag). Empty filters pass everything — so a batch launched as
 // "<name>-000", "<name>-001", … is listable and groupable purely by its ?name=
-// prefix (and ?kind=). This is the ONLY grouping; there is no fleet entity.
-func filterMachines(machines []*service.Machine, kind, namePrefix string) []*service.Machine {
+// prefix (and ?kind= / ?project=). This is the ONLY grouping; there is no fleet
+// entity.
+func filterMachines(machines []*service.Machine, kind, namePrefix, project string) []*service.Machine {
 	kind = strings.TrimSpace(kind)
 	namePrefix = strings.TrimSpace(namePrefix)
-	if kind == "" && namePrefix == "" {
+	project = strings.TrimSpace(project)
+	if kind == "" && namePrefix == "" && project == "" {
 		return machines
 	}
 	want := service.CanonicalKind(kind)
@@ -142,6 +170,9 @@ func filterMachines(machines []*service.Machine, kind, namePrefix string) []*ser
 		if kind != "" && service.MachineKind(m) != want {
 			continue
 		}
+		if project != "" && service.MachineProject(m) != project {
+			continue
+		}
 		out = append(out, m)
 	}
 	return out
@@ -150,7 +181,7 @@ func filterMachines(machines []*service.Machine, kind, namePrefix string) []*ser
 // ListComputeMachines
 // @Title ListComputeMachines
 // @Tag Compute API
-// @Description list the caller org's machines, optionally filtered by ?kind= and ?name= (prefix)
+// @Description list the caller org's machines, optionally filtered by ?kind=, ?name= (prefix) and ?project=
 // @Success 200 {object} controllers.Response
 // @router /machines [get]
 func (c *ApiController) ListComputeMachines() {
@@ -168,7 +199,7 @@ func (c *ApiController) ListComputeMachines() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(filterMachines(machines, c.Input().Get("kind"), c.Input().Get("name")))
+	c.ResponseOk(filterMachines(machines, c.Input().Get("kind"), c.Input().Get("name"), c.Input().Get("project")))
 }
 
 // GetComputeMachine
@@ -215,16 +246,21 @@ func (c *ApiController) DeleteComputeMachine() {
 }
 
 // launchComputeRequest is the body for POST /v1/machines/launch. It embeds the
-// provider spec and adds a size alias, a kind, a dryRun flag (quote only, no
-// spend) and a batch launch: count>1 launches N machines named "<name>-000",
-// "<name>-001", … (a "fleet" is just this batch, grouped by the ?name= prefix).
+// provider spec and adds a size alias, a kind, an optional app/project scope, a
+// dryRun flag (quote only, no spend) and a batch launch: count>1 launches N
+// machines named "<name>-000", "<name>-001", … (a "fleet" is just this batch,
+// grouped by the ?name= prefix). App/Project are a body-level FALLBACK for a
+// direct API caller — the gateway-threaded X-App-ID / X-Project-ID header wins
+// when present (resolveComputeApp / resolveComputeProject).
 type launchComputeRequest struct {
 	service.CreateMachineSpec
-	Size   string `json:"size"`
-	Kind   string `json:"kind"`
-	Count  int    `json:"count"` // >1 launches a batch; 0/1 is a single machine
-	Name   string `json:"name"`  // machine name; batch members are <name>-NNN
-	DryRun bool   `json:"dryRun"`
+	Size    string `json:"size"`
+	Kind    string `json:"kind"`
+	App     string `json:"app"`     // optional org>app>project scope; header X-App-ID wins
+	Project string `json:"project"` // optional; header X-Project-ID wins
+	Count   int    `json:"count"`   // >1 launches a batch; 0/1 is a single machine
+	Name    string `json:"name"`    // machine name; batch members are <name>-NNN
+	DryRun  bool   `json:"dryRun"`
 }
 
 // LaunchQuote is the resale price quote for a size in a region (Hanzo price
@@ -347,11 +383,17 @@ func (c *ApiController) LaunchComputeMachine() {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// One base spec — size + kind set once, shared by the single and every batch
-	// member (SetKind default is machine; kind=bot bootstraps the @hanzo/bot agent).
+	// One base spec — size, kind and the optional app>project scope set once,
+	// shared by the single and every batch member. SetKind default is machine
+	// (kind=bot bootstraps the @hanzo/bot agent); SetScope injects the resolved
+	// app/project as hanzo-app/hanzo-project tags so the droplet self-describes its
+	// org>app>project scope, exactly as org is injected in LaunchOrgMachine. Both
+	// launch surfaces (single + batch) flow through this SAME base, so scope is set
+	// exactly one way.
 	base := req.CreateMachineSpec
 	base.InstanceType = size
 	service.SetKind(&base, req.Kind)
+	service.SetScope(&base, c.resolveComputeApp(req.App), c.resolveComputeProject(req.Project))
 	name := strings.TrimSpace(req.Name)
 
 	// Batch: count>1 launches N members named "<name>-NNN" through the SAME

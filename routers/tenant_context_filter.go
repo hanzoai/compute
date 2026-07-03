@@ -21,14 +21,6 @@ import (
 	"github.com/hanzoai/visor/object"
 )
 
-const (
-	tenantContextOrgIDKey     = "tenant.orgId"
-	tenantContextProjectIDKey = "tenant.projectId"
-	tenantContextTenantIDKey  = "tenant.tenantId"
-	tenantContextActorIDKey   = "tenant.actorId"
-	tenantContextEnvKey       = "tenant.env"
-)
-
 func normalizeTenantHeader(value string) string {
 	return strings.TrimSpace(value)
 }
@@ -37,15 +29,16 @@ func getTenantHeader(ctx *context.Context, name string) string {
 	return normalizeTenantHeader(ctx.Input.Header(name))
 }
 
-func setTenantContextValue(ctx *context.Context, key string, value string) {
-	if value == "" {
-		return
-	}
-	ctx.Input.SetData(key, value)
-}
-
+// TenantContextFilter copies the gateway-injected tenant-scope headers
+// (org > app > project, plus tenant/actor/env) onto the beego request context so
+// every downstream handler resolves the caller's scope through object's getters —
+// the ONE shared read-back. Org additionally falls back to the whitelabel
+// hostname's org filter, and tenant defaults to org. App and project are OPTIONAL
+// finer scope beneath org and are threaded verbatim (left unset when the caller
+// sends no header), so a request that omits them is never altered.
 func TenantContextFilter(ctx *context.Context) {
 	orgID := getTenantHeader(ctx, "X-Org-ID")
+	appID := getTenantHeader(ctx, "X-App-ID")
 	projectID := getTenantHeader(ctx, "X-Project-ID")
 	tenantID := getTenantHeader(ctx, "X-Tenant-ID")
 	actorID := getTenantHeader(ctx, "X-Actor-ID")
@@ -63,29 +56,10 @@ func TenantContextFilter(ctx *context.Context) {
 		tenantID = orgID
 	}
 
-	setTenantContextValue(ctx, tenantContextOrgIDKey, orgID)
-	setTenantContextValue(ctx, tenantContextProjectIDKey, projectID)
-	setTenantContextValue(ctx, tenantContextTenantIDKey, tenantID)
-	setTenantContextValue(ctx, tenantContextActorIDKey, actorID)
-	setTenantContextValue(ctx, tenantContextEnvKey, env)
-}
-
-func getTenantContextValue(ctx *context.Context, key string) string {
-	if ctx == nil {
-		return ""
-	}
-	value := ctx.Input.GetData(key)
-	text, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(text)
-}
-
-func GetTenantOrgID(ctx *context.Context) string {
-	value := getTenantContextValue(ctx, tenantContextOrgIDKey)
-	if value != "" {
-		return value
-	}
-	return getTenantHeader(ctx, "X-Org-ID")
+	object.SetTenantContextValue(ctx, object.TenantContextOrgIDKey, orgID)
+	object.SetTenantContextValue(ctx, object.TenantContextAppIDKey, appID)
+	object.SetTenantContextValue(ctx, object.TenantContextProjectIDKey, projectID)
+	object.SetTenantContextValue(ctx, object.TenantContextTenantIDKey, tenantID)
+	object.SetTenantContextValue(ctx, object.TenantContextActorIDKey, actorID)
+	object.SetTenantContextValue(ctx, object.TenantContextEnvKey, env)
 }
