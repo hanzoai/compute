@@ -201,10 +201,10 @@ func tagValue(tags, key string) string {
 // otherwise the write is handed to a goroutine so it NEVER delays or fails the
 // caller.
 func EmitCompute(org, event string, m *Machine, priceCents int64) {
-	if !AnalyticsConfigured() || m == nil {
+	if m == nil {
 		return
 	}
-	go writeComputeEvent(ComputeEvent{
+	EmitComputeEvent(ComputeEvent{
 		Org:        org,
 		App:        tagValue(m.Tag, appTagKey),
 		Project:    tagValue(m.Tag, projectTagKey),
@@ -213,8 +213,25 @@ func EmitCompute(org, event string, m *Machine, priceCents int64) {
 		MachineID:  m.Id,
 		Size:       m.Size,
 		PriceCents: priceCents,
-		Ts:         time.Now().UTC().Format("2006-01-02 15:04:05.000"),
 	})
+}
+
+// EmitComputeEvent is the ONE kind-agnostic emit: it records a single compute
+// fleet event of ANY kind (machine, bot, cluster, nodepool, container, function)
+// into the datastore. It canonicalizes the kind and stamps ts when the caller
+// left it empty, then — like every emit — is best-effort and fire-and-forget: a
+// no-op when analytics is unconfigured, otherwise handed to a goroutine so it
+// NEVER delays or fails the caller. EmitCompute (machine) and the cluster /
+// nodepool emitters are all thin adapters over this one path.
+func EmitComputeEvent(ev ComputeEvent) {
+	if !AnalyticsConfigured() {
+		return
+	}
+	ev.Kind = CanonicalKind(ev.Kind)
+	if ev.Ts == "" {
+		ev.Ts = time.Now().UTC().Format("2006-01-02 15:04:05.000")
+	}
+	go writeComputeEvent(ev)
 }
 
 // writeComputeEvent performs the single best-effort HTTP insert. Every failure is

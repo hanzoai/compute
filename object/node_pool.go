@@ -47,6 +47,32 @@ func (pool *NodePool) GetId() string {
 	return fmt.Sprintf("%s/%s", pool.Owner, pool.Name)
 }
 
+// computeEvent builds this node pool's analytics fleet event (kind=nodepool).
+// org falls back to the pool's Casdoor owner when no explicit billing OrgID is
+// set; the DOKS PoolID identifies the unit (its owner/name id when the pool is
+// not yet provisioned), Size is its node slug, and priceCents is the caller's
+// per-event price (CostPerHour on create/scale, 0 on destroy). The single
+// pool→event mapping, so every emit path writes one consistent shape.
+func (pool *NodePool) computeEvent(event string, priceCents int64) service.ComputeEvent {
+	org := pool.OrgID
+	if org == "" {
+		org = pool.Owner
+	}
+	id := pool.PoolID
+	if id == "" {
+		id = pool.GetId()
+	}
+	return service.ComputeEvent{
+		Org:        org,
+		Project:    pool.ProjectID,
+		Kind:       service.KindNodePool,
+		Event:      event,
+		MachineID:  id,
+		Size:       pool.Size,
+		PriceCents: priceCents,
+	}
+}
+
 // GetAllNodePools fetches all node pools across all owners (for billing reporting).
 func GetAllNodePools(pools *[]*NodePool) error {
 	return adapter.engine.Where("state = ?", "Active").Find(pools)
@@ -130,9 +156,23 @@ func AddNodePool(pool *NodePool) (bool, error) {
 }
 
 func DeleteNodePool(pool *NodePool) (bool, error) {
+	// Load the authoritative record first so a destroyed event carries the
+	// pool's billing attribution + identity even when the caller supplied only
+	// the PK (the delete controller unmarshals a sparse pool).
+	full, _ := getNodePool(pool.Owner, pool.Name)
+
 	affected, err := adapter.engine.ID(core.PK{pool.Owner, pool.Name}).Delete(&NodePool{})
 	if err != nil {
 		return false, err
+	}
+
+	if affected != 0 {
+		emitPool := full
+		if emitPool == nil {
+			emitPool = pool
+		}
+		// Roll a destroyed event into the analytics datastore (best-effort).
+		service.EmitComputeEvent(emitPool.computeEvent(service.ComputeDestroyed, 0))
 	}
 
 	return affected != 0, nil
@@ -265,6 +305,10 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 		return nil, fmt.Errorf("node pool created in DOKS but DB insert failed: %w", err)
 	}
 
+	// Roll a launched event into the analytics datastore (best-effort; never
+	// blocks or fails the create) — kind=nodepool for the Clusters board.
+	service.EmitComputeEvent(pool.computeEvent(service.ComputeLaunched, pool.CostPerHour))
+
 	return pool, nil
 }
 
@@ -327,6 +371,9 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 		if err != nil {
 			return nil, err
 		}
+		// Roll a running event into the analytics datastore at the pool's new
+		// scale (best-effort) — kind=nodepool, price from CostPerHour.
+		service.EmitComputeEvent(dbPool.computeEvent(service.ComputeRunning, dbPool.CostPerHour))
 		return dbPool, nil
 	}
 
