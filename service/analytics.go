@@ -151,6 +151,14 @@ func specIsBot(spec *CreateMachineSpec) bool {
 	return CanonicalKind(spec.Tags[kindTagKey]) == KindBot
 }
 
+// MachineKind recovers a machine's canonical compute kind from its own tags —
+// the read-back counterpart of SetKind (which writes the kind on launch). It is
+// the ONE way to read a live machine's kind (the ?kind= list filter and
+// EmitCompute both use it), so a missing/garbage tag resolves to machine.
+func MachineKind(m *Machine) string {
+	return CanonicalKind(tagValue(m.Tag, kindTagKey))
+}
+
 // datastoreURL is the datastore's ClickHouse HTTP base (e.g.
 // http://datastore.hanzo.svc.cluster.local:8123). It is the single "is the
 // analytical plane wired" signal: unset ⇒ every emit is a safe no-op, so a
@@ -200,7 +208,7 @@ func EmitCompute(org, event string, m *Machine, priceCents int64) {
 		Org:        org,
 		App:        tagValue(m.Tag, appTagKey),
 		Project:    tagValue(m.Tag, projectTagKey),
-		Kind:       CanonicalKind(tagValue(m.Tag, kindTagKey)),
+		Kind:       MachineKind(m),
 		Event:      event,
 		MachineID:  m.Id,
 		Size:       m.Size,

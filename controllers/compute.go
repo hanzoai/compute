@@ -19,11 +19,18 @@
 // identity (never trusted from a client-supplied field). Launch is metered
 // through commerce (per-org debit); a dryRun returns a price quote and spends
 // nothing.
+//
+// A "fleet" is not a separate entity — it is just N machines launched in one
+// batch (count>1) named "<name>-000", "<name>-001", … and grouped by the
+// ?name= (prefix) / ?kind= list filters. There is exactly ONE way a machine is
+// launched, billed and destroyed (launchMetered), whether alone or as one of a
+// batch.
 package controllers
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -115,10 +122,35 @@ func (c *ApiController) GetComputeGPUs() {
 
 // ---- Machines (per-org, house account) ----
 
+// filterMachines narrows a machine list by an optional kind (exact, matched on
+// the machine's canonical kind) and an optional name prefix (matched on the
+// droplet DisplayName). Empty filters pass everything — so a batch launched as
+// "<name>-000", "<name>-001", … is listable and groupable purely by its ?name=
+// prefix (and ?kind=). This is the ONLY grouping; there is no fleet entity.
+func filterMachines(machines []*service.Machine, kind, namePrefix string) []*service.Machine {
+	kind = strings.TrimSpace(kind)
+	namePrefix = strings.TrimSpace(namePrefix)
+	if kind == "" && namePrefix == "" {
+		return machines
+	}
+	want := service.CanonicalKind(kind)
+	out := make([]*service.Machine, 0, len(machines))
+	for _, m := range machines {
+		if namePrefix != "" && !strings.HasPrefix(m.DisplayName, namePrefix) {
+			continue
+		}
+		if kind != "" && service.MachineKind(m) != want {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 // ListComputeMachines
 // @Title ListComputeMachines
 // @Tag Compute API
-// @Description list the caller org's machines
+// @Description list the caller org's machines, optionally filtered by ?kind= and ?name= (prefix)
 // @Success 200 {object} controllers.Response
 // @router /machines [get]
 func (c *ApiController) ListComputeMachines() {
@@ -136,7 +168,7 @@ func (c *ApiController) ListComputeMachines() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(machines)
+	c.ResponseOk(filterMachines(machines, c.Input().Get("kind"), c.Input().Get("name")))
 }
 
 // GetComputeMachine
@@ -183,11 +215,15 @@ func (c *ApiController) DeleteComputeMachine() {
 }
 
 // launchComputeRequest is the body for POST /v1/machines/launch. It embeds the
-// provider spec and adds a size alias plus a dryRun flag (quote only, no spend).
+// provider spec and adds a size alias, a kind, a dryRun flag (quote only, no
+// spend) and a batch launch: count>1 launches N machines named "<name>-000",
+// "<name>-001", … (a "fleet" is just this batch, grouped by the ?name= prefix).
 type launchComputeRequest struct {
 	service.CreateMachineSpec
 	Size   string `json:"size"`
 	Kind   string `json:"kind"`
+	Count  int    `json:"count"` // >1 launches a batch; 0/1 is a single machine
+	Name   string `json:"name"`  // machine name; batch members are <name>-NNN
 	DryRun bool   `json:"dryRun"`
 }
 
@@ -203,10 +239,57 @@ type LaunchQuote struct {
 	GPU          *service.GPUSpec `json:"gpu,omitempty"`
 }
 
+// batchMemberName is the canonical name of batch member i: "<name>-NNN". A batch
+// launched with count N is just N machines sharing this name prefix — there is
+// no separate fleet entity; the ?name= list filter re-groups them.
+func batchMemberName(name string, i int) string {
+	return fmt.Sprintf("%s-%03d", name, i)
+}
+
+// launchMetered is the ONE metered launch shared by the single and batch launch
+// paths: authorize the org for the first hour of si, provision + bootstrap via
+// LaunchOrgMachine, then debit that launch hour. Fail-closed — an unknown or
+// insufficient balance launches nothing and spends nothing. The caller sets the
+// spec's kind (service.SetKind) before calling; launchMetered is kind-agnostic.
+// Every SUBSEQUENT running hour is debited by service.MeterRunningMachines (the
+// hourly ticker) on this SAME commerce path; the launch owns the launch hour and
+// the sweep skips a machine created in the current clock hour, so the hour is
+// never double-billed. A metering write failure never fails the launch — the
+// machine exists and the ticker/reconciler reconciles.
+func launchMetered(ctx context.Context, org string, spec *service.CreateMachineSpec, si *service.SizeInfo) (*service.Machine, error) {
+	meter := service.NewMeteringClient(org)
+	firstHourCents := service.PriceToCents(si.PriceHourly)
+	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd", AmountCents: firstHourCents}); err != nil {
+		if err == metering.ErrInsufficientBalance {
+			return nil, fmt.Errorf("insufficient balance to launch machine")
+		}
+		return nil, fmt.Errorf("billing authorization failed: %v", err)
+	}
+	machine, err := service.LaunchOrgMachine(org, spec)
+	if err != nil {
+		return nil, err
+	}
+	// Roll a launched event into the analytics datastore (best-effort; never
+	// blocks or fails the launch) — the analytical mirror of the commerce debit.
+	service.EmitCompute(org, service.ComputeLaunched, machine, firstHourCents)
+	_, _ = meter.Record(ctx, metering.Usage{
+		User:        org,
+		Actor:       org,
+		Org:         org,
+		Currency:    "usd",
+		AmountCents: firstHourCents,
+		Provider:    "compute",
+		Model:       spec.InstanceType,
+		Status:      "launched",
+		RequestID:   machine.Id,
+	})
+	return machine, nil
+}
+
 // LaunchComputeMachine
 // @Title LaunchComputeMachine
 // @Tag Compute API
-// @Description quote (dryRun) or launch a metered, per-org machine
+// @Description quote (dryRun) or launch a metered, per-org machine; count>1 launches a batch of <name>-NNN
 // @router /machines/launch [post]
 func (c *ApiController) LaunchComputeMachine() {
 	org := c.resolveComputeOrg()
@@ -256,67 +339,52 @@ func (c *ApiController) LaunchComputeMachine() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// The batch launch budgets ~60s per member; a single launch keeps 30s.
+	timeout := 30 * time.Second
+	if req.Count > 1 {
+		timeout = time.Duration(60*req.Count) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	meter := service.NewMeteringClient(org)
-	firstHourCents := service.PriceToCents(si.PriceHourly)
+	// One base spec — size + kind set once, shared by the single and every batch
+	// member (SetKind default is machine; kind=bot bootstraps the @hanzo/bot agent).
+	base := req.CreateMachineSpec
+	base.InstanceType = size
+	service.SetKind(&base, req.Kind)
+	name := strings.TrimSpace(req.Name)
 
-	// Pre-flight balance gate — fail closed (a paid product does not launch on
-	// an unknown balance) AND require the org can cover at least the first hour,
-	// so a near-zero balance can't green-light an expensive GPU (AmountCents
-	// gate, not the bare available>0).
-	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd", AmountCents: firstHourCents}); err != nil {
-		if err == metering.ErrInsufficientBalance {
-			c.ResponseError("insufficient balance to launch machine")
+	// Batch: count>1 launches N members named "<name>-NNN" through the SAME
+	// metered primitive. A per-member failure returns what launched plus the error.
+	if req.Count > 1 {
+		if name == "" {
+			c.ResponseError("name is required to launch a batch")
 			return
 		}
-		c.ResponseError("billing authorization failed: " + err.Error())
+		machines := make([]*service.Machine, 0, req.Count)
+		for i := 0; i < req.Count; i++ {
+			spec := base
+			spec.Name = batchMemberName(name, i)
+			spec.DisplayName = spec.Name
+			machine, err := launchMetered(ctx, org, &spec, si)
+			if err != nil {
+				c.ResponseOk(map[string]interface{}{"machines": machines, "quote": quote, "error": err.Error()})
+				return
+			}
+			machines = append(machines, machine)
+		}
+		c.ResponseOk(map[string]interface{}{"machines": machines, "quote": quote})
 		return
 	}
 
-	spec := req.CreateMachineSpec
-	spec.InstanceType = size
-	// Record the requested kind (default machine - a raw single launch is
-	// agent-less) so it flows onto the droplet tags and gates the agent install.
-	service.SetKind(&spec, req.Kind)
-	machine, err := service.LaunchOrgMachine(org, &spec)
+	// Single: count<=1 keeps today's shape. The outer Name shadows the embedded
+	// spec's Name in JSON, so set it explicitly.
+	spec := base
+	spec.Name = name
+	machine, err := launchMetered(ctx, org, &spec, si)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
-
-	// Roll a launched event into the analytics datastore (best-effort; never
-	// blocks or fails the launch) - the analytical mirror of the commerce
-	// debit below.
-	service.EmitCompute(org, service.ComputeLaunched, machine, firstHourCents)
-
-	// Debit the FIRST hour of resale price to the org at launch. Every SUBSEQUENT
-	// hour a running machine stays up is debited by service.MeterRunningMachines
-	// (the hourly ticker) on the SAME commerce/metering path — so a bound machine
-	// keeps drawing down the org's balance. The launch owns the LAUNCH hour; the
-	// recurring sweep explicitly SKIPS a machine whose create time is in the
-	// current hour (service.meterMachines/createdInHour), so launch + a sweep
-	// landing in the same clock hour never double-bill that hour. (Commerce does
-	// not dedup on requestId, so this skip — not the requestId — is what prevents
-	// the overlap; cross-replica overlap is prevented by the ticker's per-hour
-	// single-flight lease.)
-	if _, err := meter.Record(ctx, metering.Usage{
-		User:        org,
-		Actor:       org,
-		Org:         org,
-		Currency:    "usd",
-		AmountCents: firstHourCents,
-		Provider:    "compute",
-		Model:       size,
-		Status:      "launched",
-		RequestID:   machine.Id,
-	}); err != nil {
-		// The machine exists; a metering write failure must not 500 the launch.
-		// Surface it in the payload so the ticker/reconciler can reconcile.
-		c.ResponseOk(map[string]interface{}{"machine": machine, "quote": quote, "meteringError": err.Error()})
-		return
-	}
-
 	c.ResponseOk(map[string]interface{}{"machine": machine, "quote": quote})
 }
