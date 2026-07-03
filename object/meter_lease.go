@@ -54,7 +54,10 @@ const meterLeaseTTL = 24 * time.Hour
 // nothing on the hot skip path.
 func ClaimMeterHour(now time.Time) bool {
 	hour := now.UTC().Format("2006010215")
-	affected, err := adapter.engine.Insert(&MeterLease{
+	// The lease is a cluster-global single-winner primitive, so it lives on the
+	// shared coordination engine (Postgres under both backends), NEVER in per-org
+	// SQLite -- two pods' separate SQLite files would each "win" and double-debit.
+	affected, err := Shared().Insert(&MeterLease{
 		Hour:        hour,
 		CreatedTime: now.UTC().Format(time.RFC3339),
 	})
@@ -68,5 +71,5 @@ func ClaimMeterHour(now time.Time) bool {
 // pruneMeterLeases deletes lease rows older than cutoff. Best-effort: a failure
 // only leaves stale rows, never causes a double debit.
 func pruneMeterLeases(cutoff time.Time) {
-	_, _ = adapter.engine.Where("hour < ?", cutoff.UTC().Format("2006010215")).Delete(&MeterLease{})
+	_, _ = Shared().Where("hour < ?", cutoff.UTC().Format("2006010215")).Delete(&MeterLease{})
 }

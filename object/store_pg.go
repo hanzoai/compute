@@ -26,4 +26,11 @@ type pgStore struct {
 
 func (s *pgStore) EngineFor(string) (*xorm.Engine, error) { return s.engine, nil }
 
+// Shared is the same one engine -- the shared tables are plain rows in it.
+func (s *pgStore) Shared() *xorm.Engine { return s.engine }
+
+// AllEngines is the single engine: it already holds every org's rows, so a
+// cross-org sweep is one query against it.
+func (s *pgStore) AllEngines() ([]*xorm.Engine, error) { return []*xorm.Engine{s.engine}, nil }
+
 func (s *pgStore) Close() error { return s.engine.Close() }

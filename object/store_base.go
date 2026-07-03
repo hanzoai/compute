@@ -34,26 +34,36 @@ import (
 // the full DSN through to the driver.
 const sqlitePragmas = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
 
-// baseStore serves each owner from its own SQLite file under a data root -- one
-// *xorm.Engine per org, opened lazily and cached for the process lifetime. This
-// is the per-tenant Base substrate (HIP-0302). The same xorm models and queries
-// run unchanged against it; only the resolved engine differs from Postgres.
+// baseStore serves each owner's per-tenant tables from its own SQLite file under
+// a data root -- one *xorm.Engine per org, opened lazily and cached for the
+// process lifetime. It also holds coord, the shared Postgres engine that serves
+// the cross-pod shared tables (Plan catalog, MeterLease lease) which cannot live
+// in per-org SQLite. The same xorm models and queries run unchanged against
+// either; only the resolved engine differs from Postgres.
 //
-// Slice-1 scope: local per-org files only. Object-storage replication (the
-// base/store S3 hydration path, or hanzo/cloud's org.Replicator) is a follow-up
-// slice -- see the migration plan / LLM.md.
+// Durability/HA scope: per-org files are local to the pod's data root. In
+// production dataRoot is a persistent volume, so an org DB survives a pod
+// restart. Serving one org from more than one pod concurrently requires
+// WAL->object-storage replication with single-writer-per-org coordination; that
+// is a separate slice, and until it lands Base mode is safe under replicas:1 or
+// org-sharded routing. See LLM.md (Base backend: durability & replication) for
+// the exact integration point and the interim operational constraint.
 type baseStore struct {
-	root string
+	root  string
+	coord *xorm.Engine // shared Postgres engine for the cross-pod shared tables
 
 	mu      sync.Mutex
 	engines map[string]*xorm.Engine
 }
 
-func newBaseStore(root string) (*baseStore, error) {
+func newBaseStore(root string, coord *xorm.Engine) (*baseStore, error) {
 	if root == "" {
 		return nil, fmt.Errorf("visor: base store data root is empty")
 	}
-	return &baseStore{root: root, engines: map[string]*xorm.Engine{}}, nil
+	if coord == nil {
+		return nil, fmt.Errorf("visor: base store shared coordination engine is nil")
+	}
+	return &baseStore{root: root, coord: coord, engines: map[string]*xorm.Engine{}}, nil
 }
 
 // EngineFor returns the org's SQLite engine, opening and schema-syncing it on
@@ -79,7 +89,9 @@ func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("visor: base store open %s: %w", path, err)
 	}
-	if err := engine.Sync2(models()...); err != nil {
+	// Only the per-tenant tables live in an org DB; the shared tables (Plan,
+	// MeterLease) stay on coord (Postgres) and are never synced here.
+	if err := engine.Sync2(perOrgModels()...); err != nil {
 		_ = engine.Close()
 		return nil, fmt.Errorf("visor: base store sync %s: %w", path, err)
 	}
@@ -88,7 +100,38 @@ func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
 	return engine, nil
 }
 
-// Close closes every open per-org engine, returning the first error.
+// Shared returns the shared Postgres engine that holds the cross-pod tables.
+func (s *baseStore) Shared() *xorm.Engine { return s.coord }
+
+// AllEngines returns one engine per org DB under the data root -- the set a
+// cross-org sweep unions over. It reads the on-disk orgs/ directory so it sees
+// every org ever written, not only those opened this process lifetime.
+func (s *baseStore) AllEngines() ([]*xorm.Engine, error) {
+	orgsDir := filepath.Join(s.root, "orgs")
+	entries, err := os.ReadDir(orgsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // no org has been written yet
+		}
+		return nil, fmt.Errorf("visor: base store list orgs %s: %w", orgsDir, err)
+	}
+
+	engines := make([]*xorm.Engine, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		engine, err := s.EngineFor(e.Name())
+		if err != nil {
+			return nil, err
+		}
+		engines = append(engines, engine)
+	}
+	return engines, nil
+}
+
+// Close closes every open per-org engine, returning the first error. It does
+// NOT close coord: the Adapter owns the shared Postgres engine's lifecycle.
 func (s *baseStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

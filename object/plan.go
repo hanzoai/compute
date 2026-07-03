@@ -50,9 +50,14 @@ type Plan struct {
 	SortOrder int `json:"sortOrder"`
 }
 
+// Plan is a global read-only catalog: identical for every org, so it lives on
+// the shared engine (Shared(), Postgres under both backends), never duplicated
+// into per-org SQLite. The owner column is retained so white-label brands can
+// scope their own catalog, but the physical table is shared. All Plan CRUD
+// therefore routes through Shared().
 func GetPlans(owner string) ([]*Plan, error) {
 	plans := []*Plan{}
-	err := adapter.engine.Where("owner = ? AND state = ?", owner, "Active").Asc("sort_order").Find(&plans)
+	err := Shared().Where("owner = ? AND state = ?", owner, "Active").Asc("sort_order").Find(&plans)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +66,7 @@ func GetPlans(owner string) ([]*Plan, error) {
 
 func GetAllPlans(owner string) ([]*Plan, error) {
 	plans := []*Plan{}
-	err := adapter.engine.Where("owner = ?", owner).Asc("sort_order").Find(&plans)
+	err := Shared().Where("owner = ?", owner).Asc("sort_order").Find(&plans)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +75,7 @@ func GetAllPlans(owner string) ([]*Plan, error) {
 
 func GetPlan(owner string, name string) (*Plan, error) {
 	plan := Plan{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&plan)
+	existed, err := Shared().Get(&plan)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +86,7 @@ func GetPlan(owner string, name string) (*Plan, error) {
 }
 
 func AddPlan(plan *Plan) (bool, error) {
-	affected, err := adapter.engine.Insert(plan)
+	affected, err := Shared().Insert(plan)
 	if err != nil {
 		return false, err
 	}
@@ -89,7 +94,7 @@ func AddPlan(plan *Plan) (bool, error) {
 }
 
 func UpdatePlan(owner string, name string, plan *Plan) (bool, error) {
-	_, err := adapter.engine.ID(core.PK{owner, name}).AllCols().Update(plan)
+	_, err := Shared().ID(core.PK{owner, name}).AllCols().Update(plan)
 	if err != nil {
 		return false, err
 	}
@@ -97,7 +102,7 @@ func UpdatePlan(owner string, name string, plan *Plan) (bool, error) {
 }
 
 func DeletePlan(plan *Plan) (bool, error) {
-	affected, err := adapter.engine.ID(core.PK{plan.Owner, plan.Name}).Delete(&Plan{})
+	affected, err := Shared().ID(core.PK{plan.Owner, plan.Name}).Delete(&Plan{})
 	if err != nil {
 		return false, err
 	}
