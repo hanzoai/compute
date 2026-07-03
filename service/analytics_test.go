@@ -93,6 +93,23 @@ func TestEmitComputeMachineKind(t *testing.T) {
 	}
 }
 
+// An out-of-set kind tag normalizes to machine on emit (open-ended column, safe
+// fallback) — the case the widened spectrum must guarantee.
+func TestEmitComputeUnknownKindNormalizes(t *testing.T) {
+	got := captureDatastore(t)
+	m := &Machine{Id: "9", Size: "s-1vcpu-1gb", Tag: "hanzo-org:acme,hanzo-kind:quantum-toaster,"}
+	EmitCompute("acme", ComputeRunning, m, 3)
+
+	select {
+	case c := <-got:
+		if c.row.Kind != KindMachine {
+			t.Fatalf("kind = %q, want %q (unknown normalizes to machine)", c.row.Kind, KindMachine)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no datastore insert received")
+	}
+}
+
 // With no DATASTORE_URL, emit is a safe no-op (must not panic or block).
 func TestAnalyticsUnconfiguredNoOp(t *testing.T) {
 	t.Setenv("DATASTORE_URL", "")
@@ -102,11 +119,16 @@ func TestAnalyticsUnconfiguredNoOp(t *testing.T) {
 	EmitCompute("acme", ComputeRunning, &Machine{Id: "1", Tag: "hanzo-org:acme,"}, 1)
 }
 
-// CanonicalKind defaults everything but the exact string "machine" to bot.
+// CanonicalKind passes through the whole compute spectrum and normalizes anything
+// unrecognized (including empty) to machine.
 func TestCanonicalKind(t *testing.T) {
 	cases := map[string]string{
-		"": KindBot, "bot": KindBot, "machine": KindMachine,
-		"MACHINE": KindBot, "garbage": KindBot, " machine ": KindMachine,
+		// the known spectrum passes through
+		"machine": KindMachine, "bot": KindBot, "cluster": KindCluster,
+		"nodepool": KindNodePool, "container": KindContainer, "function": KindFunction,
+		" bot ": KindBot,
+		// out of set / empty -> machine (the spectrum base)
+		"": KindMachine, "MACHINE": KindMachine, "vm": KindMachine, "garbage": KindMachine,
 	}
 	for in, want := range cases {
 		if got := CanonicalKind(in); got != want {
@@ -115,25 +137,30 @@ func TestCanonicalKind(t *testing.T) {
 	}
 }
 
-// SetKind + specIsBot gate the agent cloud-init: a machine gets none, a bot does.
+// SetKind + specIsBot gate the agent cloud-init: only a bot gets it; a default
+// (raw single launch) is a machine and gets none.
 func TestSetKindGatesAgent(t *testing.T) {
 	spec := &CreateMachineSpec{}
 
-	SetKind(spec, "") // default
-	if spec.Tags[kindTagKey] != KindBot || !specIsBot(spec) {
-		t.Fatalf("default kind: tag=%q isBot=%v, want bot/true", spec.Tags[kindTagKey], specIsBot(spec))
-	}
-
-	SetKind(spec, KindMachine)
+	SetKind(spec, "") // default -> machine (raw single launch, agent-less)
 	if spec.Tags[kindTagKey] != KindMachine || specIsBot(spec) {
-		t.Fatalf("machine kind: tag=%q isBot=%v, want machine/false", spec.Tags[kindTagKey], specIsBot(spec))
+		t.Fatalf("default kind: tag=%q isBot=%v, want machine/false", spec.Tags[kindTagKey], specIsBot(spec))
 	}
 	if ud := buildBotUserData(spec); ud != "" {
 		t.Fatalf("machine must get no cloud-init, got %d bytes", len(ud))
 	}
 
 	SetKind(spec, KindBot)
+	if spec.Tags[kindTagKey] != KindBot || !specIsBot(spec) {
+		t.Fatalf("bot kind: tag=%q isBot=%v, want bot/true", spec.Tags[kindTagKey], specIsBot(spec))
+	}
 	if ud := buildBotUserData(spec); !strings.Contains(ud, "@hanzo/bot") {
 		t.Fatal("bot must get @hanzo/bot cloud-init")
+	}
+
+	// a non-bot kind from the wider spectrum is also agent-less
+	SetKind(spec, KindCluster)
+	if specIsBot(spec) || buildBotUserData(spec) != "" {
+		t.Fatal("cluster kind must be agent-less")
 	}
 }

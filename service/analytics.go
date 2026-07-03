@@ -17,7 +17,8 @@
 // that mirrors, but is orthogonal to, the OPERATIONAL commerce ledger
 // (tenant-data-hierarchy HIP). Commerce metering DEBITS an org's balance; this
 // only RECORDS a fleet event for unified, cross-tenant rollups that
-// admin.hanzo.ai reads by org / app / project — and by kind (bot vs machine).
+// admin.hanzo.ai reads by org / app / project — and by kind across visor's
+// compute spectrum (machine, bot, cluster, nodepool, container, function).
 //
 // Every emit is best-effort and fire-and-forget: the write runs in its own
 // goroutine on a short-lived context and swallows all errors, so an unreachable
@@ -49,19 +50,45 @@ const (
 	ComputeDestroyed = "destroyed"
 )
 
-// Fleet kinds — the values of the `kind` Enum8 lens in hanzo.compute_usage. A BOT
-// is a machine running the @hanzo/bot agent (cloud-init'd to gw.hanzo.bot); a
-// MACHINE is raw compute with no agent. Every bot is a machine; not every machine
-// is a bot. admin.hanzo.ai renders two lenses over the one table on this column.
+// Compute kinds — the values of the `kind` LowCardinality(String) lens in
+// hanzo.compute_usage, spanning visor's compute spectrum:
+//
+//	machine   — a raw droplet/VM (no agent)
+//	bot       — a machine running the @hanzo/bot agent (gw.hanzo.bot)
+//	cluster   — a K8s cluster (service/doks.go)
+//	nodepool  — a K8s node pool (object/node_pool.go)
+//	container — a container workload
+//	function  — a FaaS function (hanzoai/functions)
+//
+// Every bot is a machine with the agent role; not every machine is a bot.
+// admin.hanzo.ai renders one lens per kind over the one table. Only machine and
+// bot emit today; cluster/nodepool/container/function land later on this SAME
+// table + kind — no schema migration needed (the column is open-ended).
 const (
-	KindMachine = "machine"
-	KindBot     = "bot"
+	KindMachine   = "machine"
+	KindBot       = "bot"
+	KindCluster   = "cluster"
+	KindNodePool  = "nodepool"
+	KindContainer = "container"
+	KindFunction  = "function"
 )
+
+// knownKinds is the recognized compute spectrum; CanonicalKind falls back to
+// machine (the base of the spectrum — every kind is at least a machine's worth of
+// compute) for anything outside it.
+var knownKinds = map[string]bool{
+	KindMachine:   true,
+	KindBot:       true,
+	KindCluster:   true,
+	KindNodePool:  true,
+	KindContainer: true,
+	KindFunction:  true,
+}
 
 // Tenant-hierarchy + kind tag keys carried on a machine's DO tags. hanzo-org
 // (orgTagKey, compute.go) is the authoritative billing/attribution key injected
 // at launch; hanzo-app / hanzo-project are optional finer scoping a caller may
-// set; hanzo-kind records bot-vs-machine. All are read back here so a machine
+// set; hanzo-kind records the compute kind. All are read back here so a machine
 // self-describes its org > app > project scope and kind on every sweep/destroy —
 // the same tag read-back model as org.
 const (
@@ -78,7 +105,7 @@ const computeUsageTable = "compute_usage"
 // ClickHouse column names (JSONEachRow maps by key), making this struct the
 // single Go mirror of the schema in hanzoai/datastore (hanzo/schema.sql). ts is
 // pre-formatted in ClickHouse's default DateTime input format so no per-request
-// parsing setting is needed; kind is inserted by its Enum name.
+// parsing setting is needed; kind is a plain LowCardinality(String) value.
 type ComputeEvent struct {
 	Org        string `json:"org"`
 	App        string `json:"app"`
@@ -91,18 +118,17 @@ type ComputeEvent struct {
 	Ts         string `json:"ts"`
 }
 
-// CanonicalKind normalizes an arbitrary kind string to the two-value domain,
-// defaulting to bot: visor installs the @hanzo/bot agent on every launch unless a
-// caller explicitly opts out with kind=machine, and legacy droplets (no hanzo-kind
-// tag) were all launched as bots. Applied on every WRITE (SetKind) and READ
-// (EmitCompute, specIsBot), so a missing or garbage tag safely resolves to bot and
-// only the exact value "machine" yields a machine — the Enum8 insert can never be
-// fed an out-of-domain value.
+// CanonicalKind normalizes an arbitrary kind string to the known compute
+// spectrum, falling back to machine for anything unrecognized (including empty).
+// Applied on every WRITE (SetKind) and READ (EmitCompute), so a missing or garbage
+// tag safely resolves to machine and the LowCardinality column only ever sees a
+// known value. Fleet launches set bot explicitly; a raw single launch carries no
+// kind and so resolves to machine.
 func CanonicalKind(kind string) string {
-	if strings.TrimSpace(kind) == KindMachine {
-		return KindMachine
+	if k := strings.TrimSpace(kind); knownKinds[k] {
+		return k
 	}
-	return KindBot
+	return KindMachine
 }
 
 // SetKind records the launch's kind on the spec's tags so it flows onto the
@@ -117,10 +143,10 @@ func SetKind(spec *CreateMachineSpec, kind string) {
 	spec.Tags[kindTagKey] = CanonicalKind(kind)
 }
 
-// specIsBot reports whether a launch provisions the @hanzo/bot agent — true unless
-// the caller opted out with kind=machine. It is the single source of truth gating
-// both the agent cloud-init (buildBotUserData) and the IAM agent-user registration
-// (LaunchOrgMachine), so a machine is truthfully agent-less end to end.
+// specIsBot reports whether a launch provisions the @hanzo/bot agent — true only
+// for kind=bot. It is the single source of truth gating both the agent cloud-init
+// (buildBotUserData) and the IAM agent-user registration (LaunchOrgMachine), so a
+// machine (or any non-bot kind) is truthfully agent-less end to end.
 func specIsBot(spec *CreateMachineSpec) bool {
 	return CanonicalKind(spec.Tags[kindTagKey]) == KindBot
 }

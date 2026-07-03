@@ -277,8 +277,8 @@ func (c *ApiController) LaunchComputeMachine() {
 
 	spec := req.CreateMachineSpec
 	spec.InstanceType = size
-	// Record bot|machine kind (default bot) so it flows onto the droplet tags
-	// and gates the @hanzo/bot agent install.
+	// Record the requested kind (default machine - a raw single launch is
+	// agent-less) so it flows onto the droplet tags and gates the agent install.
 	service.SetKind(&spec, req.Kind)
 	machine, err := service.LaunchOrgMachine(org, &spec)
 	if err != nil {
