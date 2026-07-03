@@ -238,16 +238,16 @@ func writeComputeEvent(ev ComputeEvent) {
 	}
 	q := req.URL.Query()
 	q.Set("query", "INSERT INTO "+datastoreDB()+"."+computeUsageTable+" FORMAT JSONEachRow")
-	req.URL.RawQuery = q.Encode()
-	req.Header.Set("Content-Type", "application/json")
-	// ClickHouse HTTP auth (optional in dev; wired from the datastore secret in
-	// cluster). Header form keeps credentials out of the query string.
+	// ClickHouse HTTP auth via query params — this datastore rejects the
+	// X-ClickHouse-Key header form; internal cluster traffic (datastore.hanzo.svc).
 	if u := strings.TrimSpace(os.Getenv("DATASTORE_USER")); u != "" {
-		req.Header.Set("X-ClickHouse-User", u)
+		q.Set("user", u)
 	}
 	if p := strings.TrimSpace(os.Getenv("DATASTORE_PASSWORD")); p != "" {
-		req.Header.Set("X-ClickHouse-Key", p)
+		q.Set("password", p)
 	}
+	req.URL.RawQuery = q.Encode()
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
