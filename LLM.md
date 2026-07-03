@@ -26,21 +26,67 @@ hanzoai/base per-org SQLite. The seam is one interface -- `engineProvider` in
   (xorm driver name `"sqlite"`).
 
 Selected at boot by `storageBackend` (app.conf / `STORAGE_BACKEND`, default
-`postgres`) + `dataRoot` (`DATA_ROOT`, default `/data`). `object.EngineFor(owner)`
-is the single backend-agnostic entry point. `models()` is the one table registry
-feeding both schema sync and migration. `MigratePostgresToBase` (in
-`object/migrate_base.go`, never at boot) copies rows grouped by Owner into the
-per-org DBs. The canonical Base adopter to pattern-match is **hanzo/cloud**
-(HIP-0302/HIP-0106: `internal/org/replica.go`, `internal/storagelock`,
-`migration/pg_to_sqlite.go`).
+`postgres`) + `dataRoot` (`DATA_ROOT`, default `/data`). Every model routes its
+query through one of three package entry points, so the same xorm query runs
+unchanged on either backend:
+- `object.EngineFor(owner)` — per-tenant rows (per-org SQLite under Base).
+- `object.Shared()` — the cross-pod SHARED tables (Plan, MeterLease); Postgres
+  under BOTH backends.
+- `object.allEngines()` — the union set a cross-org sweep reads (one engine
+  under Postgres; one per org DB under Base).
 
-OPEN for CTO: (1) MeterLease is a cluster-global leader-election lease -- per-org
-SQLite cannot provide a cluster-wide single winner; needs a shared coordination
-store or a different mechanism (routes to `_global` for now). (2) Plan/Provider
-are global catalog data -- per-org duplication vs a shared read-only DB.
-(3) Object-storage replication (S3 hydration / cloud's Replicator) is a follow-up
-slice; slice-1 is local per-org files. (4) Migrating call sites
-`adapter.engine` -> `object.EngineFor(owner)` is slice-2.
+Call-site migration is DONE: no model touches `adapter.engine` anymore
+(`adapter.engine` survives only inside `InitStore`, which hands it to the
+providers). `MigratePostgresToBase` (`object/migrate_base.go`, never at boot)
+copies `perOrgModels()` rows grouped by Owner into the per-org DBs. The canonical
+Base adopter to pattern-match is **hanzo/cloud** (HIP-0302/HIP-0106).
+
+#### Base backend: shared vs per-org (CTO decisions, RESOLVED)
+The 10 tables split into two classes, defined once each in `object/store.go`:
+- `perOrgModels()` (8): Asset, Provider, Machine, Record, Session, NodePool,
+  Volume, AgentBinding — one physical SQLite copy per org under Base.
+- `sharedModels()` (2): Plan, MeterLease — live on the ONE shared engine every
+  pod sees (Postgres, both backends). `models()` = the two unioned; only the
+  Postgres adapter hosts all 10, Base syncs only `perOrgModels()` into org DBs.
+
+1. **MeterLease → shared (Postgres), never per-org.** It is a cluster-global
+   leader-election lease whose entire job is money safety: exactly ONE replica
+   sweeps hourly billing per wall-clock hour. Two pods with separate local SQLite
+   files would each "win" the insert-once PK and double-debit. Leader election
+   needs a single linearizable store; per-org SQLite (local, eventually-replicated)
+   cannot be one. `ClaimMeterHour`/`pruneMeterLeases` route through `Shared()`.
+
+2. **Plan → shared read-only catalog (Postgres), Provider → per-org.** Plan is a
+   global catalog identical for every org; duplicating 11 rows into every org DB
+   breaks DRY and lets an admin price edit diverge pod-to-pod, so all Plan CRUD
+   routes through `Shared()` (the `owner` column is kept for white-label scoping;
+   the physical table is shared). **Provider is NOT a catalog** and stays per-org:
+   it holds per-org cloud credentials (`ClientId`/`ClientSecret`, masked `***` on
+   read) and per-org blockchain config — routed by `EngineFor(owner)`. (This
+   corrects the original "Plan/Provider = catalogs" framing: only Plan is global.)
+
+3. **Cross-org sweeps fan out over `allEngines()`.** `GetAllNodePools` (hourly
+   billing report) and `GetSessionsByStatus` (stale-session GC) have no owner —
+   they read every tenant. Under Postgres that is one query; under Base there is
+   no table spanning tenants, so they union each org DB. `baseStore.AllEngines()`
+   enumerates `<dataRoot>/orgs/*` on disk, so it sees every org ever written, not
+   just those opened this process lifetime.
+
+4. **Durability & replication (STAGED — the one deliberately-deferred piece).**
+   Per-org SQLite is WAL-mode local to the pod's `dataRoot`. In production
+   `dataRoot` is a **persistent volume**, so an org DB survives a pod restart.
+   What is NOT yet built: serving one org from >1 pod concurrently. SQLite is
+   single-writer, and local files diverge between pods, so **Base mode is safe
+   today only under `replicas: 1` OR org-sharded routing** (each org pinned to one
+   pod). Lifting that needs WAL→object-storage replication with
+   single-writer-per-org coordination (hanzo/cloud's `internal/org/replica.go` +
+   `internal/storagelock` is the pattern). Exact integration point when it lands:
+   hydrate-on-open inside `baseStore.EngineFor` (pull the latest object-storage
+   snapshot before first use) plus a post-commit WAL shipper; the lease primitive
+   already in `MeterLease`/`Shared()` provides the single-writer election. No code
+   stub is shipped for this (no dead abstraction) — this note IS the staging.
+   NOTE: default `postgres` backend is unaffected and remains the production
+   default; the Postgres→Base data migration is a separate operator action.
 
 ### Provider Adapters (all fully implemented)
 | Provider | Machine | Volume | File |
