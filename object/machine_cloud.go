@@ -109,7 +109,7 @@ func SyncMachinesCloud(owner string) (bool, error) {
 		return false, nil
 	}
 
-	affected, err := addMachines(machines)
+	affected, err := addMachines(owner, machines)
 	return affected, err
 }
 
