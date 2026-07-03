@@ -166,25 +166,7 @@ func (c *ApiController) DeleteNodePool() {
 		return
 	}
 
-	// If the pool has a PoolID and Provider, also delete from DOKS
-	if pool.PoolID != "" && pool.Provider != "" && pool.Owner != "" {
-		dbPool, err := object.GetNodePool(pool.GetId())
-		if err == nil && dbPool != nil && dbPool.ClusterID != "" {
-			provider, err := object.GetProvider(util.GetIdFromOwnerAndName(pool.Owner, pool.Provider))
-			if err == nil && provider != nil {
-				token := provider.ClientSecret
-				if token == "" {
-					token = provider.ClientId
-				}
-				client, err := service.NewDOKSClient(token, dbPool.ClusterID)
-				if err == nil {
-					_ = client.DeleteNodePool(pool.PoolID)
-				}
-			}
-		}
-	}
-
-	c.Data["json"] = wrapActionResponse(object.DeleteNodePool(&pool))
+	c.Data["json"] = wrapActionResponse(object.DeleteNodePoolCloud(&pool))
 	c.ServeJSON()
 }
 

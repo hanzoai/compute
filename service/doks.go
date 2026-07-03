@@ -16,7 +16,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/digitalocean/godo"
 	"golang.org/x/oauth2"
@@ -200,4 +202,14 @@ func (c *DOKSClient) RecycleNodePoolNodes(poolID string, nodeIDs []string) error
 	}
 
 	return nil
+}
+
+// IsNotFound reports whether err wraps a DigitalOcean 404 response, meaning the
+// resource is already gone. Callers treat this as success when deleting.
+func IsNotFound(err error) bool {
+	var doErr *godo.ErrorResponse
+	if errors.As(err, &doErr) && doErr.Response != nil {
+		return doErr.Response.StatusCode == http.StatusNotFound
+	}
+	return false
 }
