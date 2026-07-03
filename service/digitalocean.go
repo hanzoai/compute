@@ -287,6 +287,10 @@ func safeTagField(s string) bool {
 // gateway. Environment variables are passed via spec.Tags with the
 // "env:" prefix (e.g., Tags["env:BOT_NODE_GATEWAY_URL"] = "wss://gw.hanzo.bot").
 func buildBotUserData(spec *CreateMachineSpec) string {
+	// A machine (kind=machine) is raw compute with no agent - no cloud-init.
+	if !specIsBot(spec) {
+		return ""
+	}
 	gatewayURL := "wss://gw.hanzo.bot"
 	gatewayToken := ""
 	apiKey := ""

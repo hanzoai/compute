@@ -187,6 +187,7 @@ func (c *ApiController) DeleteComputeMachine() {
 type launchComputeRequest struct {
 	service.CreateMachineSpec
 	Size   string `json:"size"`
+	Kind   string `json:"kind"`
 	DryRun bool   `json:"dryRun"`
 }
 
@@ -276,6 +277,9 @@ func (c *ApiController) LaunchComputeMachine() {
 
 	spec := req.CreateMachineSpec
 	spec.InstanceType = size
+	// Record bot|machine kind (default bot) so it flows onto the droplet tags
+	// and gates the @hanzo/bot agent install.
+	service.SetKind(&spec, req.Kind)
 	machine, err := service.LaunchOrgMachine(org, &spec)
 	if err != nil {
 		c.ResponseError(err.Error())
