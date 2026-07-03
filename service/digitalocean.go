@@ -299,6 +299,11 @@ func buildBotUserData(spec *CreateMachineSpec) string {
 	if displayName == "" {
 		displayName = spec.Name
 	}
+	// org is the authoritative attribution tag LaunchOrgMachine injected before
+	// CreateMachine — surfaced to the runtime so the bot gateway connection
+	// and playground heartbeats are scoped to the SAME org visor registered the
+	// node under (registerPlaygroundNode). Empty for a non-org launch.
+	org := spec.Tags[orgTagKey]
 
 	// Extract env overrides from tags
 	for k, v := range spec.Tags {
@@ -330,6 +335,7 @@ cat > /etc/hanzo-bot.env << 'ENVEOF'
 BOT_NODE_GATEWAY_URL=%s
 BOT_GATEWAY_TOKEN=%s
 HANZO_API_KEY=%s
+HANZO_ORG=%s
 AGENT_NODE_ID=%s
 AGENT_DISPLAY_NAME=%s
 HANZO_PLAYGROUND_CLOUD_NODE=true
@@ -358,5 +364,5 @@ SVCEOF
 # Enable and start the service
 systemctl daemon-reload
 systemctl enable --now hanzo-bot
-`, gatewayURL, gatewayToken, apiKey, nodeID, displayName, nodeID)
+`, gatewayURL, gatewayToken, apiKey, org, nodeID, displayName, nodeID)
 }
