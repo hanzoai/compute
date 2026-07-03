@@ -52,7 +52,11 @@ func GetProviderCount(owner, field, value string) (int64, error) {
 
 func GetProviders(owner string) ([]*Provider, error) {
 	providers := []*Provider{}
-	err := adapter.engine.Desc("created_time").Find(&providers, &Provider{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return providers, err
+	}
+	err = engine.Desc("created_time").Find(&providers, &Provider{Owner: owner})
 	if err != nil {
 		return providers, err
 	}
@@ -76,8 +80,12 @@ func getProvider(owner string, name string) (*Provider, error) {
 		return nil, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	provider := Provider{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&provider)
+	existed, err := engine.Get(&provider)
 	if err != nil {
 		return &provider, err
 	}
@@ -138,7 +146,11 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 		provider.ClientSecret = p.ClientSecret
 	}
 
-	affected, err := adapter.engine.ID(core.PK{owner, name}).AllCols().Update(provider)
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{owner, name}).AllCols().Update(provider)
 	if err != nil {
 		return false, err
 	}
@@ -147,7 +159,11 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 }
 
 func AddProvider(provider *Provider) (bool, error) {
-	affected, err := adapter.engine.Insert(provider)
+	engine, err := EngineFor(provider.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(provider)
 	if err != nil {
 		return false, err
 	}
@@ -166,7 +182,11 @@ func DeleteProvider(provider *Provider) (bool, error) {
 	// the cluster UUID/region even when the caller supplied only the PK.
 	full, _ := getProvider(provider.Owner, provider.Name)
 
-	affected, err := adapter.engine.ID(core.PK{provider.Owner, provider.Name}).Delete(&Provider{})
+	engine, err := EngineFor(provider.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{provider.Owner, provider.Name}).Delete(&Provider{})
 	if err != nil {
 		return false, err
 	}

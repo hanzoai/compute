@@ -73,9 +73,24 @@ func (pool *NodePool) computeEvent(event string, priceCents int64) service.Compu
 	}
 }
 
-// GetAllNodePools fetches all node pools across all owners (for billing reporting).
+
+// GetAllNodePools fetches all Active node pools across ALL owners for billing
+// reporting. Under Postgres this is one query over the single engine; under Base
+// it unions the per-org SQLite DBs (allEngines), since no single table spans
+// tenants.
 func GetAllNodePools(pools *[]*NodePool) error {
-	return adapter.engine.Where("state = ?", "Active").Find(pools)
+	engines, err := allEngines()
+	if err != nil {
+		return err
+	}
+	for _, engine := range engines {
+		batch := []*NodePool{}
+		if err := engine.Where("state = ?", "Active").Find(&batch); err != nil {
+			return err
+		}
+		*pools = append(*pools, batch...)
+	}
+	return nil
 }
 
 func GetNodePoolCount(owner, field, value string) (int64, error) {
@@ -85,7 +100,11 @@ func GetNodePoolCount(owner, field, value string) (int64, error) {
 
 func GetNodePools(owner string) ([]*NodePool, error) {
 	pools := []*NodePool{}
-	err := adapter.engine.Desc("created_time").Find(&pools, &NodePool{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return pools, err
+	}
+	err = engine.Desc("created_time").Find(&pools, &NodePool{Owner: owner})
 	if err != nil {
 		return pools, err
 	}
@@ -109,8 +128,12 @@ func getNodePool(owner string, name string) (*NodePool, error) {
 		return nil, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	pool := NodePool{Owner: owner, Name: name}
-	existed, err := adapter.engine.Get(&pool)
+	existed, err := engine.Get(&pool)
 	if err != nil {
 		return &pool, err
 	}
@@ -138,7 +161,11 @@ func UpdateNodePool(id string, pool *NodePool) (bool, error) {
 
 	pool.UpdatedTime = time.Now().Format(time.RFC3339)
 
-	affected, err := adapter.engine.ID(core.PK{owner, name}).AllCols().Update(pool)
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{owner, name}).AllCols().Update(pool)
 	if err != nil {
 		return false, err
 	}
@@ -147,7 +174,11 @@ func UpdateNodePool(id string, pool *NodePool) (bool, error) {
 }
 
 func AddNodePool(pool *NodePool) (bool, error) {
-	affected, err := adapter.engine.Insert(pool)
+	engine, err := EngineFor(pool.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Insert(pool)
 	if err != nil {
 		return false, err
 	}
@@ -161,7 +192,11 @@ func DeleteNodePool(pool *NodePool) (bool, error) {
 	// the PK (the delete controller unmarshals a sparse pool).
 	full, _ := getNodePool(pool.Owner, pool.Name)
 
-	affected, err := adapter.engine.ID(core.PK{pool.Owner, pool.Name}).Delete(&NodePool{})
+	engine, err := EngineFor(pool.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.ID(core.PK{pool.Owner, pool.Name}).Delete(&NodePool{})
 	if err != nil {
 		return false, err
 	}
@@ -229,16 +264,20 @@ func SyncNodePoolsCloud(owner string) (bool, error) {
 				UpdatedTime: now,
 			}
 
+			engine, err := EngineFor(owner)
+			if err != nil {
+				return false, err
+			}
 			if dbPool != nil {
 				// Preserve billing attribution fields from DB
 				pool.OrgID = dbPool.OrgID
 				pool.ProjectID = dbPool.ProjectID
 				pool.CostPerHour = dbPool.CostPerHour
 				pool.CreatedTime = dbPool.CreatedTime
-				_, err = adapter.engine.ID(core.PK{owner, sp.Name}).AllCols().Update(pool)
+				_, err = engine.ID(core.PK{owner, sp.Name}).AllCols().Update(pool)
 			} else {
 				pool.CreatedTime = now
-				_, err = adapter.engine.Insert(pool)
+				_, err = engine.Insert(pool)
 			}
 			if err != nil {
 				return false, err
@@ -367,7 +406,11 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 	if dbPool != nil {
 		dbPool.Count = updatedPool.Count
 		dbPool.UpdatedTime = time.Now().Format(time.RFC3339)
-		_, err = adapter.engine.ID(core.PK{owner, updatedPool.Name}).AllCols().Update(dbPool)
+		engine, err := EngineFor(owner)
+		if err != nil {
+			return nil, err
+		}
+		_, err = engine.ID(core.PK{owner, updatedPool.Name}).AllCols().Update(dbPool)
 		if err != nil {
 			return nil, err
 		}

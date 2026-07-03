@@ -68,7 +68,11 @@ func GetRecordCount(owner, field, value string) (int64, error) {
 
 func GetRecords(owner string) ([]*Record, error) {
 	records := []*Record{}
-	err := adapter.engine.Desc("id").Find(&records, &Record{Owner: owner})
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return records, err
+	}
+	err = engine.Desc("id").Find(&records, &Record{Owner: owner})
 	if err != nil {
 		return records, err
 	}
@@ -92,8 +96,12 @@ func getRecord(owner string, name string) (*Record, error) {
 		return nil, nil
 	}
 
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return nil, err
+	}
 	record := Record{Name: name}
-	existed, err := adapter.engine.Get(&record)
+	existed, err := engine.Get(&record)
 	if err != nil {
 		return &record, err
 	}
@@ -118,7 +126,11 @@ func UpdateRecord(id string, record *Record) (bool, error) {
 		return false, nil
 	}
 
-	affected, err := adapter.engine.Where("name = ?", name).AllCols().Update(record)
+	engine, err := EngineFor(owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Where("name = ?", name).AllCols().Update(record)
 	if err != nil {
 		return false, err
 	}
@@ -196,7 +208,7 @@ func AddRecord(record *Record) bool {
 
 	record.Owner = record.Organization
 
-	affected, err := adapter.engine.Insert(record)
+	affected, err := mustEngineFor(record.Owner).Insert(record)
 	if err != nil {
 		panic(err)
 	}
@@ -205,7 +217,11 @@ func AddRecord(record *Record) bool {
 }
 
 func DeleteRecord(record *Record) (bool, error) {
-	affected, err := adapter.engine.Where("name = ?", record.Name).Delete(&Record{})
+	engine, err := EngineFor(record.Owner)
+	if err != nil {
+		return false, err
+	}
+	affected, err := engine.Where("name = ?", record.Name).Delete(&Record{})
 	if err != nil {
 		return false, err
 	}

@@ -29,17 +29,20 @@ type MigrationReport struct {
 	Orgs        int // distinct owner DBs the rows fanned into
 }
 
-// MigratePostgresToBase copies every visor table from the shared Postgres
-// engine into per-org Base SQLite files, routing each row to DBPath(owner). It
-// iterates the same models() registry the schema sync uses, so it can never
-// drift from the live schema.
+// MigratePostgresToBase copies the per-tenant visor tables from the shared
+// Postgres engine into per-org Base SQLite files, routing each row to
+// DBPath(owner). It iterates perOrgModels() -- the SAME registry the Base schema
+// sync uses -- so it can never drift from what an org DB actually holds. The
+// shared tables (Plan catalog, MeterLease lease) are deliberately NOT migrated:
+// they stay on the shared Postgres coordination engine under Base mode (see
+// LLM.md, Base backend: shared vs per-org).
 //
 // It NEVER runs at boot: an operator invokes it explicitly during the cutover
 // window (e.g. a `visor migrate` subcommand). Rows are grouped by their Owner
-// field; models without an Owner (MeterLease -- a cluster-global lease, see the
-// CTO note in LLM.md) route to the _global sentinel DB. This mirrors
-// hanzo/cloud's introspective migration/pg_to_sqlite.go, but is schema-aware
-// because visor owns its models rather than a drifted upstream schema.
+// field; the rare row with an empty Owner (e.g. a Record whose Organization was
+// unset) routes to the _global sentinel DB. This mirrors hanzo/cloud's
+// introspective migration/pg_to_sqlite.go, but is schema-aware because visor
+// owns its models rather than a drifted upstream schema.
 func MigratePostgresToBase(src *xorm.Engine, dst *baseStore) ([]MigrationReport, error) {
 	if src == nil {
 		return nil, fmt.Errorf("visor: migrate: nil source engine")
@@ -48,8 +51,8 @@ func MigratePostgresToBase(src *xorm.Engine, dst *baseStore) ([]MigrationReport,
 		return nil, fmt.Errorf("visor: migrate: nil base store")
 	}
 
-	reports := make([]MigrationReport, 0, len(models()))
-	for _, model := range models() {
+	reports := make([]MigrationReport, 0, len(perOrgModels()))
+	for _, model := range perOrgModels() {
 		rep, err := migrateModel(src, dst, model)
 		if err != nil {
 			return reports, err
