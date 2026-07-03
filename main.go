@@ -16,48 +16,15 @@ package main
 
 import (
 	"github.com/beego/beego"
-	"github.com/beego/beego/plugins/cors"
-	_ "github.com/beego/beego/session/redis"
-	"github.com/hanzoai/visor/authz"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/routers"
-	"github.com/hanzoai/visor/task"
-	"github.com/hanzoai/visor/util"
+
+	"github.com/hanzoai/visor/pkg/visor"
 )
 
 func main() {
-	object.InitAdapter()
-	authz.InitAuthz()
-	util.InitIpDb()
-	util.InitParser()
-
-	beego.InsertFilter("*", beego.BeforeRouter, cors.Allow(&cors.Options{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "X-Requested-With", "Content-Type", "Accept"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-	}))
-
-	beego.SetStaticPath("/swagger", "swagger")
-	// https://studygolang.com/articles/2303
-	beego.InsertFilter("/", beego.BeforeRouter, routers.TransparentStatic) // must has this for default page
-	beego.InsertFilter("/*", beego.BeforeRouter, routers.TransparentStatic)
-	beego.InsertFilter("*", beego.BeforeRouter, routers.TenantContextFilter)
-	beego.InsertFilter("*", beego.BeforeRouter, routers.ApiFilter)
-	beego.InsertFilter("*", beego.BeforeRouter, routers.RecordMessage)
-	beego.InsertFilter("*", beego.AfterExec, routers.AfterRecordMessage, false)
-
-	if beego.AppConfig.String("redisEndpoint") == "" {
-		beego.BConfig.WebConfig.Session.SessionProvider = "file"
-		beego.BConfig.WebConfig.Session.SessionProviderConfig = "./tmp"
-	} else {
-		beego.BConfig.WebConfig.Session.SessionProvider = "redis"
-		beego.BConfig.WebConfig.Session.SessionProviderConfig = beego.AppConfig.String("redisEndpoint")
-	}
-	beego.BConfig.WebConfig.Session.SessionGCMaxLifetime = 3600 * 24 * 365
-
-	task.NewTicker().SetupTicker()
-
+	// visor.Bootstrap is the single in-process boot path — DB, authz, parsers,
+	// filters, session config and background tickers. It is shared verbatim with
+	// the embedded cloud mount (pkg/visor.Handler), so standalone and fused never
+	// drift. Here main() owns the listener; beego.Run binds it and blocks.
+	visor.Bootstrap()
 	beego.Run()
 }
