@@ -18,7 +18,7 @@ import "math"
 
 // Resell markup — the ONE place Hanzo's compute margin over DigitalOcean's
 // list price is defined. DigitalOcean is the wholesale cost; Hanzo resells at
-// list * markup. Current policy is a single FLAT markup (+30%) across all SKUs
+// list * markup. Current policy is a single FLAT markup (+33.3%, one-third) across all SKUs
 // — standard droplets and GPU alike — for one honest, predictable price.
 //
 // Keep this as the single source of truth for compute pricing. The base/GPU
@@ -26,8 +26,8 @@ import "math"
 // changing a constant here — never scatter markups across controllers or the
 // dashboard.
 const (
-	resellMarkupBase = 1.30
-	resellMarkupGPU  = 1.30
+	resellMarkupBase = 4.0 / 3.0
+	resellMarkupGPU  = 4.0 / 3.0
 )
 
 // HanzoPrice converts a DigitalOcean list price (USD) into Hanzo's resale
