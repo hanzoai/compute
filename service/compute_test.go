@@ -25,14 +25,14 @@ func almost(a, b float64) bool { return math.Abs(a-b) < 1e-6 }
 
 func TestHanzoPriceMarkup(t *testing.T) {
 	// Standard sizes use the base markup; GPU sizes the gentler GPU markup.
-	if got := HanzoPrice(48.0, false); !almost(got, 67.2) {
-		t.Fatalf("base monthly markup: got %v want 67.2", got)
+	if got := HanzoPrice(48.0, false); !almost(got, 64.0) {
+		t.Fatalf("base monthly markup: got %v want 64.0", got)
 	}
-	if got := HanzoPrice(0.00744, false); !almost(got, 0.01042) {
-		t.Fatalf("base hourly markup: got %v want 0.01042", got)
+	if got := HanzoPrice(0.00744, false); !almost(got, 0.00992) {
+		t.Fatalf("base hourly markup: got %v want 0.00992", got)
 	}
-	if got := HanzoPrice(3.0, true); !almost(got, 3.75) {
-		t.Fatalf("gpu markup: got %v want 3.75", got)
+	if got := HanzoPrice(3.0, true); !almost(got, 4.0) {
+		t.Fatalf("gpu markup: got %v want 4.0", got)
 	}
 	// Resale price must always exceed wholesale — the margin invariant.
 	for _, do := range []float64{0.007, 0.5, 48, 3200} {
