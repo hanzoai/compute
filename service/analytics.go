@@ -238,16 +238,15 @@ func writeComputeEvent(ev ComputeEvent) {
 	}
 	q := req.URL.Query()
 	q.Set("query", "INSERT INTO "+datastoreDB()+"."+computeUsageTable+" FORMAT JSONEachRow")
-	// ClickHouse HTTP auth via query params — this datastore rejects the
-	// X-ClickHouse-Key header form; internal cluster traffic (datastore.hanzo.svc).
-	if u := strings.TrimSpace(os.Getenv("DATASTORE_USER")); u != "" {
-		q.Set("user", u)
-	}
-	if p := strings.TrimSpace(os.Getenv("DATASTORE_PASSWORD")); p != "" {
-		q.Set("password", p)
-	}
 	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Content-Type", "application/json")
+	// Hanzo Datastore auth headers (white-labeled from ClickHouse X-ClickHouse-*).
+	if u := strings.TrimSpace(os.Getenv("DATASTORE_USER")); u != "" {
+		req.Header.Set("X-Datastore-User", u)
+	}
+	if p := strings.TrimSpace(os.Getenv("DATASTORE_PASSWORD")); p != "" {
+		req.Header.Set("X-Datastore-Key", p)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
