@@ -421,10 +421,14 @@ func LaunchOrgMachine(org string, spec *CreateMachineSpec) (*Machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A launched bot is an org member: register it as an IAM agent-user so it
-	// surfaces as a user in hanzo.team (best-effort; never fails the launch).
+	// A launched bot is an org member AND a playground node: register it as an
+	// IAM agent-user (surfaces in hanzo.team) and plant it in the org playground
+	// node registry attributed to org. Both best-effort — a registration failure
+	// never fails the launch; the bot still runs and each registry reconciles
+	// later (IAM on next sync, playground on the runtime heartbeat).
 	if specIsBot(spec) {
 		registerBotUser(org, spec.Name, spec.DisplayName)
+		registerPlaygroundNode(org, spec.Name)
 	}
 	return machine, nil
 }
