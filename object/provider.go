@@ -17,6 +17,7 @@ package object
 import (
 	"fmt"
 
+	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
 	"xorm.io/core"
 )
@@ -151,13 +152,35 @@ func AddProvider(provider *Provider) (bool, error) {
 		return false, err
 	}
 
+	if affected != 0 && provider.isManagedCluster() {
+		// A DOKS provider carrying a cluster UUID = a managed K8s cluster entering
+		// visor's fleet. Roll a launched event (best-effort) — kind=cluster.
+		service.EmitComputeEvent(provider.clusterEvent(service.ComputeLaunched))
+	}
+
 	return affected != 0, nil
 }
 
 func DeleteProvider(provider *Provider) (bool, error) {
+	// Load the authoritative record first so a destroyed cluster event carries
+	// the cluster UUID/region even when the caller supplied only the PK.
+	full, _ := getProvider(provider.Owner, provider.Name)
+
 	affected, err := adapter.engine.ID(core.PK{provider.Owner, provider.Name}).Delete(&Provider{})
 	if err != nil {
 		return false, err
+	}
+
+	if affected != 0 {
+		p := full
+		if p == nil {
+			p = provider
+		}
+		if p.isManagedCluster() {
+			// The managed cluster is leaving visor's fleet. Roll a destroyed
+			// event (best-effort) — kind=cluster.
+			service.EmitComputeEvent(p.clusterEvent(service.ComputeDestroyed))
+		}
 	}
 
 	return affected != 0, nil
@@ -165,4 +188,26 @@ func DeleteProvider(provider *Provider) (bool, error) {
 
 func (provider *Provider) getId() string {
 	return fmt.Sprintf("%s/%s", provider.Owner, provider.Name)
+}
+
+// isManagedCluster reports whether this provider registers a real DOKS cluster —
+// a DigitalOcean provider carrying a cluster UUID. Only such providers are a
+// cluster in the compute-analytics sense; blockchain/other providers are not.
+func (provider *Provider) isManagedCluster() bool {
+	return provider.Type == "DigitalOcean" && provider.ClusterID != ""
+}
+
+// clusterEvent builds the analytics fleet event for the DOKS cluster this
+// provider registers (kind=cluster). org is the provider's Casdoor owner; the
+// cluster UUID identifies the unit and Region is its size lens. Price is 0 — the
+// DOKS control plane is free; a cluster's compute cost lives in its node pools
+// (kind=nodepool).
+func (provider *Provider) clusterEvent(event string) service.ComputeEvent {
+	return service.ComputeEvent{
+		Org:       provider.Owner,
+		Kind:      service.KindCluster,
+		Event:     event,
+		MachineID: provider.ClusterID,
+		Size:      provider.Region,
+	}
 }

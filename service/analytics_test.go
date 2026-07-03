@@ -164,3 +164,68 @@ func TestSetKindGatesAgent(t *testing.T) {
 		t.Fatal("cluster kind must be agent-less")
 	}
 }
+
+// EmitComputeEvent is the kind-agnostic path a cluster event flows through
+// unchanged — kind canonicalized, ts stamped — the exact shape the widened
+// Clusters board reads (org authoritative, cluster UUID as the unit id).
+func TestEmitComputeEventClusterShape(t *testing.T) {
+	got := captureDatastore(t)
+	EmitComputeEvent(ComputeEvent{
+		Org: "acme", Kind: KindCluster, Event: ComputeLaunched,
+		MachineID: "do-cluster-uuid", Size: "nyc3",
+	})
+
+	select {
+	case c := <-got:
+		if c.row.Kind != KindCluster || c.row.Org != "acme" || c.row.MachineID != "do-cluster-uuid" || c.row.Size != "nyc3" {
+			t.Fatalf("cluster row = %+v", c.row)
+		}
+		if c.row.Ts == "" {
+			t.Fatal("ts must be stamped when the caller leaves it empty")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no datastore insert received")
+	}
+}
+
+// A node-pool event carries its project + hourly price (from CostPerHour)
+// through the same one path — kind=nodepool.
+func TestEmitComputeEventNodePoolShape(t *testing.T) {
+	got := captureDatastore(t)
+	EmitComputeEvent(ComputeEvent{
+		Org: "acme", Project: "prod", Kind: KindNodePool, Event: ComputeRunning,
+		MachineID: "pool-123", Size: "s-4vcpu-8gb", PriceCents: 24,
+	})
+
+	select {
+	case c := <-got:
+		if c.row.Kind != KindNodePool || c.row.Project != "prod" || c.row.PriceCents != 24 {
+			t.Fatalf("nodepool row = %+v", c.row)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no datastore insert received")
+	}
+}
+
+// An out-of-set kind normalizes to machine on the kind-agnostic path too
+// (the LowCardinality column only ever sees a known value).
+func TestEmitComputeEventUnknownKindNormalizes(t *testing.T) {
+	got := captureDatastore(t)
+	EmitComputeEvent(ComputeEvent{Org: "acme", Kind: "quantum-toaster", Event: ComputeLaunched, MachineID: "x"})
+
+	select {
+	case c := <-got:
+		if c.row.Kind != KindMachine {
+			t.Fatalf("kind = %q, want %q", c.row.Kind, KindMachine)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no datastore insert received")
+	}
+}
+
+// EmitComputeEvent is a safe no-op when analytics is unconfigured (must not
+// panic or block).
+func TestEmitComputeEventUnconfiguredNoOp(t *testing.T) {
+	t.Setenv("DATASTORE_URL", "")
+	EmitComputeEvent(ComputeEvent{Org: "acme", Kind: KindCluster, Event: ComputeLaunched})
+}
