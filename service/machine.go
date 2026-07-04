@@ -58,6 +58,8 @@ func NewMachineClient(providerType string, accessKeyId string, accessKeySecret s
 		res, err = newMachineLightsailClient(accessKeyId, accessKeySecret, region)
 	} else if providerType == "Hetzner" {
 		res, err = newMachineHetznerClient(accessKeyId, accessKeySecret, region)
+	} else if providerType == "Nebius" {
+		res, err = newMachineNebiusClient(accessKeyId, accessKeySecret, region)
 	} else {
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}

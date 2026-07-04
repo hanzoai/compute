@@ -41,6 +41,13 @@ const orgTagKey = "hanzo-org"
 
 func orgTag(org string) string { return orgTagKey + ":" + org }
 
+// projectTag namespaces a droplet by the project (WITHIN its org) that owns it,
+// using the same "key:value" tag shape as orgTag. projectTagKey ("hanzo-project")
+// is defined in analytics.go — the ONE tenant-hierarchy tag vocabulary shared by
+// billing, metering and analytics. Only written for a NAMED project; the default
+// (empty) project writes no project tag.
+func projectTag(project string) string { return projectTagKey + ":" + project }
+
 // houseDOToken resolves Hanzo's DigitalOcean API token. KMS is the only source:
 // the operator wires it from KMS into DIGITALOCEAN_ACCESS_TOKEN (or the app.conf
 // digitalOceanToken key, itself KMS-synced via the visor-kms-sync KMSSecret).
@@ -266,15 +273,27 @@ func SizeBySlug(slug string) (*SizeInfo, error) {
 
 // ---- Org-scoped machine operations (house account) ----
 
-// ListOrgMachines returns only the droplets tagged for org — per-org isolation
-// enforced at the DigitalOcean layer via an exact tag query.
-func ListOrgMachines(org string) ([]*Machine, error) {
+// ListOrgMachines returns the droplets tagged for org — per-org isolation enforced
+// at the DigitalOcean layer via an exact tag query — optionally narrowed to a
+// single project.
+//
+// project scopes the result WITHIN the org: the empty project is the org's default
+// and returns EVERY org machine (today's behavior — a machine launched before the
+// project dimension carries no hanzo-project tag), while a named project returns
+// only the machines carrying that hanzo-project tag. Project is an attribution and
+// view dimension, not a second isolation boundary — org is the tenant boundary, so
+// get/delete stay org-scoped and only listing narrows by project.
+func ListOrgMachines(org, project string) ([]*Machine, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
 	client, err := newHouseDOClient()
 	if err != nil {
 		return nil, err
+	}
+	want := ""
+	if project != "" {
+		want = projectTag(project)
 	}
 	var machines []*Machine
 	opt := &godo.ListOptions{Page: 1, PerPage: 200}
@@ -284,6 +303,9 @@ func ListOrgMachines(org string) ([]*Machine, error) {
 			return nil, fmt.Errorf("list droplets for org %q: %w", org, err)
 		}
 		for _, d := range droplets {
+			if want != "" && !dropletHasTag(d, want) {
+				continue // narrow to the requested project
+			}
 			machines = append(machines, getMachineFromDroplet(d))
 		}
 		if resp.Links == nil || resp.Links.IsLastPage() {
@@ -338,14 +360,20 @@ func ListRunningHouseMachines() ([]*Machine, error) {
 	return machines, nil
 }
 
-func dropletHasOrgTag(d *godo.Droplet, org string) bool {
-	want := orgTag(org)
+// dropletHasTag reports whether a droplet carries an exact tag. It is the ONE
+// tag-membership check, shared by the org-isolation guard and the project view
+// filter, so both compare tags identically.
+func dropletHasTag(d godo.Droplet, tag string) bool {
 	for _, t := range d.Tags {
-		if t == want {
+		if t == tag {
 			return true
 		}
 	}
 	return false
+}
+
+func dropletHasOrgTag(d *godo.Droplet, org string) bool {
+	return dropletHasTag(*d, orgTag(org))
 }
 
 // GetOrgMachine returns a single machine only if it belongs to org; otherwise
@@ -397,17 +425,23 @@ func DeleteOrgMachine(org, id string) error {
 }
 
 // LaunchOrgMachine provisions a droplet in Hanzo's house account, tagged so it
-// is owned by org. The org tag is injected here (never trusted from the client
-// body) so the machine is always attributable to the right tenant.
+// is owned by org and attributed to project. Both attribution tags are injected
+// here (never trusted from the client body) so the machine is always attributable
+// to the right tenant AND project.
 //
 // org is validated as a clean slug first: it becomes BOTH the hanzo-org
 // attribution tag (read back by the hourly meter) AND the commerce billing key,
 // so a value carrying the meter's "," / ":" separators must never reach the tag.
 // A validated IAM owner claim is already a DNS-label slug, so this only rejects a
-// malformed/forged org — it never breaks a real tenant.
-func LaunchOrgMachine(org string, spec *CreateMachineSpec) (*Machine, error) {
+// malformed/forged org — it never breaks a real tenant. project is validated the
+// same way; the EMPTY project is the org's default and writes no hanzo-project tag
+// (backward-compatible with every machine launched before the project dimension).
+func LaunchOrgMachine(org, project string, spec *CreateMachineSpec) (*Machine, error) {
 	if !validOrgSlug(org) {
 		return nil, fmt.Errorf("invalid org slug %q", org)
+	}
+	if !validProjectSlug(project) {
+		return nil, fmt.Errorf("invalid project slug %q", project)
 	}
 	client, err := newHouseDOClient()
 	if err != nil {
@@ -417,6 +451,9 @@ func LaunchOrgMachine(org string, spec *CreateMachineSpec) (*Machine, error) {
 		spec.Tags = map[string]string{}
 	}
 	spec.Tags[orgTagKey] = org
+	if project != "" {
+		spec.Tags[projectTagKey] = project
+	}
 	machine, err := client.CreateMachine(spec)
 	if err != nil {
 		return nil, err
@@ -431,17 +468,4 @@ func LaunchOrgMachine(org string, spec *CreateMachineSpec) (*Machine, error) {
 		registerPlaygroundNode(org, spec.Name)
 	}
 	return machine, nil
-}
-
-// validOrgSlug bounds the org used as a billing key + DO attribution tag: a
-// non-empty, bounded string with no separator that the tag read-back
-// (orgFromTag) or DO would misparse. Deliberately permissive on the exact
-// charset (a real owner claim is already a DNS label); it exists to keep the
-// meter attribution surface un-forgeable, not to re-validate IAM.
-func validOrgSlug(org string) bool {
-	org = strings.TrimSpace(org)
-	if org == "" || len(org) > 128 {
-		return false
-	}
-	return !strings.ContainsAny(org, ",: \t\r\n")
 }

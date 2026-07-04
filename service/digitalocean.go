@@ -249,26 +249,30 @@ func buildDropletTags(spec *CreateMachineSpec) []string {
 		if len(k) > 4 && k[:4] == "env:" {
 			continue
 		}
-		// The hanzo-org tag is the BILLING ATTRIBUTION key: the hourly meter reads
-		// it back from the droplet to decide which org to debit. A client must
-		// never be able to set/forge/duplicate it. LaunchOrgMachine injects the
-		// authoritative value under the map key, but a value carrying the meter's
-		// "," separator (or a second "hanzo-org:" token) could smuggle a duplicate
-		// attribution token that orgFromTag would pick up on read-back. Drop the
-		// reserved key from client input and refuse any tag whose key/value could
-		// break the read-back parse — deterministic, not reliant on DO's own tag
-		// validation.
-		if k == orgTagKey || !safeTagField(k) || !safeTagField(v) {
+		// hanzo-org (billing key) and hanzo-project (billing attribution) are the
+		// RESERVED attribution keys: the hourly meter reads them back from the
+		// droplet to decide which org to debit and which project to attribute. A
+		// client must never be able to set/forge/duplicate either. LaunchOrgMachine
+		// injects the authoritative values under these map keys, but a value
+		// carrying the meter's "," separator (or a second reserved token) could
+		// smuggle a duplicate that orgFromTag/projectFromTag would pick up on
+		// read-back. Drop the reserved keys from client input and refuse any tag
+		// whose key/value could break the read-back parse — deterministic, not
+		// reliant on DO's own tag validation.
+		if k == orgTagKey || k == projectTagKey || !safeTagField(k) || !safeTagField(v) {
 			continue
 		}
 		tags = append(tags, fmt.Sprintf("%s:%s", k, v))
 	}
 
-	// Attribution tag last, from the authoritative injected value, AFTER the
-	// client loop dropped any client attempt — so exactly one hanzo-org token
-	// exists and it is the server-resolved org.
+	// Attribution tags last, from the authoritative injected values, AFTER the
+	// client loop dropped any client attempt — so exactly one hanzo-org and at
+	// most one hanzo-project token exist and they are the server-resolved values.
 	if org, ok := spec.Tags[orgTagKey]; ok {
 		tags = append(tags, fmt.Sprintf("%s:%s", orgTagKey, org))
+	}
+	if project, ok := spec.Tags[projectTagKey]; ok && project != "" {
+		tags = append(tags, fmt.Sprintf("%s:%s", projectTagKey, project))
 	}
 
 	return tags

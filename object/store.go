@@ -51,6 +51,9 @@ func sharedModels() []interface{} {
 	return []interface{}{
 		new(Plan),
 		new(MeterLease),
+		new(BillingLease),
+		new(FleetWorker),
+		new(CostCursor),
 	}
 }
 

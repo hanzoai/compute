@@ -18,8 +18,11 @@ import "xorm.io/core"
 
 // Volume represents a block storage volume attached to a machine.
 type Volume struct {
-	Owner       string `xorm:"varchar(100) notnull pk" json:"owner"`
-	Name        string `xorm:"varchar(100) notnull pk" json:"name"`
+	Owner string `xorm:"varchar(100) notnull pk" json:"owner"`
+	Name  string `xorm:"varchar(100) notnull pk" json:"name"`
+	// Project is the attribution dimension alongside Owner: the project WITHIN the
+	// org that owns this volume. Additive, Sync2-safe, defaults to "".
+	Project     string `xorm:"varchar(100)" json:"project"`
 	CreatedTime string `xorm:"varchar(100)" json:"createdTime"`
 	UpdatedTime string `xorm:"varchar(100)" json:"updatedTime"`
 

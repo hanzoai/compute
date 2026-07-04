@@ -30,6 +30,7 @@ import (
 
 	"github.com/beego/beego/logs"
 	"github.com/hanzoai/commerce/metering"
+	"github.com/hanzoai/visor/telemetry"
 )
 
 // meteringProvider labels resell-compute usage in the commerce ledger so spend
@@ -130,8 +131,11 @@ func MeterRunningMachines(ctx context.Context) {
 	if !ComputeConfigured() || !MeteringConfigured() {
 		return
 	}
+	ctx, span := telemetry.Span(ctx, "billing.meter.hourly", "", "")
+	defer span.End()
 	machines, err := ListRunningHouseMachines()
 	if err != nil {
+		span.RecordError(err)
 		logs.Warning("compute metering: list running machines: %v", err)
 		return
 	}
@@ -155,6 +159,11 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			logs.Warning("compute metering: machine %s has no %s tag; skipping (unattributable)", m.Id, orgTagKey)
 			continue
 		}
+		// Project is the second attribution dimension recovered from the machine's
+		// own tag (empty == the org's default project). It never changes the debit
+		// destination (always the org), only the metering Actor, so the ledger is
+		// attributable per project.
+		project := projectFromTag(m.Tag)
 		// Skip the LAUNCH hour: the launch path already debited this machine one
 		// hour at create time (RequestID = machine id). Metering it again for the
 		// same wall-clock hour would double-charge the launch hour (the launch and
@@ -178,7 +187,7 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		client := NewMeteringClient(org)
 		if _, err := client.Record(ctx, metering.Usage{
 			User:        org,
-			Actor:       org,
+			Actor:       MeterActor(org, project),
 			Org:         org,
 			Currency:    "usd",
 			AmountCents: cents,
@@ -192,15 +201,12 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			continue
 		}
 		metered++
+		// Mirror the debit as an OTel metric (per org/project, tier "compute") so
+		// o11y shows real per-project spend as it is billed.
+		telemetry.CountMetered(ctx, org, project, "compute", cents)
 		// Roll a running event into the analytics datastore alongside this
 		// hour's debit (best-effort; never blocks or affects the sweep).
 		EmitCompute(org, ComputeRunning, m, cents)
 	}
 	return metered, skipped
 }
-
-// orgFromTag recovers the owning org from a machine's comma-joined tag string
-// (as getMachineFromDroplet builds it): the value after "hanzo-org:". Empty when
-// the machine carries no org tag — such a machine is unattributable and is
-// skipped rather than billed to a wrong tenant.
-func orgFromTag(tags string) string { return tagValue(tags, orgTagKey) }
