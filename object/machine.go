@@ -22,8 +22,13 @@ import (
 )
 
 type Machine struct {
-	Owner       string `xorm:"varchar(100) notnull pk" json:"owner"`
-	Name        string `xorm:"varchar(100) notnull pk" json:"name"`
+	Owner string `xorm:"varchar(100) notnull pk" json:"owner"`
+	Name  string `xorm:"varchar(100) notnull pk" json:"name"`
+	// Project is the second attribution dimension alongside Owner (the tenant
+	// boundary): the project WITHIN the org that owns this machine. Not part of the
+	// (Owner, Name) primary key — an additive, Sync2-safe column that defaults to
+	// "" (the org's default project), so existing rows and callers are unaffected.
+	Project     string `xorm:"varchar(100)" json:"project"`
 	Id          string `xorm:"varchar(100)" json:"id"`
 	Provider    string `xorm:"varchar(100)" json:"provider"`
 	CreatedTime string `xorm:"varchar(100)" json:"createdTime"`

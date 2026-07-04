@@ -23,8 +23,11 @@ import (
 )
 
 type Provider struct {
-	Owner       string `xorm:"varchar(100) notnull pk" json:"owner"`
-	Name        string `xorm:"varchar(100) notnull pk" json:"name"`
+	Owner string `xorm:"varchar(100) notnull pk" json:"owner"`
+	Name  string `xorm:"varchar(100) notnull pk" json:"name"`
+	// Project is the attribution dimension alongside Owner: the project WITHIN the
+	// org that owns this BYOC provider. Additive, Sync2-safe, defaults to "".
+	Project     string `xorm:"varchar(100)" json:"project"`
 	CreatedTime string `xorm:"varchar(100)" json:"createdTime"`
 	UpdatedTime string `xorm:"varchar(100)" json:"updatedTime"`
 	DisplayName string `xorm:"varchar(100)" json:"displayName"`
@@ -43,6 +46,18 @@ type Provider struct {
 	ProviderUrl string `xorm:"varchar(200)" json:"providerUrl"`
 
 	ClusterID string `xorm:"varchar(100)" json:"clusterId"` // DOKS cluster UUID
+
+	// CostReadScope carries the per-cloud identifier the fleet-billing cost collector
+	// needs to read this BYOC account's spend, beyond the (ClientId, ClientSecret,
+	// Region) triple used to manage machines. It is cloud-specific and additive
+	// (Sync2-safe, defaults ""):
+	//   AWS  — ignored (Cost Explorer is account-wide from the access key).
+	//   DO   — ignored (the balance endpoint is account-wide from the token).
+	//   Azure— "<tenantId>/<subscriptionId>" (Cost Management query scope + auth tenant).
+	//   GCP  — "<project>.<dataset>.<table>" of the BigQuery billing-export table.
+	// Empty means "cost-read not configured": the collector honestly skips this
+	// provider (no fee) rather than fabricating spend.
+	CostReadScope string `xorm:"varchar(300)" json:"costReadScope"`
 }
 
 func GetProviderCount(owner, field, value string) (int64, error) {

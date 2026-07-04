@@ -1,0 +1,145 @@
+// Copyright 2025 Hanzo Industries Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package telemetry is visor's OpenTelemetry seam: ONE place that wires OTel
+// traces + metrics to the o11y OTLP collector (the same OTEL_EXPORTER_OTLP_*
+// contract zen-gateway uses to emit GenAI telemetry), and ONE small API the rest
+// of visor calls to attribute spans/metrics per org+project.
+//
+// It is a leaf package — it imports only the OpenTelemetry SDK and beego's logger,
+// so service/ and controllers/ can instrument the provision/list/delete/meter
+// paths without an import cycle. When OTEL_EXPORTER_OTLP_ENDPOINT is unset the
+// pipeline is a no-op (disabled): the global no-op providers back every span and
+// counter, so instrumentation stays branch-free and a local/dev run never spams a
+// nonexistent collector. Setup is best-effort — a failure logs and disables
+// telemetry, never breaks visor.
+package telemetry
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/beego/beego/logs"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+// defaultServiceName is the OTel service.name for this process unless overridden
+// by OTEL_SERVICE_NAME (the standard OTel env knob).
+const defaultServiceName = "visor"
+
+// enabled reports whether the real OTLP pipeline was installed. It gates only
+// logging/reporting; the instrumentation helpers work regardless (no-op providers
+// when disabled), so no caller branches on it.
+var enabled bool
+
+// Enabled reports whether visor is exporting real OTel data to an OTLP collector.
+func Enabled() bool { return enabled }
+
+// ContextFromRequest extracts any inbound W3C trace context from the request
+// headers so a span started for this request continues the caller's (gateway's)
+// trace instead of beginning an orphan root. Safe when telemetry is disabled — the
+// global no-op propagator returns the request context unchanged.
+func ContextFromRequest(r *http.Request) context.Context {
+	return otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+}
+
+// serviceName resolves the OTel service.name (OTEL_SERVICE_NAME or "visor").
+func serviceName() string {
+	if n := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME")); n != "" {
+		return n
+	}
+	return defaultServiceName
+}
+
+// otlpEndpoint returns the configured OTLP endpoint (traces-specific or generic),
+// the single "is o11y wired" signal. Empty ⇒ telemetry disabled.
+func otlpEndpoint() string {
+	for _, k := range []string{"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Init builds the OTel trace + metric pipelines and installs them as the process
+// global providers, returning a shutdown that flushes the last batch. With no OTLP
+// endpoint configured it is a no-op and returns a no-op shutdown, so the disabled
+// path costs nothing. The HTTP exporters self-configure from the standard
+// OTEL_EXPORTER_OTLP_* env vars (endpoint / headers / protocol), matching the
+// zen-gateway contract, so the operator wires one endpoint and traces + metrics
+// both flow.
+func Init(ctx context.Context) func(context.Context) error {
+	noop := func(context.Context) error { return nil }
+
+	endpoint := otlpEndpoint()
+	if endpoint == "" {
+		logs.Info("telemetry: OTEL_EXPORTER_OTLP_ENDPOINT unset — OTel disabled")
+		return noop
+	}
+
+	// Propagate W3C trace context (+ baggage) so a span visor starts links to the
+	// gateway's incoming trace, giving one end-to-end trace across the edge.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, propagation.Baggage{},
+	))
+
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
+		attribute.String("service.name", serviceName()),
+	))
+	if err != nil {
+		res = resource.Default()
+	}
+
+	traceExp, err := otlptracehttp.New(ctx)
+	if err != nil {
+		logs.Warning("telemetry: trace exporter init failed: %v — OTel disabled", err)
+		return noop
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(traceExp),
+		sdktrace.WithResource(res),
+	)
+
+	metricExp, err := otlpmetrichttp.New(ctx)
+	if err != nil {
+		logs.Warning("telemetry: metric exporter init failed: %v — traces only", err)
+		otel.SetTracerProvider(tp)
+		enabled = true
+		return func(ctx context.Context) error { return tp.Shutdown(ctx) }
+	}
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)),
+		sdkmetric.WithResource(res),
+	)
+
+	otel.SetTracerProvider(tp)
+	otel.SetMeterProvider(mp)
+	enabled = true
+	logs.Info("telemetry: OTel traces+metrics → %s (service=%s)", endpoint, serviceName())
+
+	return func(ctx context.Context) error {
+		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
+	}
+}

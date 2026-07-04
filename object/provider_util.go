@@ -39,6 +39,32 @@ func getActiveCloudProviders(owner string) ([]*Provider, error) {
 	return res, nil
 }
 
+// isActiveCloudProvider is the ONE predicate for "a usable BYOC cloud account":
+// active, with both credential halves, in a cloud category. Shared by the per-owner
+// and the cross-tenant accessors so both agree on what counts.
+func isActiveCloudProvider(p *Provider) bool {
+	return p.ClientId != "" && p.ClientSecret != "" && p.State == "Active" &&
+		(p.Category == "Public Cloud" || p.Category == "Private Cloud")
+}
+
+// GetAllActiveCloudProviders returns every org's active BYOC cloud provider — the
+// set the daily fleet cost collector bills 1% of spend against. Like the running-
+// machine sweep it scans cross-tenant and each row carries its own Owner/Project, so
+// one pass attributes every org's cloud fee correctly.
+func GetAllActiveCloudProviders() ([]*Provider, error) {
+	providers := []*Provider{}
+	if err := adapter.engine.Where("state = ?", "Active").Find(&providers); err != nil {
+		return nil, err
+	}
+	res := []*Provider{}
+	for _, p := range providers {
+		if isActiveCloudProvider(p) {
+			res = append(res, p)
+		}
+	}
+	return res, nil
+}
+
 func getActiveBlockchainProvider(owner string) (*Provider, error) {
 	providers, err := GetProviders(owner)
 	if err != nil {

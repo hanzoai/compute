@@ -65,6 +65,91 @@ func TestOrgFromTag(t *testing.T) {
 	}
 }
 
+func TestProjectFromTag(t *testing.T) {
+	cases := []struct {
+		tags string
+		want string
+	}{
+		{"hanzo-org:acme,hanzo-project:web,", "web"},
+		{"foo,hanzo-project:api,bar", "api"},
+		{" hanzo-project:web ", "web"},
+		{"hanzo-org:acme,", ""},          // org only -> default project
+		{"", ""},                         // empty -> default project
+		{"hanzo-projectx:web", ""},       // exact key, not a prefix collision
+	}
+	for _, c := range cases {
+		if got := projectFromTag(c.tags); got != c.want {
+			t.Fatalf("projectFromTag(%q) = %q, want %q", c.tags, got, c.want)
+		}
+	}
+}
+
+func TestMeterActor(t *testing.T) {
+	// Empty project is the default project: the actor stays the bare org, so
+	// threading project through the existing debits is a no-op for callers that do
+	// not set X-Project-Id (backward-compatible). A named project yields org/project.
+	if got := MeterActor("acme", ""); got != "acme" {
+		t.Fatalf("MeterActor(acme, \"\") = %q, want acme (default project == today's behavior)", got)
+	}
+	if got := MeterActor("acme", "web"); got != "acme/web" {
+		t.Fatalf("MeterActor(acme, web) = %q, want acme/web", got)
+	}
+}
+
+func TestNormalizeProject(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"  ", ""},
+		{"web", "web"},
+		{"  web  ", "web"},
+		{"bad,project", ""}, // separators can't survive tag/meter read-back -> default
+		{"bad:project", ""},
+		{"has space", ""},
+	}
+	for _, c := range cases {
+		if got := NormalizeProject(c.in); got != c.want {
+			t.Fatalf("NormalizeProject(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// A running machine carrying a project tag attributes its debit to org/project via
+// the Actor, while the debit destination (User + X-Org-Id) stays the org — one org
+// balance covers all its projects.
+func TestMeterMachines_AttributesProjectViaActor(t *testing.T) {
+	url, recs, mu := fakeCommerce(t)
+	t.Setenv("COMMERCE_URL", url)
+	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
+
+	now := time.Date(2026, 7, 2, 15, 30, 0, 0, time.UTC)
+	machines := []*Machine{{Id: "p1", Size: "s", Tag: "hanzo-org:acme,hanzo-project:web,"}}
+
+	metered, _ := meterMachines(context.Background(), machines, now)
+	if metered != 1 {
+		t.Fatalf("metered=%d, want 1", metered)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	r := (*recs)[0]
+	if r.org != "acme" { // debit destination stays the org
+		t.Fatalf("X-Org-Id = %q, want acme", r.org)
+	}
+	var u struct {
+		User  string `json:"user"`
+		Actor string `json:"actor"`
+	}
+	if err := json.Unmarshal(r.body, &u); err != nil {
+		t.Fatalf("parse usage: %v", err)
+	}
+	if u.User != "acme" {
+		t.Fatalf("debit user = %q, want acme (org is the billing key)", u.User)
+	}
+	if u.Actor != "acme/web" {
+		t.Fatalf("actor = %q, want acme/web (per-project attribution)", u.Actor)
+	}
+}
+
 func TestHourStamp_IdempotencyBucket(t *testing.T) {
 	base := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
 	// Same hour -> same stamp (debit dedups).
