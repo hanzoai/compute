@@ -18,29 +18,18 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"xorm.io/xorm"
 )
 
 // installBaseStore installs a Base-backend engineProvider backed by a temp
-// dataRoot plus a temp SQLite engine standing in for the shared Postgres
-// coordination engine (Plan catalog, MeterLease). It restores the previous
-// process-wide store on cleanup, so it composes with the rest of the package's
-// tests. The modernc "sqlite" driver is registered by store_base.go's blank
-// import, which this same package shares.
+// dataRoot. newBaseStore owns the `_global` SQLite coordination engine (Plan
+// catalog, MeterLease) — no Postgres. It restores the previous process-wide store
+// on cleanup, so it composes with the rest of the package's tests. The modernc
+// "sqlite" driver is registered by store_base.go's blank import.
 func installBaseStore(t *testing.T) *baseStore {
 	t.Helper()
 	root := t.TempDir()
 
-	coord, err := xorm.NewEngine("sqlite", root+"/shared.db"+sqlitePragmas)
-	if err != nil {
-		t.Fatalf("open shared engine: %v", err)
-	}
-	if err := coord.Sync2(sharedModels()...); err != nil {
-		t.Fatalf("sync shared models: %v", err)
-	}
-
-	bs, err := newBaseStore(root, coord)
+	bs, err := newBaseStore(root)
 	if err != nil {
 		t.Fatalf("newBaseStore: %v", err)
 	}
@@ -49,7 +38,6 @@ func installBaseStore(t *testing.T) *baseStore {
 	store = bs
 	t.Cleanup(func() {
 		_ = bs.Close()
-		_ = coord.Close()
 		store = prev
 	})
 	return bs
