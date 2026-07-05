@@ -52,6 +52,8 @@ type baseStore struct {
 	root  string
 	coord *xorm.Engine // the _global SQLite engine for the cross-pod shared tables
 
+	repl *replicator // HA object-store binding (nil = local-only; see store_replica.go)
+
 	mu      sync.Mutex
 	engines map[string]*xorm.Engine
 }
@@ -67,9 +69,19 @@ func newBaseStore(root string) (*baseStore, error) {
 	if root == "" {
 		return nil, fmt.Errorf("visor: base store data root is empty")
 	}
+	// HA object-store binding (opt-in via REPLICA_STORE; nil = local-only).
+	repl, err := newReplicator(root)
+	if err != nil {
+		return nil, fmt.Errorf("visor: base store replicator: %w", err)
+	}
+
 	coordPath := DBPath(root, "_global")
 	if err := os.MkdirAll(filepath.Dir(coordPath), 0o700); err != nil {
 		return nil, fmt.Errorf("visor: base store coord dir %s: %w", filepath.Dir(coordPath), err)
+	}
+	// Hydrate the shared (_global) DB from the object store BEFORE opening it.
+	if err := repl.hydrate("_global", coordPath); err != nil {
+		return nil, fmt.Errorf("visor: base store hydrate coord: %w", err)
 	}
 	coord, err := xorm.NewEngine("sqlite", coordPath+sqlitePragmas)
 	if err != nil {
@@ -80,7 +92,9 @@ func newBaseStore(root string) (*baseStore, error) {
 		_ = coord.Close()
 		return nil, fmt.Errorf("visor: base store sync coord: %w", err)
 	}
-	return &baseStore{root: root, coord: coord, engines: map[string]*xorm.Engine{}}, nil
+	bs := &baseStore{root: root, coord: coord, repl: repl, engines: map[string]*xorm.Engine{}}
+	repl.ship("_global", coordPath) // back up the shared DB on an interval
+	return bs, nil
 }
 
 // EngineFor returns the org's SQLite engine, opening and schema-syncing it on
@@ -101,6 +115,11 @@ func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("visor: base store mkdir %s: %w", filepath.Dir(path), err)
 	}
+	// Hydrate this org's DB from the object store BEFORE opening it (HA: a fresh
+	// pod pulls the org's last committed state; a brand-new org starts empty).
+	if err := s.repl.hydrate(owner, path); err != nil {
+		return nil, fmt.Errorf("visor: base store hydrate %s: %w", owner, err)
+	}
 
 	engine, err := xorm.NewEngine("sqlite", path+sqlitePragmas)
 	if err != nil {
@@ -114,6 +133,7 @@ func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
 	}
 
 	s.engines[owner] = engine
+	s.repl.ship(owner, path) // back this org's DB up to the object store on an interval
 	return engine, nil
 }
 
