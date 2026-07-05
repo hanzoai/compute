@@ -18,8 +18,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/hanzoai/authz v1.10.0
-	github.com/hanzoai/authzstore v0.1.1
-	github.com/hanzoai/xorm v1.1.6
 	github.com/hetznercloud/hcloud-go/v2 v2.37.0
 	github.com/lib/pq v1.12.1
 	github.com/luthermonson/go-proxmox v0.4.0
@@ -62,6 +60,8 @@ require (
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.1.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
+	github.com/mattn/go-isatty v0.0.21 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.39.0 // indirect
@@ -120,7 +120,6 @@ require (
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
-	github.com/hanzoai/builder v0.3.13 // indirect
 	github.com/hanzoai/iam v1.28.12
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
