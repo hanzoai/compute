@@ -69,11 +69,9 @@ func newBaseStore(root string) (*baseStore, error) {
 	if root == "" {
 		return nil, fmt.Errorf("visor: base store data root is empty")
 	}
-	// HA object-store binding (opt-in via REPLICA_STORE; nil = local-only).
-	repl, err := newReplicator(root)
-	if err != nil {
-		return nil, fmt.Errorf("visor: base store replicator: %w", err)
-	}
+	// HA object-store binding (opt-in via REPLICA_STORE; nil = local-only). Never
+	// fatal — a bad/unreachable store degrades to local-only inside newReplicator.
+	repl := newReplicator(root)
 
 	coordPath := DBPath(root, "_global")
 	if err := os.MkdirAll(filepath.Dir(coordPath), 0o700); err != nil {

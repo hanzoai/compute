@@ -36,9 +36,9 @@ func TestReplicatorHydrateShipRoundTrip(t *testing.T) {
 
 	// Pod A: write org rows, push a snapshot synchronously.
 	rootA := t.TempDir()
-	repA, err := newReplicator(rootA)
-	if err != nil || repA == nil {
-		t.Fatalf("newReplicator A: rep=%v err=%v", repA, err)
+	repA := newReplicator(rootA)
+	if repA == nil {
+		t.Fatal("newReplicator A returned nil with REPLICA_STORE set")
 	}
 	defer repA.close()
 
@@ -57,10 +57,7 @@ func TestReplicatorHydrateShipRoundTrip(t *testing.T) {
 
 	// Pod B: fresh disk, hydrate must pull acme's DB and expose the row.
 	rootB := t.TempDir()
-	repB, err := newReplicator(rootB)
-	if err != nil {
-		t.Fatalf("newReplicator B: %v", err)
-	}
+	repB := newReplicator(rootB)
 	defer repB.close()
 	pathB := DBPath(rootB, "acme")
 	if err := os.MkdirAll(filepath.Dir(pathB), 0o700); err != nil {
@@ -84,10 +81,7 @@ func TestReplicatorHydrateShipRoundTrip(t *testing.T) {
 // nil replicator whose methods are safe no-ops (today's local-only behavior).
 func TestReplicatorDisabledIsLocalOnly(t *testing.T) {
 	t.Setenv("REPLICA_STORE", "")
-	rep, err := newReplicator(t.TempDir())
-	if err != nil {
-		t.Fatalf("newReplicator: %v", err)
-	}
+	rep := newReplicator(t.TempDir())
 	if rep != nil {
 		t.Fatal("replicator must be nil when REPLICA_STORE is unset")
 	}
