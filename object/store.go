@@ -103,31 +103,21 @@ const (
 	BackendBase StorageBackend = "base"
 )
 
-// ConfiguredBackend reads the storageBackend config knob (default "postgres").
+// ConfiguredBackend reads the storageBackend config knob. Default is Base (SQLite
+// for everything — the house rule); a multi-instance deployment opts INTO Postgres
+// with storageBackend=postgres.
 func ConfiguredBackend() StorageBackend {
-	if conf.GetConfigString("storageBackend") == string(BackendBase) {
-		return BackendBase
+	if conf.GetConfigString("storageBackend") == string(BackendPostgres) {
+		return BackendPostgres
 	}
-	return BackendPostgres
+	return BackendBase
 }
 
-// InitStore selects and installs the process-wide engine provider. It is called
-// by InitAdapter after the Postgres adapter is built. The Postgres engine is
-// ALWAYS opened (the live query path depends on it, and the migration reads
-// from it); the flag only decides what EngineFor hands back to new code.
+// InitStore installs the pgStore engine provider for the Postgres backend. Base
+// mode is wired directly in InitAdapter (it never opens a Postgres adapter), so
+// this runs only on the opt-in Postgres path.
 func InitStore() {
-	switch ConfiguredBackend() {
-	case BackendBase:
-		// adapter.engine (Postgres) is the shared coordination engine: even in
-		// Base mode the Plan catalog and MeterLease lease stay on it.
-		bs, err := newBaseStore(dataRoot(), adapter.engine)
-		if err != nil {
-			panic(fmt.Errorf("visor: init base store: %w", err))
-		}
-		store = bs
-	default:
-		store = &pgStore{engine: adapter.engine}
-	}
+	store = &pgStore{engine: adapter.engine}
 }
 
 // EngineFor returns the storage engine that serves owner under the configured

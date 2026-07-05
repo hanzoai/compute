@@ -50,18 +50,35 @@ const sqlitePragmas = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_p
 // the exact integration point and the interim operational constraint.
 type baseStore struct {
 	root  string
-	coord *xorm.Engine // shared Postgres engine for the cross-pod shared tables
+	coord *xorm.Engine // the _global SQLite engine for the cross-pod shared tables
 
 	mu      sync.Mutex
 	engines map[string]*xorm.Engine
 }
 
-func newBaseStore(root string, coord *xorm.Engine) (*baseStore, error) {
+// newBaseStore opens the per-org SQLite substrate. The cross-pod shared tables
+// (Plan catalog + MeterLease lease) live in the ONE `_global` SQLite DB — no
+// Postgres anywhere (house rule: SQLite/Base for everything). This is a valid
+// single coordination store because visor runs replicas=1: one pod == one writer,
+// so the MeterLease insert-once lease cannot double-fire. Scaling visor out later
+// needs a real cluster coordinator (WAL→object-storage single-writer election,
+// the staged replication note above) — until then Base mode is single-replica.
+func newBaseStore(root string) (*baseStore, error) {
 	if root == "" {
 		return nil, fmt.Errorf("visor: base store data root is empty")
 	}
-	if coord == nil {
-		return nil, fmt.Errorf("visor: base store shared coordination engine is nil")
+	coordPath := DBPath(root, "_global")
+	if err := os.MkdirAll(filepath.Dir(coordPath), 0o700); err != nil {
+		return nil, fmt.Errorf("visor: base store coord dir %s: %w", filepath.Dir(coordPath), err)
+	}
+	coord, err := xorm.NewEngine("sqlite", coordPath+sqlitePragmas)
+	if err != nil {
+		return nil, fmt.Errorf("visor: base store open coord %s: %w", coordPath, err)
+	}
+	// The shared tables live only here (never synced into a per-org DB).
+	if err := coord.Sync2(sharedModels()...); err != nil {
+		_ = coord.Close()
+		return nil, fmt.Errorf("visor: base store sync coord: %w", err)
 	}
 	return &baseStore{root: root, coord: coord, engines: map[string]*xorm.Engine{}}, nil
 }
@@ -119,6 +136,11 @@ func (s *baseStore) AllEngines() ([]*xorm.Engine, error) {
 	engines := make([]*xorm.Engine, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() {
+			continue
+		}
+		// `_global` holds the shared coord tables (Plan/MeterLease), not a tenant —
+		// a cross-ORG sweep (billing node-pool report, stale-session GC) must skip it.
+		if e.Name() == "_global" {
 			continue
 		}
 		engine, err := s.EngineFor(e.Name())

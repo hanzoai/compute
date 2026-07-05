@@ -38,11 +38,23 @@ func InitConfig() {
 }
 
 func InitAdapter() {
+	// SQLite/Base is the default substrate (house rule: SQLite for everything; no
+	// Postgres unless a multi-instance deployment opts in with storageBackend=postgres).
+	// In Base mode NOTHING dials Postgres — the per-org + `_global` SQLite DBs are the
+	// whole store, so a cluster with no SQL service boots clean.
+	if ConfiguredBackend() == BackendBase {
+		bs, err := newBaseStore(dataRoot())
+		if err != nil {
+			panic(fmt.Errorf("visor: init base store: %w", err))
+		}
+		store = bs
+		// Legacy `adapter.engine` references (pre-seam call sites, createDatabase)
+		// resolve to the `_global` SQLite coord engine — never nil, never Postgres.
+		adapter = &Adapter{driverName: "sqlite", engine: bs.Shared()}
+		return
+	}
+	// Postgres: multi-instance production only (opt-in). The historical shared engine.
 	adapter = NewAdapter(conf.GetConfigString("driverName"), conf.GetConfigDataSourceName())
-
-	// Install the process-wide engine provider (postgres by default; per-org
-	// Base SQLite when storageBackend=base). Additive: the Postgres engine
-	// above is always opened and remains the live query path.
 	InitStore()
 }
 
