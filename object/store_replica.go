@@ -23,12 +23,13 @@ package object
 
 import (
 	"context"
+	"log"
 	"os"
 	"time"
 
 	"github.com/hanzoai/vfs/pkg/backend"
 	_ "github.com/hanzoai/vfs/pkg/backend/file" // register file:// (dev/test)
-	_ "github.com/hanzoai/vfs/pkg/backend/s3"   // register s3:// (SeaweedFS, prod)
+	_ "github.com/hanzoai/vfs/pkg/backend/s3"   // register s3:// (Hanzo S3, prod)
 	"github.com/hanzoai/vfs/replica"
 )
 
@@ -42,16 +43,20 @@ type replicator struct {
 	cancel  context.CancelFunc
 }
 
-// newReplicator opens the object-store backend from REPLICA_STORE. Returns nil (no
-// error) when unset — HA is opt-in and its absence is the normal local-only mode.
-func newReplicator(root string) (*replicator, error) {
+// newReplicator opens the object-store backend from REPLICA_STORE. Returns nil when
+// unset (HA is opt-in; absence is the normal local-only mode) OR when the backend
+// can't be opened — HA durability is ADDITIVE and must NEVER take the service down.
+// A misconfigured/unreachable object store degrades to local-only with a logged
+// warning, exactly as if REPLICA_STORE were unset. It never returns an error.
+func newReplicator(root string) *replicator {
 	url := os.Getenv("REPLICA_STORE")
 	if url == "" {
-		return nil, nil
+		return nil
 	}
 	be, err := backend.Open(context.Background(), url)
 	if err != nil {
-		return nil, err
+		log.Printf("visor: REPLICA_STORE set but object store unavailable (%v); running local-only (no HA durability)", err)
+		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &replicator{
@@ -60,7 +65,7 @@ func newReplicator(root string) (*replicator, error) {
 		pushDur: 15 * time.Second,
 		ctx:     ctx,
 		cancel:  cancel,
-	}, nil
+	}
 }
 
 // hydrate pulls owner's last snapshot from the object store into its local file
