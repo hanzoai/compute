@@ -20,32 +20,14 @@ import (
 	authz "github.com/hanzoai/authz"
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
-	"github.com/hanzoai/authzstore"
 	iam "github.com/hanzoai/iam"
 	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/xorm"
 )
 
 var Enforcer *authz.Enforcer
 
 func InitAuthz() {
 	var err error
-
-	tableNamePrefix := conf.GetConfigString("tableNamePrefix")
-	driverName := conf.GetConfigString("driverName")
-	dataSourceName := conf.GetConfigDataSourceName()
-	if driverName == "mysql" {
-		dataSourceName = dataSourceName + conf.GetConfigString("dbName")
-	}
-
-	eng, err := xorm.NewEngine(driverName, dataSourceName)
-	if err != nil {
-		panic(err)
-	}
-	a, err := authzstore.New(eng, "api_rule", tableNamePrefix)
-	if err != nil {
-		panic(err)
-	}
 
 	modelText := `
 [request_definition]
@@ -71,7 +53,10 @@ m = (r.subOwner == p.subOwner || p.subOwner == "*") && (r.subName == p.subName |
 		panic(err)
 	}
 
-	Enforcer, err = authz.NewEnforcer(m, a)
+	// The policy is STATIC (code-defined below) — it lives entirely in memory. No
+	// database (was a pointless Postgres api_rule persistence sink for hardcoded
+	// rules; house rule: no SQL). One source of truth: the ruleText string adapter.
+	Enforcer, err = authz.NewEnforcer(m)
 	if err != nil {
 		panic(err)
 	}
@@ -93,17 +78,9 @@ p, *, *, GET, /v1/gpus, *, *
 `
 
 		sa := stringadapter.NewAdapter(ruleText)
-		// load all rules from string adapter to enforcer's memory
-		err := sa.LoadPolicy(Enforcer.GetModel())
-		if err != nil {
-			panic(err)
-		}
-
-		// save all rules from enforcer's memory to Xorm adapter (DB)
-		// same as:
-		// a.SavePolicy(Enforcer.GetModel())
-		err = Enforcer.SavePolicy()
-		if err != nil {
+		// Load the static rules into the enforcer's memory. There is no DB to save
+		// them back to — the rules are the source of truth in code.
+		if err := sa.LoadPolicy(Enforcer.GetModel()); err != nil {
 			panic(err)
 		}
 	}
