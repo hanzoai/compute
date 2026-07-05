@@ -97,8 +97,11 @@ func (r *replicator) pushNow(owner, path string) error {
 }
 
 // ship starts a per-org background loop that pushNow's on an interval — the owner's
-// WAL-shipper. Called once per org after its engine is opened. Fire-and-forget;
-// never blocks queries.
+// WAL-shipper. Called once per org after its engine is opened. Never blocks queries.
+// A durability feature must NOT fail silently: a push error is logged (rate-limited to
+// the first failure + first recovery per org) so a broken object store is visible, not
+// a silent loss of durability. The first successful push per org is logged once too,
+// so ops can confirm HA is actually shipping.
 func (r *replicator) ship(owner, path string) {
 	if r == nil {
 		return
@@ -106,12 +109,27 @@ func (r *replicator) ship(owner, path string) {
 	go func() {
 		t := time.NewTicker(r.pushDur)
 		defer t.Stop()
+		failing := false
+		first := true
 		for {
 			select {
 			case <-r.ctx.Done():
 				return
 			case <-t.C:
-				_ = r.pushNow(owner, path)
+				err := r.pushNow(owner, path)
+				switch {
+				case err != nil && !failing:
+					log.Printf("visor HA: org %q push FAILED (durability at risk): %v", owner, err)
+					failing = true
+				case err == nil && failing:
+					log.Printf("visor HA: org %q push recovered", owner)
+					failing = false
+				case err == nil && first:
+					log.Printf("visor HA: org %q shipping to object store (durable)", owner)
+				}
+				if err == nil {
+					first = false
+				}
 			}
 		}
 	}()
