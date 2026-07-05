@@ -194,7 +194,7 @@ func (c *ApiController) ListComputeMachines() {
 		c.ResponseError("hanzo compute is not configured")
 		return
 	}
-	machines, err := service.ListOrgMachines(org)
+	machines, err := service.ListOrgMachines(org, c.resolveComputeProject(""))
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -292,7 +292,7 @@ func batchMemberName(name string, i int) string {
 // the sweep skips a machine created in the current clock hour, so the hour is
 // never double-billed. A metering write failure never fails the launch — the
 // machine exists and the ticker/reconciler reconciles.
-func launchMetered(ctx context.Context, org string, spec *service.CreateMachineSpec, si *service.SizeInfo) (*service.Machine, error) {
+func launchMetered(ctx context.Context, org, project string, spec *service.CreateMachineSpec, si *service.SizeInfo) (*service.Machine, error) {
 	meter := service.NewMeteringClient(org)
 	firstHourCents := service.PriceToCents(si.PriceHourly)
 	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd", AmountCents: firstHourCents}); err != nil {
@@ -301,7 +301,7 @@ func launchMetered(ctx context.Context, org string, spec *service.CreateMachineS
 		}
 		return nil, fmt.Errorf("billing authorization failed: %v", err)
 	}
-	machine, err := service.LaunchOrgMachine(org, spec)
+	machine, err := service.LaunchOrgMachine(org, project, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +393,8 @@ func (c *ApiController) LaunchComputeMachine() {
 	base := req.CreateMachineSpec
 	base.InstanceType = size
 	service.SetKind(&base, req.Kind)
-	service.SetScope(&base, c.resolveComputeApp(req.App), c.resolveComputeProject(req.Project))
+	project := c.resolveComputeProject(req.Project)
+	service.SetScope(&base, c.resolveComputeApp(req.App), project)
 	name := strings.TrimSpace(req.Name)
 
 	// Batch: count>1 launches N members named "<name>-NNN" through the SAME
@@ -408,7 +409,7 @@ func (c *ApiController) LaunchComputeMachine() {
 			spec := base
 			spec.Name = batchMemberName(name, i)
 			spec.DisplayName = spec.Name
-			machine, err := launchMetered(ctx, org, &spec, si)
+			machine, err := launchMetered(ctx, org, project, &spec, si)
 			if err != nil {
 				c.ResponseOk(map[string]interface{}{"machines": machines, "quote": quote, "error": err.Error()})
 				return
@@ -423,7 +424,7 @@ func (c *ApiController) LaunchComputeMachine() {
 	// spec's Name in JSON, so set it explicitly.
 	spec := base
 	spec.Name = name
-	machine, err := launchMetered(ctx, org, &spec, si)
+	machine, err := launchMetered(ctx, org, project, &spec, si)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
