@@ -63,22 +63,30 @@ func (t *Ticker) SetupTicker() {
 	// MeterRunningMachines (no-op when commerce or compute is unconfigured), so
 	// this is wired unconditionally — no second config gate to drift.
 	//
-	// SINGLE-FLIGHT ACROSS REPLICAS (money safety): visor runs replicas: 2 with
-	// no leader election, and commerce does NOT dedup the withdraw on requestId,
-	// so an unguarded sweep would double-debit every machine every hour. The
-	// per-hour DB lease (object.ClaimMeterHour) makes exactly ONE replica run the
-	// sweep per wall-clock hour; the others skip. It also blocks a mid-hour
-	// restart from re-sweeping the same hour.
+	// SINGLE-FLIGHT ACROSS REPLICAS (money safety): visor runs replicas: 2+ with no
+	// external coordinator, and commerce does NOT dedup the withdraw on requestId, so an
+	// unguarded sweep would double-debit every machine every hour. Exactly-once is TWO
+	// composed guarantees, both inside object:
+	//   (1) IsBillingOwner() — only the HRW-elected owner of the `_global` coord DB runs
+	//       the sweep, so non-owner replicas never enumerate machines or call commerce
+	//       (they still serve all read/stateless traffic — only the money-WRITER is gated).
+	//   (2) ClaimMeterHour — the per-hour lease (hydrate prior claims, insert-once, ship
+	//       synchronously) makes exactly ONE claim win per wall-clock hour cluster-wide,
+	//       and blocks a mid-hour restart or a post-flip new owner from re-sweeping.
+	// At replicas: 1 the sole pod always elects itself owner (no external coordinator
+	// needed), so it bills normally; at replicas: N only the elected owner bills.
+	// ClaimMeterHour re-checks ownership, so the gate here is a clean-skip optimization,
+	// never the sole guarantee.
 	if service.MeteringConfigured() {
 		computeTicker := time.NewTicker(time.Hour)
 		go func() {
 			for range computeTicker.C {
-				if object.ClaimMeterHour(time.Now()) {
+				if object.IsBillingOwner() && object.ClaimMeterHour(time.Now()) {
 					service.MeterRunningMachines(context.Background())
 				}
 			}
 		}()
-		logs.Info("compute metering: hourly running-machine drawdown enabled (single-flight per hour)")
+		logs.Info("compute metering: hourly running-machine drawdown enabled (single-flight per hour, elected owner)")
 	}
 
 	// autoscaler: start pod watcher if cluster configs are set
