@@ -29,6 +29,13 @@ func (s *pgStore) EngineFor(string) (*xorm.Engine, error) { return s.engine, nil
 // Shared is the same one engine -- the shared tables are plain rows in it.
 func (s *pgStore) Shared() *xorm.Engine { return s.engine }
 
+// PullSharedLeases / PushShared are no-ops under Postgres: the shared engine already
+// IS the single, durable, linearizable coordination store, so the insert-once lease PK
+// holds cluster-wide with no hydrate/ship. (These exist only so the Base backend can
+// make its pod-local `_global` SQLite coord cluster-safe across a leadership handoff.)
+func (s *pgStore) PullSharedLeases() error { return nil }
+func (s *pgStore) PushShared() error       { return nil }
+
 // AllEngines is the single engine: it already holds every org's rows, so a
 // cross-org sweep is one query against it.
 func (s *pgStore) AllEngines() ([]*xorm.Engine, error) { return []*xorm.Engine{s.engine}, nil }

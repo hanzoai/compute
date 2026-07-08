@@ -25,12 +25,14 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/hanzoai/vfs/pkg/backend"
 	_ "github.com/hanzoai/vfs/pkg/backend/file" // register file:// (dev/test)
 	_ "github.com/hanzoai/vfs/pkg/backend/s3"   // register s3:// (Hanzo S3, prod)
 	"github.com/hanzoai/vfs/replica"
+	"xorm.io/xorm"
 )
 
 // replicator holds the object-store binding for HA, or nil when REPLICA_STORE is
@@ -94,6 +96,106 @@ func (r *replicator) pushNow(owner, path string) error {
 		return err
 	}
 	return r.store.Put(r.ctx, replica.DBPath(owner, "", "visor"), data)
+}
+
+// mergeSharedLeases pulls the object store's committed billing-lease rows for owner
+// and inserts-if-absent each into the LIVE coord engine — guarantee (2) of exactly-once
+// (durable lease history across a leadership handoff). It never swaps the coord file
+// (that would need the engine closed and strand the cached Shared() pointer): it reads
+// the remote snapshot through a TRANSIENT read engine and replays only the lease rows,
+// so the merge is safe while the coord engine stays open for process life.
+//
+// The merge is idempotent: an already-present PK is a no-op (the insert-once
+// constraint), so a lease a prior owner claimed is present locally BEFORE this replica
+// claims — its own claim of the same hour/unit then fails the PK and it correctly skips.
+//
+// Nil replicator (local-only, single writer) or a missing/empty remote (no owner has
+// shipped yet) is not an error — there is nothing to merge and the local coord is
+// already authoritative.
+func (r *replicator) mergeSharedLeases(owner string, coord *xorm.Engine) error {
+	if r == nil {
+		return nil
+	}
+	data, _, err := r.store.Get(r.ctx, replica.DBPath(owner, "", "visor"))
+	if err != nil || len(data) == 0 {
+		return nil // no remote yet — nothing to merge.
+	}
+	// Materialize the remote snapshot in a throwaway temp dir and open a transient read
+	// engine on it. Dir + engine are removed before we return; nothing persists.
+	dir, err := os.MkdirTemp("", "visor-lease-merge")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	tmp := filepath.Join(dir, owner+".db")
+	if err := replica.RestoreFile(tmp, data); err != nil {
+		return err
+	}
+	remote, err := xorm.NewEngine("sqlite", tmp+sqlitePragmas)
+	if err != nil {
+		return err
+	}
+	defer remote.Close()
+
+	return mergeLeaseRows(remote, coord)
+}
+
+// mergeLeaseRows copies every billing-lease row present in src but absent in dst,
+// inserting-if-absent so an existing PK is a no-op. It covers exactly the tables whose
+// insert-once claim guards money: MeterLease (hourly compute sweep), BillingLease
+// (daily/monthly fleet units), and CostCursor (the BYOC watermark advanced under the
+// BillingLease). One error aborts the merge so the caller fails CLOSED (a claim that
+// cannot confirm it has the prior owner's rows must not proceed).
+func mergeLeaseRows(src, dst *xorm.Engine) error {
+	var meters []MeterLease
+	if err := src.Find(&meters); err != nil {
+		return err
+	}
+	for i := range meters {
+		if _, err := dst.Insert(&meters[i]); err != nil {
+			// A duplicate-PK insert is reported by xorm as an error on some drivers;
+			// treat "already present" as success by checking existence, so a real
+			// error still aborts.
+			if exists, e := dst.Exist(&MeterLease{Hour: meters[i].Hour}); e != nil {
+				return e
+			} else if !exists {
+				return err
+			}
+		}
+	}
+
+	var units []BillingLease
+	if err := src.Find(&units); err != nil {
+		return err
+	}
+	for i := range units {
+		if _, err := dst.Insert(&units[i]); err != nil {
+			if exists, e := dst.Exist(&BillingLease{Unit: units[i].Unit}); e != nil {
+				return e
+			} else if !exists {
+				return err
+			}
+		}
+	}
+
+	var cursors []CostCursor
+	if err := src.Find(&cursors); err != nil {
+		return err
+	}
+	for i := range cursors {
+		c := cursors[i]
+		exists, err := dst.Exist(&CostCursor{Owner: c.Owner, Provider: c.Provider, Month: c.Month})
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue // never REGRESS a watermark: the local value is at least as advanced.
+		}
+		if _, err := dst.Insert(&c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ship starts a per-org background loop that pushNow's on an interval — the owner's

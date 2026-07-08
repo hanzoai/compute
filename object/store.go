@@ -75,9 +75,19 @@ type engineProvider interface {
 	// Postgres ignores owner (isolation is a WHERE owner=? clause); Base
 	// returns, lazily opening, the org's own SQLite engine.
 	EngineFor(owner string) (*xorm.Engine, error)
-	// Shared returns the ONE engine that holds the cross-pod shared tables
-	// (the Plan catalog and the MeterLease lease). Postgres under both backends.
+	// Shared returns the ONE engine that holds the cross-pod shared tables (the Plan
+	// catalog and the billing leases). Postgres: a single shared, linearizable engine.
+	// Base: the pod-local `_global` SQLite engine, made cluster-safe for the leases by
+	// the single-writer gate plus PullSharedLeases/PushShared across a handoff.
 	Shared() *xorm.Engine
+	// PullSharedLeases merges the object store's committed billing-lease rows into the
+	// live coord before a claim (durable lease history across a leadership handoff).
+	// Postgres: no-op — the shared engine already IS the durable, linearizable source.
+	// Base: row-merge from the `_global` snapshot into the local coord.
+	PullSharedLeases() error
+	// PushShared ships the coord DB to the object store after a winning claim, before
+	// the caller debits, so the claim is durable before money moves. Postgres: no-op.
+	PushShared() error
 	// AllEngines returns every engine a cross-org sweep must union over.
 	// Postgres: the single engine (it already holds every org's rows).
 	// Base: one engine per org DB under the data root.
@@ -157,6 +167,25 @@ func allEngines() ([]*xorm.Engine, error) {
 		return nil, fmt.Errorf("visor: store not initialised (call InitAdapter first)")
 	}
 	return store.AllEngines()
+}
+
+// pullSharedLeases merges the durable billing-lease rows into the live coord before a
+// claim (guarantee 2 of exactly-once). Backend-agnostic: a no-op under Postgres, a
+// row-merge from the `_global` snapshot under Base.
+func pullSharedLeases() error {
+	if store == nil {
+		return fmt.Errorf("visor: store not initialised (call InitAdapter first)")
+	}
+	return store.PullSharedLeases()
+}
+
+// pushShared ships the coord DB after a winning claim, before the caller debits, so
+// the claim is durable before money moves. No-op under Postgres.
+func pushShared() error {
+	if store == nil {
+		return fmt.Errorf("visor: store not initialised (call InitAdapter first)")
+	}
+	return store.PushShared()
 }
 
 // dataRoot is the filesystem root for per-org Base SQLite files (default /data).

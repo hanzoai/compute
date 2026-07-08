@@ -44,25 +44,23 @@ const meterLeaseTTL = 24 * time.Hour
 
 // ClaimMeterHour attempts to claim the hourly metering sweep for the wall-clock
 // hour containing now, cluster-wide. It returns true to EXACTLY ONE caller per
-// hour (the replica whose Insert wins the Hour primary key); every other replica
-// — and any re-entry within the same hour after a restart — gets false and must
-// skip the sweep.
+// hour (the elected owner whose Insert wins the Hour primary key); every other
+// replica — a non-owner, or any re-entry within the same hour after a restart —
+// gets false and must skip the sweep.
 //
-// A DB error (unreachable/constraint) yields false: fail SAFE for a paid product
-// means NOT sweeping (better a missed hour, reconciled later, than a duplicate
-// debit). Best-effort prune of stale rows runs only for the winner so it costs
+// Exactly-once is the shared claimLease primitive: the single-writer gate (only the
+// elected `_global` owner claims), a hydrate of the prior owner's leases before the
+// insert, and a synchronous ship of the winning claim before the caller debits. Any
+// failure (not owner, hydrate/ship failed, PK lost, DB error) yields false: fail SAFE
+// for a paid product means NOT sweeping (a missed hour is reconciled; a duplicate debit
+// is not). Best-effort prune of stale rows runs only for the winner, so it costs
 // nothing on the hot skip path.
 func ClaimMeterHour(now time.Time) bool {
-	hour := now.UTC().Format("2006010215")
-	// The lease is a cluster-global single-winner primitive, so it lives on the
-	// shared coordination engine (Postgres under both backends), NEVER in per-org
-	// SQLite -- two pods' separate SQLite files would each "win" and double-debit.
-	affected, err := Shared().Insert(&MeterLease{
-		Hour:        hour,
+	if !claimLease(&MeterLease{
+		Hour:        now.UTC().Format("2006010215"),
 		CreatedTime: now.UTC().Format(time.RFC3339),
-	})
-	if err != nil || affected == 0 {
-		return false // another replica already owns this hour (dup PK), or DB error -> fail safe (no sweep).
+	}) {
+		return false
 	}
 	pruneMeterLeases(now.Add(-meterLeaseTTL))
 	return true

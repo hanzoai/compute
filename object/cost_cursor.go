@@ -47,7 +47,7 @@ type CostCursor struct {
 // advances nothing and returns 0.
 func AdvanceCostCursor(owner, provider, month string, currentMTDCents int64) (int64, error) {
 	cursor := CostCursor{Owner: owner, Provider: provider, Month: month}
-	existed, err := adapter.engine.Get(&cursor)
+	existed, err := Shared().Get(&cursor)
 	if err != nil {
 		return 0, err
 	}
@@ -60,13 +60,22 @@ func AdvanceCostCursor(owner, provider, month string, currentMTDCents int64) (in
 	cursor.BilledSpendCents = currentMTDCents
 	cursor.UpdatedTime = time.Now().UTC().Format(time.RFC3339)
 	if existed {
-		if _, err := adapter.engine.ID(core.PK{owner, provider, month}).Cols("billed_spend_cents", "updated_time").Update(&cursor); err != nil {
+		if _, err := Shared().ID(core.PK{owner, provider, month}).Cols("billed_spend_cents", "updated_time").Update(&cursor); err != nil {
 			return 0, err
 		}
 	} else {
-		if _, err := adapter.engine.Insert(&cursor); err != nil {
+		if _, err := Shared().Insert(&cursor); err != nil {
 			return 0, err
 		}
+	}
+	// Ship the advanced watermark so it is durable BEFORE the caller debits the fee.
+	// The BillingLease that gated this advance is already durable (shipped by
+	// ClaimBillingUnit); shipping again here persists the cursor increment too, so a
+	// post-flip owner both sees the unit claimed AND resumes from the advanced watermark
+	// (never re-billing the increment). A ship failure surfaces so the caller can decide
+	// (the lease row already blocks a same-unit re-bill).
+	if err := pushShared(); err != nil {
+		return 0, err
 	}
 	return delta, nil
 }

@@ -135,8 +135,43 @@ func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
 	return engine, nil
 }
 
-// Shared returns the shared Postgres engine that holds the cross-pod tables.
+// Shared returns the `_global` SQLite coordination engine that holds the cross-pod
+// tables (Plan catalog + the billing leases). Under Base this is a pod-local file, so
+// the billing leases are made cluster-safe by the single-writer gate (coordinator.go)
+// plus PullSharedLeases/PushShared across a leadership handoff — NOT by the file being
+// shared. Under Postgres the same call resolves to the one shared, linearizable engine.
 func (s *baseStore) Shared() *xorm.Engine { return s.coord }
+
+// PullSharedLeases merges the object store's committed billing-lease rows into the
+// live `_global` coord engine, so a replica that has just become the billing owner
+// sees the PRIOR owner's claims BEFORE it claims anything itself. This is guarantee
+// (2) of exactly-once (durable lease history across handoff): with it, the insert-once
+// PK holds GLOBALLY — a new owner finds a prior claim already present and does not
+// re-bill the hour/unit.
+//
+// It is a ROW MERGE, not a file swap: the remote snapshot is read through a transient
+// handle and each lease row is inserted-if-absent into the live coord. That is the
+// only pull that is safe while the coord engine is open for process life (a file-level
+// RestoreFile requires closing the engine, which would strand the cached Shared()
+// pointer). The merge is idempotent — an already-present PK is a no-op — so it is safe
+// to run before every claim.
+//
+// A nil replicator (REPLICA_STORE unset ⇒ local-only, single writer) has nothing to
+// pull; it returns nil. A missing remote (no owner has ever shipped) is likewise nil.
+func (s *baseStore) PullSharedLeases() error {
+	return s.repl.mergeSharedLeases(coordKey, s.coord)
+}
+
+// PushShared snapshots the `_global` coord DB and ships it to the object store — the
+// post-claim durability step. It is called SYNCHRONOUSLY after a winning lease insert
+// and BEFORE the caller debits, so a claim is durable (visible to the next owner)
+// before any money moves. SnapshotFile uses a transient read handle (VACUUM INTO), so
+// it is safe concurrent with the live coord engine.
+//
+// A nil replicator (local-only) has nowhere to ship; it returns nil.
+func (s *baseStore) PushShared() error {
+	return s.repl.pushNow(coordKey, DBPath(s.root, coordKey))
+}
 
 // AllEngines returns one engine per org DB under the data root -- the set a
 // cross-org sweep unions over. It reads the on-disk orgs/ directory so it sees
