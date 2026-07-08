@@ -38,19 +38,6 @@ require (
 )
 
 require (
-	github.com/hanzoai/commerce/metering v0.1.2
-	modernc.org/sqlite v1.48.0
-)
-
-require (
-	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	modernc.org/libc v1.70.0 // indirect
-	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
-)
-
-require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
