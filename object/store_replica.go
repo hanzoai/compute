@@ -18,8 +18,8 @@ package object
 //
 // Single-writer: visor runs replicas=1, so self is the sole owner of every org and
 // the PushLoop is the whole story. When visor scales out, swap the members source for
-// the live pod set and gate writes with replica.IsOwner — the library already does the
-// HRW election; no code here changes.
+// the live pod set and gate writes with ha.IsOwner (github.com/hanzoai/ha) — the
+// election primitive already does the HRW election; no code here changes.
 
 import (
 	"context"

@@ -31,9 +31,9 @@ package object
 //	    GLOBALLY, not per-pod (store_base.go PullSharedLeases/PushShared, driven by the
 //	    claim path in meter_lease.go / billing_lease.go).
 //
-// The election is the SAME deterministic HRW (Rendezvous) primitive the HA-SQLite
-// substrate uses (github.com/hanzoai/vfs/replica) — no coordinator, no lock service,
-// no Postgres, no Redis. It is applied to the single coordination key `_global`, so
+// The election is the SAME deterministic HRW (Rendezvous) primitive every Hanzo
+// singleton uses (github.com/hanzoai/ha) — no coordinator, no lock service, no
+// Postgres, no Redis. It is applied to the single coordination key `_global`, so
 // every replica computes the same owner from the same live membership set.
 //
 // FAIL-CLOSED. For a paid product the safe failure is NOT to bill (a missed hour is
@@ -48,7 +48,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hanzoai/vfs/replica"
+	"github.com/hanzoai/ha"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -74,7 +74,7 @@ const membershipTimeout = 5 * time.Second
 //	          CLOSED on. A nil error with a non-empty set is the only "proceed" signal.
 type membershipSource interface {
 	self() string
-	members(ctx context.Context) ([]replica.Member, error)
+	members(ctx context.Context) ([]ha.Member, error)
 }
 
 // membership is the process-wide source, swappable in tests. Defaults to the
@@ -96,7 +96,7 @@ func billingOwner() bool {
 	if err != nil || len(members) == 0 {
 		return false // unknown membership → fail closed (never risk a double debit).
 	}
-	return replica.IsOwner(coordKey, membership.self(), members)
+	return ha.IsOwner(coordKey, membership.self(), members)
 }
 
 // IsBillingOwner is the exported ownership gate the metering ticker checks before it
@@ -148,22 +148,22 @@ func (m *k8sMembership) self() string { return selfID() }
 // Inside a cluster it lists Running+Ready visor pods; a list error is surfaced so the
 // caller fails CLOSED (an in-cluster replica that cannot see its peers must NOT assume
 // it is the owner).
-func (m *k8sMembership) members(ctx context.Context) ([]replica.Member, error) {
+func (m *k8sMembership) members(ctx context.Context) ([]ha.Member, error) {
 	m.init()
 	if m.client == nil {
 		// Single-process mode: one writer, itself. Never an error (no cluster to fail
 		// closed against).
-		return []replica.Member{{ID: selfID()}}, nil
+		return []ha.Member{{ID: selfID()}}, nil
 	}
 	list, err := m.client.CoreV1().Pods(m.ns).List(ctx, metav1.ListOptions{LabelSelector: k8sAppLabel})
 	if err != nil {
 		return nil, err // fail closed: peers unknown.
 	}
-	members := make([]replica.Member, 0, len(list.Items))
+	members := make([]ha.Member, 0, len(list.Items))
 	for i := range list.Items {
 		p := &list.Items[i]
 		if podWriterEligible(p) {
-			members = append(members, replica.Member{ID: p.Name, Addr: p.Status.PodIP})
+			members = append(members, ha.Member{ID: p.Name, Addr: p.Status.PodIP})
 		}
 	}
 	return members, nil
