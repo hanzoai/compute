@@ -38,6 +38,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/costmanagement/armcostmanagement v1.1.1
 	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.65.3
 	github.com/hanzoai/commerce/metering v0.1.2
+	github.com/hanzoai/ha v0.1.0
 	github.com/hanzoai/vfs v0.6.1
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.39.0
