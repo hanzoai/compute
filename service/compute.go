@@ -316,6 +316,24 @@ func ListOrgMachines(org, project string) ([]*Machine, error) {
 	return machines, nil
 }
 
+// ListOrgKubernetesNodes returns one Machine per DOKS worker node for every
+// cluster in Hanzo's HOUSE DigitalOcean account tagged for org — the house
+// analogue of ListOrgMachines, but for managed-Kubernetes nodes. DOKS worker
+// droplets carry k8s tags, not a hanzo-org DROPLET tag, so they never surface
+// through ListOrgMachines; this lists them via the managed-Kubernetes API and maps
+// each node to the same Machine shape. Per-org isolation is by the cluster's
+// hanzo-org tag — a tenant can only ever see its own clusters' nodes.
+func ListOrgKubernetesNodes(org string) ([]*Machine, error) {
+	if org == "" {
+		return nil, fmt.Errorf("org is required")
+	}
+	client, err := newHouseDOClient()
+	if err != nil {
+		return nil, err
+	}
+	return kubernetesNodeMachinesByTag(context.Background(), client.Client, orgTag(org))
+}
+
 // ListRunningHouseMachines returns every RUNNING droplet in Hanzo's house
 // account that carries a hanzo-org tag — the set the recurring hourly meter
 // debits. It lists across ALL orgs (no per-org tag filter): the org is recovered

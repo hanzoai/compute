@@ -202,6 +202,81 @@ func (c *ApiController) ListComputeMachines() {
 	c.ResponseOk(filterMachines(machines, c.Input().Get("kind"), c.Input().Get("name"), c.Input().Get("project")))
 }
 
+// unionMachines merges machine lists from independent sources into ONE deduped
+// slice: a machine is claimed by provider id OR name, and the FIRST source to
+// carry it wins (later sources contribute only what is not already present). This
+// is the visor-side analogue of the cloud fleet dedup — a DOKS node whose droplet
+// is also in the droplet list appears once (deduped by droplet id). Ordered
+// sources let the caller pick the winner.
+func unionMachines(sources ...[]*service.Machine) []*service.Machine {
+	out := []*service.Machine{}
+	seen := map[string]struct{}{}
+	claimed := func(m *service.Machine) bool {
+		if m.Id != "" {
+			if _, ok := seen["id:"+m.Id]; ok {
+				return true
+			}
+		}
+		if m.Name != "" {
+			if _, ok := seen["name:"+m.Name]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	claim := func(m *service.Machine) {
+		if m.Id != "" {
+			seen["id:"+m.Id] = struct{}{}
+		}
+		if m.Name != "" {
+			seen["name:"+m.Name] = struct{}{}
+		}
+	}
+	for _, src := range sources {
+		for _, m := range src {
+			if claimed(m) {
+				continue
+			}
+			out = append(out, m)
+			claim(m)
+		}
+	}
+	return out
+}
+
+// ListComputeKubernetesNodes
+// @Title ListComputeKubernetesNodes
+// @Tag Compute API
+// @Description list the caller org's DOKS worker nodes (as machines): the deduped union of the house account (hanzo-org cluster tag) and BYOC providers (Provider.ClusterID)
+// @Success 200 {object} controllers.Response
+// @router /kubernetes-nodes [get]
+func (c *ApiController) ListComputeKubernetesNodes() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	// House-account clusters (hanzo-org tag association) require the house DO token.
+	// When compute is unconfigured, skip this source cleanly rather than hide BYOC
+	// nodes behind an error — the two sources are independent.
+	var house []*service.Machine
+	if service.ComputeConfigured() {
+		var err error
+		house, err = service.ListOrgKubernetesNodes(org)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+	}
+	// BYOC clusters (Provider.ClusterID association).
+	byoc, err := object.GetKubernetesNodesCloud(org)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(unionMachines(house, byoc))
+}
+
 // GetComputeMachine
 // @Title GetComputeMachine
 // @Tag Compute API

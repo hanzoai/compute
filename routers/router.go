@@ -72,6 +72,10 @@ func initAPI() {
 	beego.Router("/v1/machines/launch", &controllers.ApiController{}, "POST:LaunchComputeMachine")
 	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "GET:GetComputeMachine")
 	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "DELETE:DeleteComputeMachine")
+	// DOKS worker nodes as fleet machines — house (hanzo-org cluster tag) + BYOC
+	// (Provider.ClusterID), deduped. Surfaces cluster NODES on the fleet, not just
+	// standalone droplets.
+	beego.Router("/v1/kubernetes-nodes", &controllers.ApiController{}, "GET:ListComputeKubernetesNodes")
 	beego.Router("/v1/images", &controllers.ApiController{}, "get:ListImages;post:CreateImage")
 
 	// Agent↔machine binding — mark a machine as running the @hanzo/bot runtime for
