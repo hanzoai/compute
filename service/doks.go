@@ -213,3 +213,152 @@ func IsNotFound(err error) bool {
 	}
 	return false
 }
+
+// KubernetesCluster is a DOKS cluster in the shape visor surfaces: identity,
+// region, status and tags. Tags carry ownership (hanzo-org:<org>) used to scope a
+// house-account cluster to the org that owns it.
+type KubernetesCluster struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	RegionSlug string   `json:"regionSlug"`
+	Status     string   `json:"status"`
+	Tags       []string `json:"tags"`
+}
+
+func clusterFromGodo(c *godo.KubernetesCluster) *KubernetesCluster {
+	kc := &KubernetesCluster{
+		ID:         c.ID,
+		Name:       c.Name,
+		RegionSlug: c.RegionSlug,
+		Tags:       c.Tags,
+	}
+	if c.Status != nil {
+		kc.Status = string(c.Status.State)
+	}
+	return kc
+}
+
+// poolsFromGodo maps DO node pools to visor NodePools via the ONE pool mapper, so
+// pools sourced from a cluster Get expand identically to those from ListNodePools.
+func poolsFromGodo(gpools []*godo.KubernetesNodePool) []*NodePool {
+	pools := make([]*NodePool, 0, len(gpools))
+	for _, gp := range gpools {
+		pools = append(pools, nodePoolFromGodo(gp))
+	}
+	return pools
+}
+
+// listClustersFull pages Kubernetes.List and re-Gets each cluster so RegionSlug,
+// Status and the node pools (with their nodes) reflect authoritative per-cluster
+// detail — List alone can return a lighter cluster. It is the ONE cluster
+// enumeration, shared by ListClusters and the house-account node lister.
+func listClustersFull(ctx context.Context, client *godo.Client) ([]*godo.KubernetesCluster, error) {
+	opt := &godo.ListOptions{Page: 1, PerPage: 200}
+	var out []*godo.KubernetesCluster
+	for {
+		clusters, resp, err := client.Kubernetes.List(ctx, opt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list kubernetes clusters: %w", err)
+		}
+		for _, cl := range clusters {
+			full, _, err := client.Kubernetes.Get(ctx, cl.ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get kubernetes cluster %s: %w", cl.ID, err)
+			}
+			out = append(out, full)
+		}
+		if resp.Links == nil || resp.Links.IsLastPage() {
+			break
+		}
+		opt.Page++
+	}
+	return out, nil
+}
+
+// ListClusters returns every DOKS cluster visible to this client's token, in the
+// clean KubernetesCluster shape.
+func (c *DOKSClient) ListClusters(ctx context.Context) ([]*KubernetesCluster, error) {
+	full, err := listClustersFull(ctx, c.Client)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*KubernetesCluster, 0, len(full))
+	for _, gc := range full {
+		out = append(out, clusterFromGodo(gc))
+	}
+	return out, nil
+}
+
+// nodePoolMachines expands a cluster's node pools into one Machine per worker
+// node — the SAME shape ListOrgMachines emits for a standalone droplet — so DOKS
+// nodes merge into the fleet exactly like droplets. Id is the node's DropletID
+// (the dedup key against the droplet list); Size is the pool's slug; Region and
+// the owning cluster come from the cluster; State is the node's DO status. IPs are
+// empty — the managed-Kubernetes API does not expose per-node addresses here — and
+// are honestly omitted, not invented. A node with no DropletID yet (still
+// provisioning) is skipped: it has no droplet, so no fleet identity.
+func nodePoolMachines(cluster *KubernetesCluster, pools []*NodePool) []*Machine {
+	var machines []*Machine
+	for _, pool := range pools {
+		for _, node := range pool.Nodes {
+			if node.DropletID == "" {
+				continue
+			}
+			machines = append(machines, &Machine{
+				Id:       node.DropletID,
+				Name:     node.Name,
+				Provider: "DigitalOcean",
+				Size:     pool.Size,
+				Region:   cluster.RegionSlug,
+				State:    node.Status,
+				Tag:      "doks-cluster:" + cluster.Name,
+			})
+		}
+	}
+	return machines
+}
+
+// clusterHasTag reports whether a cluster carries an exact tag — the membership
+// check that scopes a house-account cluster to its owning org.
+func clusterHasTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
+
+// kubernetesNodeMachinesByTag returns one Machine per DOKS worker node for every
+// cluster reachable by client whose tags contain wantTag. An empty wantTag matches
+// every cluster. Nodes are expanded from each cluster's own pools (returned by the
+// authoritative Get in listClustersFull), so no per-cluster pool re-list is needed.
+func kubernetesNodeMachinesByTag(ctx context.Context, client *godo.Client, wantTag string) ([]*Machine, error) {
+	clusters, err := listClustersFull(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	var machines []*Machine
+	for _, gc := range clusters {
+		if wantTag != "" && !clusterHasTag(gc.Tags, wantTag) {
+			continue
+		}
+		machines = append(machines, nodePoolMachines(clusterFromGodo(gc), poolsFromGodo(gc.NodePools))...)
+	}
+	return machines, nil
+}
+
+// NodeMachines returns one Machine per worker node in THIS client's cluster — the
+// BYOC path where a Provider names a single cluster. The cluster Get supplies the
+// region/name; ListNodePools supplies the pools whose nodes become the machines.
+func (c *DOKSClient) NodeMachines(ctx context.Context) ([]*Machine, error) {
+	gc, _, err := c.Client.Kubernetes.Get(ctx, c.ClusterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get kubernetes cluster %s: %w", c.ClusterID, err)
+	}
+	pools, err := c.ListNodePools()
+	if err != nil {
+		return nil, err
+	}
+	return nodePoolMachines(clusterFromGodo(gc), pools), nil
+}
