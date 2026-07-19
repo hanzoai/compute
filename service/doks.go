@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/digitalocean/godo"
 	"golang.org/x/oauth2"
@@ -276,14 +277,28 @@ func listClustersFull(ctx context.Context, client *godo.Client) ([]*godo.Kuberne
 }
 
 // ListClusters returns every DOKS cluster visible to this client's token, in the
-// clean KubernetesCluster shape.
+// clean KubernetesCluster shape. It is clustersByTag with no tag filter — the ONE
+// cluster enumeration, so the tenant-scoped and account-wide lists never drift.
 func (c *DOKSClient) ListClusters(ctx context.Context) ([]*KubernetesCluster, error) {
-	full, err := listClustersFull(ctx, c.Client)
+	return clustersByTag(ctx, c.Client, "")
+}
+
+// clustersByTag returns every cluster reachable by client whose tags contain
+// wantTag, in the clean KubernetesCluster shape. An empty wantTag matches every
+// cluster. It shares the ONE authoritative enumeration (listClustersFull) with the
+// node lister, so a cluster's identity/region/status is sourced identically whether
+// it surfaces as a cluster row or as its worker nodes — the exact tag-scoping
+// kubernetesNodeMachinesByTag uses, hoisted to the cluster shape.
+func clustersByTag(ctx context.Context, client *godo.Client, wantTag string) ([]*KubernetesCluster, error) {
+	full, err := listClustersFull(ctx, client)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*KubernetesCluster, 0, len(full))
 	for _, gc := range full {
+		if wantTag != "" && !clusterHasTag(gc.Tags, wantTag) {
+			continue
+		}
 		out = append(out, clusterFromGodo(gc))
 	}
 	return out, nil
@@ -361,4 +376,114 @@ func (c *DOKSClient) NodeMachines(ctx context.Context) ([]*Machine, error) {
 		return nil, err
 	}
 	return nodePoolMachines(clusterFromGodo(gc), pools), nil
+}
+
+// ---- cluster lifecycle (create / detail / delete) ----
+
+// CreateClusterSpec is the minimal request to provision a DOKS cluster: identity
+// (name), placement (region), the Kubernetes version, and ONE initial node pool.
+// It is deliberately small — the resell surface provisions a single-pool cluster;
+// further pools are added through the node-pool surface. Additional pools can be
+// grown later; this is the create seed, not the full topology.
+type CreateClusterSpec struct {
+	Name     string                `json:"name"`
+	Region   string                `json:"region"`
+	Version  string                `json:"version"`
+	NodePool CreateClusterNodePool `json:"nodePool"`
+}
+
+// CreateClusterNodePool is the initial worker pool of a new cluster: its instance
+// size and how many nodes. Name is optional (defaults to "<cluster>-pool").
+type CreateClusterNodePool struct {
+	Name  string `json:"name,omitempty"`
+	Size  string `json:"size"`
+	Count int    `json:"count"`
+}
+
+// KubernetesClusterDetail is a cluster plus its node pools and the worker nodes
+// expanded as fleet Machines — the ONE detail shape for GET .../clusters/:id. It
+// embeds KubernetesCluster so identity/region/status/tags flatten into the same
+// top-level JSON the list emits; NodePools carries the authoritative pool topology
+// and Nodes the per-worker machines (the SAME shape ListOrgMachines emits).
+type KubernetesClusterDetail struct {
+	KubernetesCluster
+	NodePools []*NodePool `json:"nodePools"`
+	Nodes     []*Machine  `json:"nodes"`
+}
+
+// clusterDetailFromGodo assembles the detail from an authoritative cluster Get
+// (which carries the node pools with their nodes). Pools and node machines are
+// mapped through the ONE pool/node mappers, so a cluster's nodes are identical
+// whether they surface here or through the fleet node lister.
+func clusterDetailFromGodo(gc *godo.KubernetesCluster) *KubernetesClusterDetail {
+	cluster := clusterFromGodo(gc)
+	pools := poolsFromGodo(gc.NodePools)
+	return &KubernetesClusterDetail{
+		KubernetesCluster: *cluster,
+		NodePools:         pools,
+		Nodes:             nodePoolMachines(cluster, pools),
+	}
+}
+
+// GetCluster returns one cluster's full detail — identity, node pools and the
+// worker nodes as Machines. The Get is authoritative: it carries the pools (with
+// their nodes) directly, so no separate pool re-list is needed.
+func (c *DOKSClient) GetCluster(ctx context.Context, id string) (*KubernetesClusterDetail, error) {
+	gc, _, err := c.Client.Kubernetes.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get kubernetes cluster %s: %w", id, err)
+	}
+	return clusterDetailFromGodo(gc), nil
+}
+
+// buildClusterCreateRequest maps a CreateClusterSpec + ownership tags to the godo
+// request. PURE (no I/O), so the spec→request contract is unit-tested without a
+// client. Ergonomic defaults: an empty version resolves to DO's "latest" alias
+// (newest patch of the default minor), an unnamed pool becomes "<cluster>-pool",
+// and a non-positive count floors at 1 (a cluster must have at least one worker).
+// tags carry ownership (managed-by + hanzo-org:<org>) so the cluster associates to
+// its org exactly like a droplet.
+func buildClusterCreateRequest(spec *CreateClusterSpec, tags []string) *godo.KubernetesClusterCreateRequest {
+	version := strings.TrimSpace(spec.Version)
+	if version == "" {
+		version = "latest"
+	}
+	poolName := strings.TrimSpace(spec.NodePool.Name)
+	if poolName == "" {
+		poolName = spec.Name + "-pool"
+	}
+	count := spec.NodePool.Count
+	if count < 1 {
+		count = 1
+	}
+	return &godo.KubernetesClusterCreateRequest{
+		Name:        spec.Name,
+		RegionSlug:  spec.Region,
+		VersionSlug: version,
+		Tags:        tags,
+		NodePools: []*godo.KubernetesNodePoolCreateRequest{{
+			Name:  poolName,
+			Size:  spec.NodePool.Size,
+			Count: count,
+		}},
+	}
+}
+
+// CreateCluster provisions a DOKS cluster from spec, tagging it with tags so it
+// associates to the owning org (the node/cluster listers scope by that tag).
+func (c *DOKSClient) CreateCluster(ctx context.Context, spec *CreateClusterSpec, tags []string) (*KubernetesCluster, error) {
+	gc, _, err := c.Client.Kubernetes.Create(ctx, buildClusterCreateRequest(spec, tags))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes cluster: %w", err)
+	}
+	return clusterFromGodo(gc), nil
+}
+
+// DeleteCluster destroys a cluster by id. A DO 404 (already gone) is the caller's
+// success to interpret via IsNotFound — DeleteCluster itself reports the raw error.
+func (c *DOKSClient) DeleteCluster(ctx context.Context, id string) error {
+	if _, err := c.Client.Kubernetes.Delete(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete kubernetes cluster %s: %w", id, err)
+	}
+	return nil
 }

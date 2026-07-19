@@ -249,7 +249,7 @@ func unionMachines(sources ...[]*service.Machine) []*service.Machine {
 // @Tag Compute API
 // @Description list the caller org's DOKS worker nodes (as machines): the deduped union of the house account (hanzo-org cluster tag) and BYOC providers (Provider.ClusterID)
 // @Success 200 {object} controllers.Response
-// @router /kubernetes-nodes [get]
+// @router /k8s/nodes [get]
 func (c *ApiController) ListComputeKubernetesNodes() {
 	org := c.resolveComputeOrg()
 	if org == "" {
@@ -275,6 +275,137 @@ func (c *ApiController) ListComputeKubernetesNodes() {
 		return
 	}
 	c.ResponseOk(unionMachines(house, byoc))
+}
+
+// ---- k8s clusters (house-account DOKS lifecycle, org-scoped) ----
+//
+// The unified /v1/k8s noun: list clusters, one cluster's detail (pools + worker
+// nodes) and DEPLOY (create) / delete DOKS clusters. Every handler is org-scoped by
+// resolveComputeOrg (fail-closed on no org context) — the SAME tenant model the rest
+// of the resell compute surface uses. Per-org isolation lives in the service layer
+// (the hanzo-org cluster tag): a tenant can only ever see or mutate its OWN clusters.
+
+// ListComputeKubernetesClusters
+// @Title ListComputeKubernetesClusters
+// @Tag Compute API
+// @Description list the caller org's DOKS clusters (house account, hanzo-org tag)
+// @Success 200 {object} controllers.Response
+// @router /k8s/clusters [get]
+func (c *ApiController) ListComputeKubernetesClusters() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	clusters, err := service.ListOrgKubernetesClusters(org)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(clusters)
+}
+
+// GetComputeKubernetesCluster
+// @Title GetComputeKubernetesCluster
+// @Tag Compute API
+// @Description get one of the caller org's DOKS clusters by id — detail incl. node pools and worker nodes
+// @router /k8s/clusters/:id [get]
+func (c *ApiController) GetComputeKubernetesCluster() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	id := c.Ctx.Input.Param(":id")
+	detail, err := service.GetOrgKubernetesCluster(org, id)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if detail == nil {
+		c.ResponseError("cluster not found")
+		return
+	}
+	c.ResponseOk(detail)
+}
+
+// CreateComputeKubernetesCluster
+// @Title CreateComputeKubernetesCluster
+// @Tag Compute API
+// @Description provision a DOKS cluster for the caller org (body: name, region, version, nodePool{size,count})
+// @router /k8s/clusters [post]
+func (c *ApiController) CreateComputeKubernetesCluster() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	// The request body IS the service spec (one shape, no re-mapping).
+	var spec service.CreateClusterSpec
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &spec); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	spec.Name = strings.TrimSpace(spec.Name)
+	spec.Region = strings.TrimSpace(spec.Region)
+	spec.NodePool.Size = strings.TrimSpace(spec.NodePool.Size)
+	if spec.Name == "" {
+		c.ResponseError("name is required")
+		return
+	}
+	if spec.Region == "" {
+		c.ResponseError("region is required")
+		return
+	}
+	if spec.NodePool.Size == "" {
+		c.ResponseError("nodePool.size is required")
+		return
+	}
+	if spec.NodePool.Count < 1 {
+		c.ResponseError("nodePool.count must be at least 1")
+		return
+	}
+	cluster, err := service.CreateOrgKubernetesCluster(org, &spec)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(cluster)
+}
+
+// DeleteComputeKubernetesCluster
+// @Title DeleteComputeKubernetesCluster
+// @Tag Compute API
+// @Description delete one of the caller org's DOKS clusters by id
+// @router /k8s/clusters/:id [delete]
+func (c *ApiController) DeleteComputeKubernetesCluster() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	id := c.Ctx.Input.Param(":id")
+	if err := service.DeleteOrgKubernetesCluster(org, id); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk("deleted")
 }
 
 // GetComputeMachine
