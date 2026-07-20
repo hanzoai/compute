@@ -32,7 +32,8 @@ import (
 	_ "github.com/hanzoai/vfs/pkg/backend/file" // register file:// (dev/test)
 	_ "github.com/hanzoai/vfs/pkg/backend/s3"   // register s3:// (Hanzo S3, prod)
 	"github.com/hanzoai/vfs/replica"
-	"xorm.io/xorm"
+
+	"github.com/hanzoai/orm/relational"
 )
 
 // replicator holds the object-store binding for HA, or nil when REPLICA_STORE is
@@ -112,7 +113,7 @@ func (r *replicator) pushNow(owner, path string) error {
 // Nil replicator (local-only, single writer) or a missing/empty remote (no owner has
 // shipped yet) is not an error — there is nothing to merge and the local coord is
 // already authoritative.
-func (r *replicator) mergeSharedLeases(owner string, coord *xorm.Engine) error {
+func (r *replicator) mergeSharedLeases(owner string, coord *relational.Engine) error {
 	if r == nil {
 		return nil
 	}
@@ -131,7 +132,7 @@ func (r *replicator) mergeSharedLeases(owner string, coord *xorm.Engine) error {
 	if err := replica.RestoreFile(tmp, data); err != nil {
 		return err
 	}
-	remote, err := xorm.NewEngine("sqlite", tmp+sqlitePragmas)
+	remote, err := relational.NewEngine("sqlite", tmp+sqlitePragmas)
 	if err != nil {
 		return err
 	}
@@ -146,7 +147,7 @@ func (r *replicator) mergeSharedLeases(owner string, coord *xorm.Engine) error {
 // (daily/monthly fleet units), and CostCursor (the BYOC watermark advanced under the
 // BillingLease). One error aborts the merge so the caller fails CLOSED (a claim that
 // cannot confirm it has the prior owner's rows must not proceed).
-func mergeLeaseRows(src, dst *xorm.Engine) error {
+func mergeLeaseRows(src, dst *relational.Engine) error {
 	var meters []MeterLease
 	if err := src.Find(&meters); err != nil {
 		return err

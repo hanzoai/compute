@@ -18,7 +18,7 @@ import (
 	"fmt"
 
 	"github.com/hanzoai/visor/util"
-	"xorm.io/core"
+	"github.com/hanzoai/xorm/schemas"
 )
 
 type Service struct {
@@ -194,7 +194,7 @@ func UpdateAsset(id string, asset *Asset) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{owner, name}).AllCols().Update(asset)
+	affected, err := engine.ID(schemas.PK{owner, name}).AllCols().Update(asset)
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +220,7 @@ func DeleteAsset(asset *Asset) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{asset.Owner, asset.Name}).Delete(&Asset{})
+	affected, err := engine.ID(schemas.PK{asset.Owner, asset.Name}).Delete(&Asset{})
 	if err != nil {
 		return false, err
 	}
