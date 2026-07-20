@@ -20,7 +20,7 @@ import (
 
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
-	"xorm.io/core"
+	"github.com/hanzoai/xorm/schemas"
 )
 
 type NodePool struct {
@@ -72,7 +72,6 @@ func (pool *NodePool) computeEvent(event string, priceCents int64) service.Compu
 		PriceCents: priceCents,
 	}
 }
-
 
 // GetAllNodePools fetches all Active node pools across ALL owners for billing
 // reporting. Under Postgres this is one query over the single engine; under Base
@@ -165,7 +164,7 @@ func UpdateNodePool(id string, pool *NodePool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{owner, name}).AllCols().Update(pool)
+	affected, err := engine.ID(schemas.PK{owner, name}).AllCols().Update(pool)
 	if err != nil {
 		return false, err
 	}
@@ -196,7 +195,7 @@ func DeleteNodePool(pool *NodePool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{pool.Owner, pool.Name}).Delete(&NodePool{})
+	affected, err := engine.ID(schemas.PK{pool.Owner, pool.Name}).Delete(&NodePool{})
 	if err != nil {
 		return false, err
 	}
@@ -274,7 +273,7 @@ func SyncNodePoolsCloud(owner string) (bool, error) {
 				pool.ProjectID = dbPool.ProjectID
 				pool.CostPerHour = dbPool.CostPerHour
 				pool.CreatedTime = dbPool.CreatedTime
-				_, err = engine.ID(core.PK{owner, sp.Name}).AllCols().Update(pool)
+				_, err = engine.ID(schemas.PK{owner, sp.Name}).AllCols().Update(pool)
 			} else {
 				pool.CreatedTime = now
 				_, err = engine.Insert(pool)
@@ -410,7 +409,7 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 		if err != nil {
 			return nil, err
 		}
-		_, err = engine.ID(core.PK{owner, updatedPool.Name}).AllCols().Update(dbPool)
+		_, err = engine.ID(schemas.PK{owner, updatedPool.Name}).AllCols().Update(dbPool)
 		if err != nil {
 			return nil, err
 		}

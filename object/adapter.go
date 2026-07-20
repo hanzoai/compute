@@ -23,7 +23,8 @@ import (
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/util"
 	_ "github.com/lib/pq"
-	"xorm.io/xorm"
+
+	"github.com/hanzoai/orm/relational"
 )
 
 var adapter *Adapter
@@ -62,7 +63,7 @@ func InitAdapter() {
 type Adapter struct {
 	driverName     string
 	dataSourceName string
-	engine         *xorm.Engine
+	engine         *relational.Engine
 }
 
 // finalizer is the destructor for Adapter.
@@ -91,7 +92,7 @@ func NewAdapter(driverName string, dataSourceName string) *Adapter {
 func (a *Adapter) createDatabase() error {
 	if a.driverName == "postgres" {
 		// PostgreSQL: connect without dbname to create the database
-		engine, err := xorm.NewEngine(a.driverName, a.dataSourceName)
+		engine, err := relational.NewEngine(a.driverName, a.dataSourceName)
 		if err != nil {
 			return err
 		}
@@ -114,7 +115,7 @@ func (a *Adapter) createDatabase() error {
 	}
 
 	// MySQL fallback
-	engine, err := xorm.NewEngine(a.driverName, a.dataSourceName)
+	engine, err := relational.NewEngine(a.driverName, a.dataSourceName)
 	if err != nil {
 		return err
 	}
@@ -138,7 +139,7 @@ func (a *Adapter) open() {
 		dsn = a.dataSourceName + beego.AppConfig.String("dbName")
 	}
 
-	engine, err := xorm.NewEngine(a.driverName, dsn)
+	engine, err := relational.NewEngine(a.driverName, dsn)
 	if err != nil {
 		panic(err)
 	}
@@ -162,7 +163,7 @@ func (a *Adapter) createTable() {
 	}
 }
 
-func GetSession(owner string, offset, limit int, field, value, sortField, sortOrder string) *xorm.Session {
+func GetSession(owner string, offset, limit int, field, value, sortField, sortOrder string) *relational.Session {
 	session := mustEngineFor(owner).Prepare()
 	if offset != -1 && limit != -1 {
 		session.Limit(limit, offset)

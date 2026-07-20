@@ -14,7 +14,7 @@
 
 package object
 
-import "xorm.io/core"
+import "github.com/hanzoai/xorm/schemas"
 
 // Volume represents a block storage volume attached to a machine.
 type Volume struct {
@@ -87,7 +87,7 @@ func UpdateVolume(owner string, name string, volume *Volume) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, err = engine.ID(core.PK{owner, name}).AllCols().Update(volume)
+	_, err = engine.ID(schemas.PK{owner, name}).AllCols().Update(volume)
 	if err != nil {
 		return false, err
 	}
@@ -99,7 +99,7 @@ func DeleteVolume(volume *Volume) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{volume.Owner, volume.Name}).Delete(&Volume{})
+	affected, err := engine.ID(schemas.PK{volume.Owner, volume.Name}).Delete(&Volume{})
 	if err != nil {
 		return false, err
 	}
