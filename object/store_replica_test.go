@@ -10,16 +10,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"xorm.io/xorm"
+	"github.com/hanzoai/orm/relational"
 )
 
 // openTestOrgDB opens an org SQLite the same way baseStore.EngineFor does.
-func openTestOrgDB(t *testing.T, path string) *xorm.Engine {
+func openTestOrgDB(t *testing.T, path string) *relational.Engine {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
 	}
-	e, err := xorm.NewEngine("sqlite", path+sqlitePragmas)
+	e, err := relational.NewEngine("sqlite", path+sqlitePragmas)
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}

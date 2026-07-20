@@ -14,20 +14,20 @@
 
 package object
 
-import "xorm.io/xorm"
+import "github.com/hanzoai/orm/relational"
 
 // pgStore serves every owner from one shared engine -- the historical visor
 // backend. owner is ignored: tenant isolation is a WHERE owner=? clause, not a
 // separate database. This is the default provider and keeps the live path
 // byte-identical to before the Base seam existed.
 type pgStore struct {
-	engine *xorm.Engine
+	engine *relational.Engine
 }
 
-func (s *pgStore) EngineFor(string) (*xorm.Engine, error) { return s.engine, nil }
+func (s *pgStore) EngineFor(string) (*relational.Engine, error) { return s.engine, nil }
 
 // Shared is the same one engine -- the shared tables are plain rows in it.
-func (s *pgStore) Shared() *xorm.Engine { return s.engine }
+func (s *pgStore) Shared() *relational.Engine { return s.engine }
 
 // PullSharedLeases / PushShared are no-ops under Postgres: the shared engine already
 // IS the single, durable, linearizable coordination store, so the insert-once lease PK
@@ -38,6 +38,8 @@ func (s *pgStore) PushShared() error       { return nil }
 
 // AllEngines is the single engine: it already holds every org's rows, so a
 // cross-org sweep is one query against it.
-func (s *pgStore) AllEngines() ([]*xorm.Engine, error) { return []*xorm.Engine{s.engine}, nil }
+func (s *pgStore) AllEngines() ([]*relational.Engine, error) {
+	return []*relational.Engine{s.engine}, nil
+}
 
 func (s *pgStore) Close() error { return s.engine.Close() }
