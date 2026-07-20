@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"xorm.io/xorm"
+	"github.com/hanzoai/orm/relational"
 )
 
 // MigrationReport records what MigratePostgresToBase copied for one table.
@@ -43,7 +43,7 @@ type MigrationReport struct {
 // unset) routes to the _global sentinel DB. This mirrors hanzo/cloud's
 // introspective migration/pg_to_sqlite.go, but is schema-aware because visor
 // owns its models rather than a drifted upstream schema.
-func MigratePostgresToBase(src *xorm.Engine, dst *baseStore) ([]MigrationReport, error) {
+func MigratePostgresToBase(src *relational.Engine, dst *baseStore) ([]MigrationReport, error) {
 	if src == nil {
 		return nil, fmt.Errorf("visor: migrate: nil source engine")
 	}
@@ -62,7 +62,7 @@ func MigratePostgresToBase(src *xorm.Engine, dst *baseStore) ([]MigrationReport,
 	return reports, nil
 }
 
-func migrateModel(src *xorm.Engine, dst *baseStore, model interface{}) (MigrationReport, error) {
+func migrateModel(src *relational.Engine, dst *baseStore, model interface{}) (MigrationReport, error) {
 	elemType := reflect.TypeOf(model).Elem()
 	rep := MigrationReport{Table: src.TableName(model, true)}
 

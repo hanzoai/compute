@@ -20,12 +20,13 @@ import (
 	"path/filepath"
 	"sync"
 
-	// hanzoai/sqlite registers the CGO-free "sqlite" database/sql driver; xorm
-	// maps the "sqlite" driver name onto its sqlite3 dialect (see
-	// xorm.io/xorm/dialects/dialect.go). This is the same driver hanzoai/base
-	// uses, so visor and base share one SQLite engine under CGO_ENABLED=0.
+	// hanzoai/sqlite registers the CGO-free "sqlite" database/sql driver; the
+	// relational engine maps the "sqlite" driver name onto its sqlite3 dialect
+	// (see github.com/hanzoai/xorm/dialects/dialect.go). This is the same driver
+	// hanzoai/base uses, so visor and base share one SQLite engine under
+	// CGO_ENABLED=0.
+	"github.com/hanzoai/orm/relational"
 	_ "github.com/hanzoai/sqlite"
-	"xorm.io/xorm"
 )
 
 // sqlitePragmas mirrors the durability profile hanzoai/base applies to its
@@ -35,7 +36,7 @@ import (
 const sqlitePragmas = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
 
 // baseStore serves each owner's per-tenant tables from its own SQLite file under
-// a data root -- one *xorm.Engine per org, opened lazily and cached for the
+// a data root -- one *relational.Engine per org, opened lazily and cached for the
 // process lifetime. It also holds coord, the shared Postgres engine that serves
 // the cross-pod shared tables (Plan catalog, MeterLease lease) which cannot live
 // in per-org SQLite. The same xorm models and queries run unchanged against
@@ -50,12 +51,12 @@ const sqlitePragmas = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_p
 // the exact integration point and the interim operational constraint.
 type baseStore struct {
 	root  string
-	coord *xorm.Engine // the _global SQLite engine for the cross-pod shared tables
+	coord *relational.Engine // the _global SQLite engine for the cross-pod shared tables
 
 	repl *replicator // HA object-store binding (nil = local-only; see store_replica.go)
 
 	mu      sync.Mutex
-	engines map[string]*xorm.Engine
+	engines map[string]*relational.Engine
 }
 
 // newBaseStore opens the per-org SQLite substrate. The cross-pod shared tables
@@ -81,7 +82,7 @@ func newBaseStore(root string) (*baseStore, error) {
 	if err := repl.hydrate("_global", coordPath); err != nil {
 		return nil, fmt.Errorf("visor: base store hydrate coord: %w", err)
 	}
-	coord, err := xorm.NewEngine("sqlite", coordPath+sqlitePragmas)
+	coord, err := relational.NewEngine("sqlite", coordPath+sqlitePragmas)
 	if err != nil {
 		return nil, fmt.Errorf("visor: base store open coord %s: %w", coordPath, err)
 	}
@@ -90,14 +91,14 @@ func newBaseStore(root string) (*baseStore, error) {
 		_ = coord.Close()
 		return nil, fmt.Errorf("visor: base store sync coord: %w", err)
 	}
-	bs := &baseStore{root: root, coord: coord, repl: repl, engines: map[string]*xorm.Engine{}}
+	bs := &baseStore{root: root, coord: coord, repl: repl, engines: map[string]*relational.Engine{}}
 	repl.ship("_global", coordPath) // back up the shared DB on an interval
 	return bs, nil
 }
 
 // EngineFor returns the org's SQLite engine, opening and schema-syncing it on
 // first use. Concurrency-safe; each org DB is opened exactly once.
-func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
+func (s *baseStore) EngineFor(owner string) (*relational.Engine, error) {
 	if owner == "" {
 		owner = "_global"
 	}
@@ -119,7 +120,7 @@ func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
 		return nil, fmt.Errorf("visor: base store hydrate %s: %w", owner, err)
 	}
 
-	engine, err := xorm.NewEngine("sqlite", path+sqlitePragmas)
+	engine, err := relational.NewEngine("sqlite", path+sqlitePragmas)
 	if err != nil {
 		return nil, fmt.Errorf("visor: base store open %s: %w", path, err)
 	}
@@ -140,7 +141,7 @@ func (s *baseStore) EngineFor(owner string) (*xorm.Engine, error) {
 // the billing leases are made cluster-safe by the single-writer gate (coordinator.go)
 // plus PullSharedLeases/PushShared across a leadership handoff — NOT by the file being
 // shared. Under Postgres the same call resolves to the one shared, linearizable engine.
-func (s *baseStore) Shared() *xorm.Engine { return s.coord }
+func (s *baseStore) Shared() *relational.Engine { return s.coord }
 
 // PullSharedLeases merges the object store's committed billing-lease rows into the
 // live `_global` coord engine, so a replica that has just become the billing owner
@@ -176,7 +177,7 @@ func (s *baseStore) PushShared() error {
 // AllEngines returns one engine per org DB under the data root -- the set a
 // cross-org sweep unions over. It reads the on-disk orgs/ directory so it sees
 // every org ever written, not only those opened this process lifetime.
-func (s *baseStore) AllEngines() ([]*xorm.Engine, error) {
+func (s *baseStore) AllEngines() ([]*relational.Engine, error) {
 	orgsDir := filepath.Join(s.root, "orgs")
 	entries, err := os.ReadDir(orgsDir)
 	if err != nil {
@@ -186,7 +187,7 @@ func (s *baseStore) AllEngines() ([]*xorm.Engine, error) {
 		return nil, fmt.Errorf("visor: base store list orgs %s: %w", orgsDir, err)
 	}
 
-	engines := make([]*xorm.Engine, 0, len(entries))
+	engines := make([]*relational.Engine, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue

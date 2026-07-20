@@ -19,7 +19,8 @@ import (
 	"path/filepath"
 
 	"github.com/hanzoai/visor/conf"
-	"xorm.io/xorm"
+
+	"github.com/hanzoai/orm/relational"
 )
 
 // perOrgModels are the per-TENANT tables. Under the Base backend each gets one
@@ -65,7 +66,7 @@ func models() []interface{} {
 	return append(perOrgModels(), sharedModels()...)
 }
 
-// engineProvider resolves the *xorm.Engine(s) that serve visor's tables. It is
+// engineProvider resolves the *relational.Engine(s) that serve visor's tables. It is
 // the ONE seam between the shared-Postgres backend (a single engine for every
 // owner) and the Base backend (one per-org SQLite engine plus a shared Postgres
 // coordination engine). Query and model code is identical on either side; only
@@ -74,12 +75,12 @@ type engineProvider interface {
 	// EngineFor returns the engine that serves owner's per-tenant rows.
 	// Postgres ignores owner (isolation is a WHERE owner=? clause); Base
 	// returns, lazily opening, the org's own SQLite engine.
-	EngineFor(owner string) (*xorm.Engine, error)
+	EngineFor(owner string) (*relational.Engine, error)
 	// Shared returns the ONE engine that holds the cross-pod shared tables (the Plan
 	// catalog and the billing leases). Postgres: a single shared, linearizable engine.
 	// Base: the pod-local `_global` SQLite engine, made cluster-safe for the leases by
 	// the single-writer gate plus PullSharedLeases/PushShared across a handoff.
-	Shared() *xorm.Engine
+	Shared() *relational.Engine
 	// PullSharedLeases merges the object store's committed billing-lease rows into the
 	// live coord before a claim (durable lease history across a leadership handoff).
 	// Postgres: no-op — the shared engine already IS the durable, linearizable source.
@@ -91,7 +92,7 @@ type engineProvider interface {
 	// AllEngines returns every engine a cross-org sweep must union over.
 	// Postgres: the single engine (it already holds every org's rows).
 	// Base: one engine per org DB under the data root.
-	AllEngines() ([]*xorm.Engine, error)
+	AllEngines() ([]*relational.Engine, error)
 	// Close releases every engine the provider owns.
 	Close() error
 }
@@ -133,7 +134,7 @@ func InitStore() {
 // EngineFor returns the storage engine that serves owner under the configured
 // backend. This is the single entry point backend-agnostic code MUST use so a
 // query works unchanged on either backend.
-func EngineFor(owner string) (*xorm.Engine, error) {
+func EngineFor(owner string) (*relational.Engine, error) {
 	if store == nil {
 		return nil, fmt.Errorf("visor: store not initialised (call InitAdapter first)")
 	}
@@ -145,7 +146,7 @@ func EngineFor(owner string) (*xorm.Engine, error) {
 // hands back the one already-open engine and cannot fail, so this panics only
 // under the Base backend on a broken data disk -- a fatal infra condition,
 // surfaced the same way Adapter.createTable's sync failure already is.
-func mustEngineFor(owner string) *xorm.Engine {
+func mustEngineFor(owner string) *relational.Engine {
 	engine, err := EngineFor(owner)
 	if err != nil {
 		panic(err)
@@ -155,14 +156,14 @@ func mustEngineFor(owner string) *xorm.Engine {
 
 // Shared returns the engine holding the cross-pod shared tables (the Plan
 // catalog and the MeterLease coordination lease). Postgres under both backends.
-func Shared() *xorm.Engine {
+func Shared() *relational.Engine {
 	return store.Shared()
 }
 
 // allEngines returns every engine a cross-org sweep (billing node-pool report,
 // stale-session GC) must union over. One engine under Postgres; one per org DB
 // under Base.
-func allEngines() ([]*xorm.Engine, error) {
+func allEngines() ([]*relational.Engine, error) {
 	if store == nil {
 		return nil, fmt.Errorf("visor: store not initialised (call InitAdapter first)")
 	}
