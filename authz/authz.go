@@ -21,7 +21,7 @@ import (
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
 	"github.com/hanzoai/authzstore"
-	iam "github.com/hanzoai/iam"
+	iam "github.com/hanzoai/iam-v1"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/xorm"
 )

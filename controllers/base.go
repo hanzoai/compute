@@ -18,7 +18,7 @@ import (
 	"encoding/gob"
 
 	"github.com/beego/beego"
-	iam "github.com/hanzoai/iam"
+	iam "github.com/hanzoai/iam-v1"
 )
 
 type ApiController struct {

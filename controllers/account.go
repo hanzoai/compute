@@ -18,7 +18,7 @@ import (
 	_ "embed"
 
 	"github.com/beego/beego"
-	iam "github.com/hanzoai/iam"
+	iam "github.com/hanzoai/iam-v1"
 )
 
 //go:embed token_jwt_key.pem

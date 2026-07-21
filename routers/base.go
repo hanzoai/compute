@@ -21,7 +21,7 @@ import (
 	"github.com/beego/beego/context"
 	"github.com/hanzoai/vm/conf"
 	"github.com/hanzoai/vm/util"
-	iam "github.com/hanzoai/iam"
+	iam "github.com/hanzoai/iam-v1"
 )
 
 type Response struct {
