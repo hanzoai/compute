@@ -16,7 +16,6 @@ package object
 
 import (
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/xorm/schemas"
 )
 
 // Fleet worker kinds — the BILLING LINEAGE of a connected compute source, resolved
@@ -122,7 +121,7 @@ func ConnectFleetWorker(worker *FleetWorker) (*FleetWorker, error) {
 	}
 	if existing != nil {
 		worker.CreatedTime = existing.CreatedTime
-		if _, err := adapter.engine.ID(schemas.PK{worker.Owner, worker.Name}).AllCols().Update(worker); err != nil {
+		if _, err := adapter.engine.ID([]any{worker.Owner, worker.Name}).AllCols().Update(worker); err != nil {
 			return nil, err
 		}
 		return worker, nil
@@ -145,7 +144,7 @@ func DisconnectFleetWorker(owner, name string) (bool, error) {
 	}
 	worker.State = FleetWorkerDisconnected
 	worker.UpdatedTime = util.GetCurrentTime()
-	affected, err := adapter.engine.ID(schemas.PK{owner, name}).Cols("state", "updated_time").Update(worker)
+	affected, err := adapter.engine.ID([]any{owner, name}).Cols("state", "updated_time").Update(worker)
 	if err != nil {
 		return false, err
 	}

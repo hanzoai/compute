@@ -16,8 +16,6 @@ package object
 
 import (
 	"time"
-
-	"github.com/hanzoai/xorm/schemas"
 )
 
 // CostCursor is the per-account watermark for BYOC cost billing (fleet tier a). It
@@ -60,7 +58,7 @@ func AdvanceCostCursor(owner, provider, month string, currentMTDCents int64) (in
 	cursor.BilledSpendCents = currentMTDCents
 	cursor.UpdatedTime = time.Now().UTC().Format(time.RFC3339)
 	if existed {
-		if _, err := Shared().ID(schemas.PK{owner, provider, month}).Cols("billed_spend_cents", "updated_time").Update(&cursor); err != nil {
+		if _, err := Shared().ID([]any{owner, provider, month}).Cols("billed_spend_cents", "updated_time").Update(&cursor); err != nil {
 			return 0, err
 		}
 	} else {

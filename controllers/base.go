@@ -18,7 +18,7 @@ import (
 	"encoding/gob"
 
 	"github.com/beego/beego"
-	iam "github.com/hanzoai/iam-v1"
+	iam "github.com/hanzoai/visor/internal/iam"
 	"github.com/hanzoai/visor/object"
 )
 

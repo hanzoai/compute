@@ -14,8 +14,6 @@
 
 package object
 
-import "github.com/hanzoai/xorm/schemas"
-
 // Plan represents a resale VM plan available to customers.
 type Plan struct {
 	Owner       string `xorm:"varchar(100) notnull pk" json:"owner"`
@@ -94,7 +92,7 @@ func AddPlan(plan *Plan) (bool, error) {
 }
 
 func UpdatePlan(owner string, name string, plan *Plan) (bool, error) {
-	_, err := Shared().ID(schemas.PK{owner, name}).AllCols().Update(plan)
+	_, err := Shared().ID([]any{owner, name}).AllCols().Update(plan)
 	if err != nil {
 		return false, err
 	}
@@ -102,7 +100,7 @@ func UpdatePlan(owner string, name string, plan *Plan) (bool, error) {
 }
 
 func DeletePlan(plan *Plan) (bool, error) {
-	affected, err := Shared().ID(schemas.PK{plan.Owner, plan.Name}).Delete(&Plan{})
+	affected, err := Shared().ID([]any{plan.Owner, plan.Name}).Delete(&Plan{})
 	if err != nil {
 		return false, err
 	}

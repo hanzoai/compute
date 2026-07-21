@@ -17,8 +17,8 @@ package object
 import (
 	"strings"
 
-	iam "github.com/hanzoai/iam-v1"
 	"github.com/hanzoai/visor/conf"
+	iam "github.com/hanzoai/visor/internal/iam"
 )
 
 // GetBearerUser validates an "Authorization: Bearer <IAM JWT>" header and

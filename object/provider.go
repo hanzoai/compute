@@ -19,7 +19,6 @@ import (
 
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/xorm/schemas"
 )
 
 type Provider struct {
@@ -165,7 +164,7 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(schemas.PK{owner, name}).AllCols().Update(provider)
+	affected, err := engine.ID([]any{owner, name}).AllCols().Update(provider)
 	if err != nil {
 		return false, err
 	}
@@ -201,7 +200,7 @@ func DeleteProvider(provider *Provider) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(schemas.PK{provider.Owner, provider.Name}).Delete(&Provider{})
+	affected, err := engine.ID([]any{provider.Owner, provider.Name}).Delete(&Provider{})
 	if err != nil {
 		return false, err
 	}

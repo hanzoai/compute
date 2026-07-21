@@ -20,7 +20,6 @@ import (
 
 	"github.com/hanzoai/visor/util"
 	"github.com/hanzoai/visor/util/guacamole"
-	"github.com/hanzoai/xorm/schemas"
 )
 
 const (
@@ -154,12 +153,12 @@ func UpdateSession(id string, session *Session, columns ...string) (bool, error)
 		return false, err
 	}
 	if len(columns) == 0 {
-		_, err := engine.ID(schemas.PK{owner, name}).AllCols().Update(session)
+		_, err := engine.ID([]any{owner, name}).AllCols().Update(session)
 		if err != nil {
 			return false, err
 		}
 	} else {
-		_, err := engine.ID(schemas.PK{owner, name}).Cols(columns...).Update(session)
+		_, err := engine.ID([]any{owner, name}).Cols(columns...).Update(session)
 		if err != nil {
 			return false, err
 		}
@@ -173,7 +172,7 @@ func DeleteSession(session *Session) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(schemas.PK{session.Owner, session.Name}).Delete(&Session{})
+	affected, err := engine.ID([]any{session.Owner, session.Name}).Delete(&Session{})
 	if err != nil {
 		return false, err
 	}

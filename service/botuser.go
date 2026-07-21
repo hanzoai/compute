@@ -15,7 +15,7 @@
 package service
 
 import (
-	iam "github.com/hanzoai/iam-v1"
+	iam "github.com/hanzoai/visor/internal/iam"
 )
 
 // botuser.go — a launched bot IS an org member. registerBotUser creates an IAM

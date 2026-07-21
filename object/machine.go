@@ -18,7 +18,6 @@ import (
 	"fmt"
 
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/xorm/schemas"
 )
 
 type Machine struct {
@@ -168,7 +167,7 @@ func UpdateMachine(id string, machine *Machine) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(schemas.PK{owner, name}).AllCols().Update(machine)
+	affected, err := engine.ID([]any{owner, name}).AllCols().Update(machine)
 	if err != nil {
 		return false, err
 	}
@@ -209,7 +208,7 @@ func DeleteMachine(machine *Machine) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(schemas.PK{machine.Owner, machine.Name}).Delete(&Machine{})
+	affected, err := engine.ID([]any{machine.Owner, machine.Name}).Delete(&Machine{})
 	if err != nil {
 		return false, err
 	}

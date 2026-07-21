@@ -20,9 +20,9 @@ import (
 
 	"github.com/beego/beego/context"
 	"github.com/hanzoai/visor/conf"
+	iam "github.com/hanzoai/visor/internal/iam"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
-	iam "github.com/hanzoai/iam-v1"
 )
 
 type Response struct {

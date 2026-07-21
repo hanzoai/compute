@@ -15,11 +15,11 @@
 package controllers
 
 import (
-	"encoding/base64"
 	_ "embed"
+	"encoding/base64"
 
 	"github.com/beego/beego"
-	iam "github.com/hanzoai/iam-v1"
+	iam "github.com/hanzoai/visor/internal/iam"
 )
 
 //go:embed token_jwt_key.pem
