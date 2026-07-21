@@ -17,7 +17,7 @@ package object
 import (
 	"strings"
 
-	iam "github.com/hanzoai/iam"
+	iam "github.com/hanzoai/iam-v1"
 	"github.com/hanzoai/visor/conf"
 )
 
