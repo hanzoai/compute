@@ -22,7 +22,7 @@ import (
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
-	iam "github.com/hanzoai/iam"
+	iam "github.com/hanzoai/iam-v1"
 )
 
 type Response struct {
