@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package controllers
+package util
 
-import (
-	"github.com/hanzoai/visor/object"
-)
-
-// GetWhitelabel returns branding config based on the request Host header.
-// @Title GetWhitelabel
-// @Tag Whitelabel API
-// @Description Get white-label branding config for the current hostname
-// @Success 200 {object} controllers.Response
-// @router /get-whitelabel [get]
-func (c *ApiController) GetWhitelabel() {
-	host := c.Ctx.Host()
-	config := object.GetWhitelabelConfig(host)
-	c.ResponseOk(config)
+// Paginate is the ONE offset/total helper the list handlers use, replacing
+// Beego's pagination.SetPaginator: given the 1-based page string, the page size
+// and the total row count, it returns the SQL offset and the total (echoed back
+// to the client as data2 for its own page math). page < 1 clamps to the first
+// page, matching Beego's Paginator.Page() lower bound.
+func Paginate(page string, perPage int, total int64) (offset int, nums int64) {
+	p := ParseInt(page)
+	if p < 1 {
+		p = 1
+	}
+	if perPage < 0 {
+		perPage = 0
+	}
+	return (p - 1) * perPage, total
 }

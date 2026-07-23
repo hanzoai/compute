@@ -29,7 +29,7 @@ import (
 // @Success 200 {array} object.Volume
 // @router /get-volumes [get]
 func (c *ApiController) GetVolumes() {
-	owner := c.Input().Get("owner")
+	owner := c.Ctx.Query("owner")
 	volumes, err := object.GetVolumes(owner)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -47,8 +47,8 @@ func (c *ApiController) GetVolumes() {
 // @Success 200 {object} object.Volume
 // @router /get-volume [get]
 func (c *ApiController) GetVolume() {
-	owner := c.Input().Get("owner")
-	name := c.Input().Get("name")
+	owner := c.Ctx.Query("owner")
+	name := c.Ctx.Query("name")
 
 	volume, err := object.GetVolume(owner, name)
 	if err != nil {
@@ -68,8 +68,8 @@ func (c *ApiController) GetVolume() {
 // @Success 200 {object} object.Volume
 // @router /create-volume [post]
 func (c *ApiController) CreateVolume() {
-	owner := c.Input().Get("owner")
-	providerName := c.Input().Get("provider")
+	owner := c.Ctx.Query("owner")
+	providerName := c.Ctx.Query("provider")
 
 	if owner == "" || providerName == "" {
 		c.ResponseError("owner and provider query parameters are required")
@@ -77,7 +77,7 @@ func (c *ApiController) CreateVolume() {
 	}
 
 	var spec service.CreateVolumeSpec
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &spec)
+	err := json.Unmarshal(c.Ctx.Body(), &spec)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -102,9 +102,9 @@ func (c *ApiController) CreateVolume() {
 // @Success 200 {object} controllers.Response
 // @router /delete-volume [post]
 func (c *ApiController) DeleteVolume() {
-	owner := c.Input().Get("owner")
-	providerName := c.Input().Get("provider")
-	name := c.Input().Get("name")
+	owner := c.Ctx.Query("owner")
+	providerName := c.Ctx.Query("provider")
+	name := c.Ctx.Query("name")
 
 	err := object.DeleteVolumeCloud(owner, providerName, name)
 	if err != nil {
@@ -122,10 +122,10 @@ func (c *ApiController) DeleteVolume() {
 // @Description attach a volume to a machine
 // @router /attach-volume [post]
 func (c *ApiController) AttachVolume() {
-	owner := c.Input().Get("owner")
-	providerName := c.Input().Get("provider")
-	volumeName := c.Input().Get("volume")
-	machineName := c.Input().Get("machine")
+	owner := c.Ctx.Query("owner")
+	providerName := c.Ctx.Query("provider")
+	volumeName := c.Ctx.Query("volume")
+	machineName := c.Ctx.Query("machine")
 
 	err := object.AttachVolumeCloud(owner, providerName, volumeName, machineName)
 	if err != nil {
@@ -143,9 +143,9 @@ func (c *ApiController) AttachVolume() {
 // @Description detach a volume from its machine
 // @router /detach-volume [post]
 func (c *ApiController) DetachVolume() {
-	owner := c.Input().Get("owner")
-	providerName := c.Input().Get("provider")
-	volumeName := c.Input().Get("volume")
+	owner := c.Ctx.Query("owner")
+	providerName := c.Ctx.Query("provider")
+	volumeName := c.Ctx.Query("volume")
 
 	err := object.DetachVolumeCloud(owner, providerName, volumeName)
 	if err != nil {
@@ -163,10 +163,10 @@ func (c *ApiController) DetachVolume() {
 // @Description resize a volume
 // @router /resize-volume [post]
 func (c *ApiController) ResizeVolume() {
-	owner := c.Input().Get("owner")
-	providerName := c.Input().Get("provider")
-	volumeName := c.Input().Get("volume")
-	sizeStr := c.Input().Get("size")
+	owner := c.Ctx.Query("owner")
+	providerName := c.Ctx.Query("provider")
+	volumeName := c.Ctx.Query("volume")
+	sizeStr := c.Ctx.Query("size")
 
 	size := 0
 	if sizeStr != "" {

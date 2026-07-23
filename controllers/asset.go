@@ -17,7 +17,6 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/beego/beego/utils/pagination"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 )
@@ -31,13 +30,13 @@ import (
 // @Success 200 {object} object.Asset The Response object
 // @router /get-assets [get]
 func (c *ApiController) GetAssets() {
-	owner := c.Input().Get("owner")
-	limit := c.Input().Get("pageSize")
-	page := c.Input().Get("p")
-	field := c.Input().Get("field")
-	value := c.Input().Get("value")
-	sortField := c.Input().Get("sortField")
-	sortOrder := c.Input().Get("sortOrder")
+	owner := c.Ctx.Query("owner")
+	limit := c.Ctx.Query("pageSize")
+	page := c.Ctx.Query("p")
+	field := c.Ctx.Query("field")
+	value := c.Ctx.Query("value")
+	sortField := c.Ctx.Query("sortField")
+	sortOrder := c.Ctx.Query("sortOrder")
 
 	if limit == "" || page == "" {
 		assets, err := object.GetMaskedAssets(object.GetAssets(owner))
@@ -55,14 +54,14 @@ func (c *ApiController) GetAssets() {
 			return
 		}
 
-		paginator := pagination.SetPaginator(c.Ctx, limit, count)
-		assets, err := object.GetMaskedAssets(object.GetPaginationAssets(owner, paginator.Offset(), limit, field, value, sortField, sortOrder))
+		offset, nums := util.Paginate(page, limit, count)
+		assets, err := object.GetMaskedAssets(object.GetPaginationAssets(owner, offset, limit, field, value, sortField, sortOrder))
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
-		c.ResponseOk(assets, paginator.Nums())
+		c.ResponseOk(assets, nums)
 	}
 }
 
@@ -74,7 +73,7 @@ func (c *ApiController) GetAssets() {
 // @Success 200 {object} object.Asset The Response object
 // @router /get-asset [get]
 func (c *ApiController) GetAsset() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	asset, err := object.GetMaskedAsset(object.GetAsset(id))
 	if err != nil {
@@ -94,10 +93,10 @@ func (c *ApiController) GetAsset() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-asset [post]
 func (c *ApiController) UpdateAsset() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	var asset object.Asset
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &asset)
+	err := json.Unmarshal(c.Ctx.Body(), &asset)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -116,7 +115,7 @@ func (c *ApiController) UpdateAsset() {
 // @router /add-asset [post]
 func (c *ApiController) AddAsset() {
 	var asset object.Asset
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &asset)
+	err := json.Unmarshal(c.Ctx.Body(), &asset)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -135,7 +134,7 @@ func (c *ApiController) AddAsset() {
 // @router /delete-asset [post]
 func (c *ApiController) DeleteAsset() {
 	var asset object.Asset
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &asset)
+	err := json.Unmarshal(c.Ctx.Body(), &asset)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

@@ -35,12 +35,18 @@ require (
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/costmanagement/armcostmanagement v1.1.1
 	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.65.3
+	github.com/fasthttp/websocket v1.5.12
 	github.com/hanzoai/commerce/metering v0.1.4
 	github.com/hanzoai/ha v0.1.1
 	github.com/hanzoai/orm v0.6.4
 	github.com/hanzoai/sqlite v0.3.1
 	github.com/hanzoai/vfs v0.6.5
 	github.com/hanzoai/xorm v1.4.3
+	github.com/luxfi/log v1.5.0
+	github.com/spf13/cobra v1.10.2
+	github.com/valyala/fasthttp v1.72.0
+	github.com/zap-proto/fiber/v3 v3.2.1
+	github.com/zap-proto/zip v1.8.3
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
@@ -114,7 +120,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/evanw/esbuild v0.28.1 // indirect
-	github.com/fasthttp/websocket v1.5.12 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
@@ -195,7 +200,6 @@ require (
 	github.com/luxfi/database v1.21.1 // indirect
 	github.com/luxfi/geth v1.20.1 // indirect
 	github.com/luxfi/ids v1.3.2 // indirect
-	github.com/luxfi/log v1.5.0 // indirect
 	github.com/luxfi/math v1.5.1 // indirect
 	github.com/luxfi/math/big v0.1.0 // indirect
 	github.com/luxfi/mdns v0.1.1 // indirect
@@ -258,19 +262,17 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
+	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.72.0 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.241 // indirect
 	github.com/volcengine/volcengine-go-sdk v1.0.141 // indirect
 	github.com/wangbin/jiebago v0.3.2 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	github.com/zap-proto/fiber/v3 v3.2.1 // indirect
 	github.com/zap-proto/go v1.3.0 // indirect
 	github.com/zap-proto/http v0.2.0 // indirect
 	github.com/zap-proto/md v0.1.0 // indirect
-	github.com/zap-proto/zip v1.8.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
@@ -373,7 +375,7 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/ini.v1 v1.67.1 // indirect
+	gopkg.in/ini.v1 v1.67.1
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect

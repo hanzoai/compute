@@ -17,7 +17,6 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/beego/beego/utils/pagination"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 )
@@ -31,13 +30,13 @@ import (
 // @Success 200 {object} object.Record The Response object
 // @router /get-records [get]
 func (c *ApiController) GetRecords() {
-	owner := c.Input().Get("owner")
-	limit := c.Input().Get("pageSize")
-	page := c.Input().Get("p")
-	field := c.Input().Get("field")
-	value := c.Input().Get("value")
-	sortField := c.Input().Get("sortField")
-	sortOrder := c.Input().Get("sortOrder")
+	owner := c.Ctx.Query("owner")
+	limit := c.Ctx.Query("pageSize")
+	page := c.Ctx.Query("p")
+	field := c.Ctx.Query("field")
+	value := c.Ctx.Query("value")
+	sortField := c.Ctx.Query("sortField")
+	sortOrder := c.Ctx.Query("sortOrder")
 
 	if limit == "" || page == "" {
 		records, err := object.GetRecords(owner)
@@ -56,14 +55,14 @@ func (c *ApiController) GetRecords() {
 			return
 		}
 
-		paginator := pagination.SetPaginator(c.Ctx, limit, count)
-		records, err := object.GetPaginationRecords(owner, paginator.Offset(), limit, field, value, sortField, sortOrder)
+		offset, nums := util.Paginate(page, limit, count)
+		records, err := object.GetPaginationRecords(owner, offset, limit, field, value, sortField, sortOrder)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
-		c.ResponseOk(records, paginator.Nums())
+		c.ResponseOk(records, nums)
 	}
 }
 
@@ -75,7 +74,7 @@ func (c *ApiController) GetRecords() {
 // @Success 200 {object} object.Record The Response object
 // @router /get-record [get]
 func (c *ApiController) GetRecord() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	record, err := object.GetRecord(id)
 	if err != nil {
@@ -95,10 +94,10 @@ func (c *ApiController) GetRecord() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-record [post]
 func (c *ApiController) UpdateRecord() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	var record object.Record
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &record)
+	err := json.Unmarshal(c.Ctx.Body(), &record)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -117,7 +116,7 @@ func (c *ApiController) UpdateRecord() {
 // @router /add-record [post]
 func (c *ApiController) AddRecord() {
 	var record object.Record
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &record)
+	err := json.Unmarshal(c.Ctx.Body(), &record)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -143,7 +142,7 @@ func (c *ApiController) AddRecord() {
 // @router /delete-record [post]
 func (c *ApiController) DeleteRecord() {
 	var record object.Record
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &record)
+	err := json.Unmarshal(c.Ctx.Body(), &record)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

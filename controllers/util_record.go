@@ -23,7 +23,7 @@ import (
 )
 
 func addRecord(c *ApiController, userName string, requestUri string) {
-	record, err := object.NewRecord(c.Ctx)
+	record, err := object.NewRecord(c.Ctx, c.Ctx.Locals(object.RecordResponseKey))
 	if err != nil {
 		fmt.Printf("addRecord() error: %s\n", err.Error())
 		return

@@ -68,7 +68,7 @@ func (c *ApiController) CreateImage() {
 		Region       string `json:"region"`
 		Distribution string `json:"distribution"`
 	}
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
+	if err := json.Unmarshal(c.Ctx.Body(), &req); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}

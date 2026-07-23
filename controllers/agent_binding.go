@@ -42,7 +42,7 @@ type bindAgentRequest struct {
 // resolved (empty Owner / no ?owner) OR the `:id` segment is empty — the handler
 // then rejects with a clear error rather than operating on a half-formed id.
 func (c *ApiController) machineIdFromPath() string {
-	name := strings.TrimSpace(c.Ctx.Input.Param(":id"))
+	name := strings.TrimSpace(c.Ctx.Param("id"))
 	if name == "" {
 		return ""
 	}
@@ -132,7 +132,7 @@ func (c *ApiController) BindAgent() {
 	}
 
 	var req bindAgentRequest
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
+	if err := json.Unmarshal(c.Ctx.Body(), &req); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}

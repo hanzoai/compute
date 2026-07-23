@@ -17,7 +17,8 @@ package routers
 import (
 	"strings"
 
-	"github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/object"
 )
 
@@ -25,28 +26,38 @@ func normalizeTenantHeader(value string) string {
 	return strings.TrimSpace(value)
 }
 
-func getTenantHeader(ctx *context.Context, name string) string {
-	return normalizeTenantHeader(ctx.Input.Header(name))
+func getTenantHeader(c *zip.Ctx, name string) string {
+	return normalizeTenantHeader(c.Header(name))
 }
 
-// TenantContextFilter copies the gateway-injected tenant-scope headers
-// (org > app > project, plus tenant/actor/env) onto the beego request context so
-// every downstream handler resolves the caller's scope through object's getters —
-// the ONE shared read-back. Org additionally falls back to the whitelabel
-// hostname's org filter, and tenant defaults to org. App and project are OPTIONAL
-// finer scope beneath org and are threaded verbatim (left unset when the caller
-// sends no header), so a request that omits them is never altered.
-func TenantContextFilter(ctx *context.Context) {
-	orgID := getTenantHeader(ctx, "X-Org-ID")
-	appID := getTenantHeader(ctx, "X-App-ID")
-	projectID := getTenantHeader(ctx, "X-Project-ID")
-	tenantID := getTenantHeader(ctx, "X-Tenant-ID")
-	actorID := getTenantHeader(ctx, "X-Actor-ID")
-	env := getTenantHeader(ctx, "X-Env")
+// TenantContextFilter is the ZAP middleware seam: it threads the tenant scope
+// onto the request, then continues the chain via c.Next(). The scope transform
+// itself is applyTenantContext, kept separate from the plumbing so it is unit-
+// testable without a routed context.
+func TenantContextFilter(c *zip.Ctx) error {
+	applyTenantContext(c)
+	return c.Next()
+}
+
+// applyTenantContext copies the gateway-injected tenant-scope headers
+// (org > app > project, plus tenant/actor/env) onto the request context locals
+// so every downstream handler resolves the caller's scope through object's
+// getters — the ONE shared read-back. Org additionally falls back to the
+// whitelabel hostname's org filter, and tenant defaults to org. App and project
+// are OPTIONAL finer scope beneath org and are threaded verbatim (left unset
+// when the caller sends no header), so a request that omits them is never
+// altered.
+func applyTenantContext(c *zip.Ctx) {
+	orgID := getTenantHeader(c, "X-Org-ID")
+	appID := getTenantHeader(c, "X-App-ID")
+	projectID := getTenantHeader(c, "X-Project-ID")
+	tenantID := getTenantHeader(c, "X-Tenant-ID")
+	actorID := getTenantHeader(c, "X-Actor-ID")
+	env := getTenantHeader(c, "X-Env")
 
 	// If no explicit org header, use the whitelabel hostname's org filter.
 	if orgID == "" {
-		wlConfig := object.GetWhitelabelConfig(ctx.Request.Host)
+		wlConfig := object.GetWhitelabelConfig(c.Host())
 		if wlConfig.OrgFilter != "" {
 			orgID = wlConfig.OrgFilter
 		}
@@ -56,10 +67,10 @@ func TenantContextFilter(ctx *context.Context) {
 		tenantID = orgID
 	}
 
-	object.SetTenantContextValue(ctx, object.TenantContextOrgIDKey, orgID)
-	object.SetTenantContextValue(ctx, object.TenantContextAppIDKey, appID)
-	object.SetTenantContextValue(ctx, object.TenantContextProjectIDKey, projectID)
-	object.SetTenantContextValue(ctx, object.TenantContextTenantIDKey, tenantID)
-	object.SetTenantContextValue(ctx, object.TenantContextActorIDKey, actorID)
-	object.SetTenantContextValue(ctx, object.TenantContextEnvKey, env)
+	object.SetTenantContextValue(c, object.TenantContextOrgIDKey, orgID)
+	object.SetTenantContextValue(c, object.TenantContextAppIDKey, appID)
+	object.SetTenantContextValue(c, object.TenantContextProjectIDKey, projectID)
+	object.SetTenantContextValue(c, object.TenantContextTenantIDKey, tenantID)
+	object.SetTenantContextValue(c, object.TenantContextActorIDKey, actorID)
+	object.SetTenantContextValue(c, object.TenantContextEnvKey, env)
 }

@@ -15,7 +15,7 @@
 package object
 
 import (
-	"github.com/beego/beego/logs"
+	"github.com/hanzoai/visor/logs"
 	"time"
 )
 

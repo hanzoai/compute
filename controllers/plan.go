@@ -28,7 +28,7 @@ import (
 // @Success 200 {array} object.Plan
 // @router /get-plans [get]
 func (c *ApiController) GetPlans() {
-	owner := c.Input().Get("owner")
+	owner := c.Ctx.Query("owner")
 	plans, err := object.GetPlans(owner)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -46,8 +46,8 @@ func (c *ApiController) GetPlans() {
 // @Success 200 {object} object.Plan
 // @router /get-plan [get]
 func (c *ApiController) GetPlan() {
-	owner := c.Input().Get("owner")
-	name := c.Input().Get("name")
+	owner := c.Ctx.Query("owner")
+	name := c.Ctx.Query("name")
 
 	plan, err := object.GetPlan(owner, name)
 	if err != nil {
@@ -66,7 +66,7 @@ func (c *ApiController) GetPlan() {
 // @router /add-plan [post]
 func (c *ApiController) AddPlan() {
 	var plan object.Plan
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &plan)
+	err := json.Unmarshal(c.Ctx.Body(), &plan)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -85,11 +85,11 @@ func (c *ApiController) AddPlan() {
 // @Success 200 {object} controllers.Response
 // @router /update-plan [post]
 func (c *ApiController) UpdatePlan() {
-	owner := c.Input().Get("owner")
-	name := c.Input().Get("name")
+	owner := c.Ctx.Query("owner")
+	name := c.Ctx.Query("name")
 
 	var plan object.Plan
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &plan)
+	err := json.Unmarshal(c.Ctx.Body(), &plan)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -107,7 +107,7 @@ func (c *ApiController) UpdatePlan() {
 // @router /delete-plan [post]
 func (c *ApiController) DeletePlan() {
 	var plan object.Plan
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &plan)
+	err := json.Unmarshal(c.Ctx.Body(), &plan)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

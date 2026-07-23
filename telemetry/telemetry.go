@@ -33,7 +33,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/beego/beego/logs"
+	"github.com/hanzoai/visor/logs"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"

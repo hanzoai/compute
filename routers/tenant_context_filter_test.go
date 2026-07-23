@@ -15,22 +15,21 @@
 package routers
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/object"
 )
 
-func newFilterCtx(headers map[string]string) *context.Context {
-	ctx := context.NewContext()
-	req := httptest.NewRequest(http.MethodPost, "/v1/machines/launch", nil)
+// newFilterCtx builds a ZAP request context the way the router hands one to the
+// filter chain, with the gateway-injected tenant headers set.
+func newFilterCtx(app *zip.App, headers map[string]string) *zip.Ctx {
+	c := app.TestCtx("POST", "/v1/machines/launch")
 	for k, v := range headers {
-		req.Header.Set(k, v)
+		c.Fiber().Request().Header.Set(k, v)
 	}
-	ctx.Reset(httptest.NewRecorder(), req)
-	return ctx
+	return c
 }
 
 // TestTenantContextFilterThreadsScope proves the filter threads the full
@@ -39,24 +38,25 @@ func newFilterCtx(headers map[string]string) *context.Context {
 // compute launch handler resolves through. X-Org-ID is set so the whitelabel
 // fallback branch is not exercised (that path needs config/DB).
 func TestTenantContextFilterThreadsScope(t *testing.T) {
-	ctx := newFilterCtx(map[string]string{
+	app := zip.New(zip.Config{})
+	c := newFilterCtx(app, map[string]string{
 		"X-Org-ID":     "acme",
 		"X-App-ID":     "web",
 		"X-Project-ID": "api",
 	})
-	TenantContextFilter(ctx)
+	applyTenantContext(c)
 
-	if got := object.GetTenantOrgID(ctx); got != "acme" {
+	if got := object.GetTenantOrgID(c); got != "acme" {
 		t.Fatalf("org = %q, want acme", got)
 	}
-	if got := object.GetTenantAppID(ctx); got != "web" {
+	if got := object.GetTenantAppID(c); got != "web" {
 		t.Fatalf("app = %q, want web", got)
 	}
-	if got := object.GetTenantProjectID(ctx); got != "api" {
+	if got := object.GetTenantProjectID(c); got != "api" {
 		t.Fatalf("project = %q, want api", got)
 	}
 	// tenant defaults to org when X-Tenant-ID is absent.
-	if got := object.GetTenantContextValue(ctx, object.TenantContextTenantIDKey); got != "acme" {
+	if got := object.GetTenantContextValue(c, object.TenantContextTenantIDKey); got != "acme" {
 		t.Fatalf("tenant default = %q, want acme", got)
 	}
 }
@@ -65,13 +65,14 @@ func TestTenantContextFilterThreadsScope(t *testing.T) {
 // leaves the scope empty (the launch that omits it is never altered) — org still
 // threads so no whitelabel lookup is triggered.
 func TestTenantContextFilterAbsentScopeEmpty(t *testing.T) {
-	ctx := newFilterCtx(map[string]string{"X-Org-ID": "acme"})
-	TenantContextFilter(ctx)
+	app := zip.New(zip.Config{})
+	c := newFilterCtx(app, map[string]string{"X-Org-ID": "acme"})
+	applyTenantContext(c)
 
-	if got := object.GetTenantAppID(ctx); got != "" {
+	if got := object.GetTenantAppID(c); got != "" {
 		t.Fatalf("absent app = %q, want empty", got)
 	}
-	if got := object.GetTenantProjectID(ctx); got != "" {
+	if got := object.GetTenantProjectID(c); got != "" {
 		t.Fatalf("absent project = %q, want empty", got)
 	}
 }

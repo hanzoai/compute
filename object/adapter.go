@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/beego/beego"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/util"
@@ -29,12 +28,9 @@ import (
 
 var adapter *Adapter
 
+// InitConfig is retained as the config+store bootstrap entry point. Config now
+// loads lazily on first read (conf package), so this simply opens the store.
 func InitConfig() {
-	err := beego.LoadAppConfig("ini", "../conf/app.conf")
-	if err != nil {
-		panic(err)
-	}
-
 	InitAdapter()
 }
 
@@ -98,7 +94,7 @@ func (a *Adapter) createDatabase() error {
 		}
 		defer engine.Close()
 
-		dbName := beego.AppConfig.String("dbName")
+		dbName := conf.GetConfigString("dbName")
 		// Check if DB exists; create if not (PostgreSQL syntax)
 		var count int64
 		_, err = engine.SQL("SELECT COUNT(*) FROM pg_database WHERE datname = ?", dbName).Get(&count)
@@ -121,7 +117,7 @@ func (a *Adapter) createDatabase() error {
 	}
 	defer engine.Close()
 
-	_, err = engine.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s default charset utf8 COLLATE utf8_general_ci", beego.AppConfig.String("dbName")))
+	_, err = engine.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s default charset utf8 COLLATE utf8_general_ci", conf.GetConfigString("dbName")))
 	return err
 }
 
@@ -136,7 +132,7 @@ func (a *Adapter) open() {
 		dsn = a.dataSourceName
 	} else {
 		// For MySQL, append dbName
-		dsn = a.dataSourceName + beego.AppConfig.String("dbName")
+		dsn = a.dataSourceName + conf.GetConfigString("dbName")
 	}
 
 	engine, err := relational.NewEngine(a.driverName, dsn)

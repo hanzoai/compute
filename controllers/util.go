@@ -17,6 +17,7 @@ package controllers
 import (
 	"strings"
 
+	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 )
 
@@ -25,6 +26,23 @@ type Response struct {
 	Msg    string      `json:"msg"`
 	Data   interface{} `json:"data"`
 	Data2  interface{} `json:"data2"`
+}
+
+// serve writes payload as the JSON response (HTTP 200, the SDK contract branches
+// on the envelope status, not the code) and stashes it on the request context so
+// the record filter can capture the response envelope after the handler returns.
+func (c *ApiController) serve(payload interface{}) {
+	if c.Ctx == nil {
+		return
+	}
+	c.Ctx.Locals(object.RecordResponseKey, payload)
+	_ = c.Ctx.JSON(200, payload)
+}
+
+// ServeJSON writes the buffered Data["json"] payload — the Beego-shaped spelling
+// the handlers use for the wrapActionResponse path.
+func (c *ApiController) ServeJSON() {
+	c.serve(c.Data["json"])
 }
 
 func (c *ApiController) ResponseOk(data ...interface{}) {
@@ -36,8 +54,7 @@ func (c *ApiController) ResponseOk(data ...interface{}) {
 	case 1:
 		resp.Data = data[0]
 	}
-	c.Data["json"] = resp
-	c.ServeJSON()
+	c.serve(resp)
 }
 
 func (c *ApiController) ResponseError(error string, data ...interface{}) {
@@ -49,8 +66,7 @@ func (c *ApiController) ResponseError(error string, data ...interface{}) {
 	case 1:
 		resp.Data = data[0]
 	}
-	c.Data["json"] = resp
-	c.ServeJSON()
+	c.serve(resp)
 }
 
 func (c *ApiController) RequireSignedIn() bool {
@@ -63,11 +79,10 @@ func (c *ApiController) RequireSignedIn() bool {
 }
 
 func (c *ApiController) getClientIp() string {
-	res := strings.Replace(util.GetIPFromRequest(c.Ctx.Request), ": ", "", -1)
+	res := strings.Replace(util.ClientIPFromCtx(c.Ctx), ": ", "", -1)
 	return res
 }
 
 func (c *ApiController) getUserAgent() string {
-	res := c.Ctx.Request.UserAgent()
-	return res
+	return c.Ctx.Header("User-Agent")
 }
