@@ -15,13 +15,26 @@
 package util
 
 import (
-	"fmt"
+	"github.com/zap-proto/zip"
 
-	"github.com/beego/beego/context"
-	"github.com/beego/beego/logs"
+	"github.com/hanzoai/visor/logs"
 )
 
-func LogInfo(ctx *context.Context, f string, v ...interface{}) {
-	ipString := fmt.Sprintf("(%s) ", GetIPFromRequest(ctx.Request))
+// LogInfo writes a request-scoped info line prefixed with the caller IP, read
+// from the ZAP request context (x-forwarded-for, else the fasthttp remote addr).
+func LogInfo(c *zip.Ctx, f string, v ...interface{}) {
+	ipString := "(" + ClientIPFromCtx(c) + ") "
 	logs.Info(ipString+f, v...)
+}
+
+// ClientIPFromCtx resolves the formatted client-IP description from a ZAP
+// request context — the ZAP counterpart of GetIPFromRequest.
+func ClientIPFromCtx(c *zip.Ctx) string {
+	remote := ""
+	if fc := c.Fiber(); fc != nil {
+		if rc := fc.RequestCtx(); rc != nil {
+			remote = rc.RemoteAddr().String()
+		}
+	}
+	return GetClientIP(c.Header("x-forwarded-for"), remote)
 }

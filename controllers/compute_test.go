@@ -15,11 +15,10 @@
 package controllers
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	beecontext "github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
@@ -118,12 +117,10 @@ func TestFilterMachinesByProject(t *testing.T) {
 	}
 }
 
-// newLaunchCtx builds a beego request context the way the router hands one to a
+// newLaunchCtx builds a ZAP request context the way the router hands one to a
 // handler, so resolveComputeApp/Project can read the threaded tenant scope.
-func newLaunchCtx() *beecontext.Context {
-	ctx := beecontext.NewContext()
-	ctx.Reset(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/machines/launch", nil))
-	return ctx
+func newLaunchCtx() *zip.Ctx {
+	return zip.New(zip.Config{}).TestCtx("POST", "/v1/machines/launch")
 }
 
 // resolveComputeApp/Project resolve the OPTIONAL scope exactly one way: the
@@ -133,8 +130,8 @@ func newLaunchCtx() *beecontext.Context {
 func TestResolveComputeScope(t *testing.T) {
 	// Threaded context is authoritative over a body fallback.
 	ctx := newLaunchCtx()
-	ctx.Input.SetData(object.TenantContextAppIDKey, "web")
-	ctx.Input.SetData(object.TenantContextProjectIDKey, "api")
+	ctx.Locals(object.TenantContextAppIDKey, "web")
+	ctx.Locals(object.TenantContextProjectIDKey, "api")
 	c := &ApiController{}
 	c.Ctx = ctx
 	if got := c.resolveComputeApp("bodyapp"); got != "web" {

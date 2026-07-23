@@ -70,14 +70,23 @@ func GetIPInfo(clientIP string) string {
 }
 
 func GetIPFromRequest(req *http.Request) string {
-	clientIP := req.Header.Get("x-forwarded-for")
+	return GetClientIP(req.Header.Get("x-forwarded-for"), req.RemoteAddr)
+}
+
+// GetClientIP formats the client IP description from the raw x-forwarded-for
+// header and the transport remote address — the transport-agnostic core shared
+// by the net/http path (GetIPFromRequest) and the ZAP path (a zip.Ctx hands the
+// header plus its fasthttp RemoteAddr). x-forwarded-for wins; otherwise the
+// remote address host is parsed (IPv4 host:port or bracketed IPv6).
+func GetClientIP(xForwardedFor, remoteAddr string) string {
+	clientIP := xForwardedFor
 	if clientIP == "" {
-		ipPort := strings.Split(req.RemoteAddr, ":")
+		ipPort := strings.Split(remoteAddr, ":")
 		if len(ipPort) >= 1 && len(ipPort) <= 2 {
 			clientIP = ipPort[0]
 		} else if len(ipPort) > 2 {
-			idx := strings.LastIndex(req.RemoteAddr, ":")
-			clientIP = req.RemoteAddr[0:idx]
+			idx := strings.LastIndex(remoteAddr, ":")
+			clientIP = remoteAddr[0:idx]
 			clientIP = strings.TrimLeft(clientIP, "[")
 			clientIP = strings.TrimRight(clientIP, "]")
 		}

@@ -15,19 +15,30 @@
 package controllers
 
 import (
-	"encoding/gob"
+	"strings"
 
-	"github.com/beego/beego"
 	iam "github.com/hanzoai/iam-v1"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/object"
 )
 
+// ApiController is the ZAP-native controller base. It carries the request
+// context (zip.Ctx) and the buffered JSON response body (Data["json"]) the
+// record filter reads back. It replaces the Beego controller one-for-one:
+// handlers keep their method receiver, but the framework underneath is zip over
+// fiber/fasthttp — no cookie/redis session. A caller authenticates statelessly
+// with a forwarded IAM Bearer JWT (object.GetBearerUser); the resolved Principal
+// is the ONE identity seam.
 type ApiController struct {
-	beego.Controller
+	Ctx  *zip.Ctx
+	Data map[string]interface{}
 }
 
-func init() {
-	gob.Register(iam.Claims{})
+// New builds a controller bound to a request context, with its response buffer
+// ready. This is the ONE construction path the route wrappers use.
+func New(c *zip.Ctx) *ApiController {
+	return &ApiController{Ctx: c, Data: map[string]interface{}{}}
 }
 
 func GetUserName(user *iam.User) string {
@@ -48,48 +59,40 @@ func wrapActionResponse(affected bool, e ...error) *Response {
 	}
 }
 
+// GetSessionClaims parses the forwarded IAM Bearer JWT into its claims — the
+// stateless replacement for the Beego cookie session. Signature is verified by
+// iam.ParseJwtToken; brand/issuer binding is enforced by the ApiFilter (via
+// object.GetBearerUser) before any handler runs, so this is a plain decode.
 func (c *ApiController) GetSessionClaims() *iam.Claims {
-	s := c.GetSession("user")
-	if s == nil {
+	const prefix = "Bearer "
+	h := c.Ctx.Header("Authorization")
+	if len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
 		return nil
 	}
-
-	claims := s.(iam.Claims)
-	return &claims
-}
-
-func (c *ApiController) SetSessionClaims(claims *iam.Claims) {
-	if claims == nil {
-		c.DelSession("user")
-		return
+	token := strings.TrimSpace(h[len(prefix):])
+	if token == "" {
+		return nil
 	}
-
-	c.SetSession("user", *claims)
+	claims, err := iam.ParseJwtToken(token)
+	if err != nil || claims == nil {
+		return nil
+	}
+	return claims
 }
 
+// SetSessionClaims is a no-op in the stateless model: there is no server-side
+// session to write. Signin returns the claims (and access token) to the client,
+// which then carries the token as a Bearer on every subsequent request.
+func (c *ApiController) SetSessionClaims(claims *iam.Claims) {}
+
+// GetSessionUser resolves the authenticated user from the forwarded IAM Bearer
+// JWT (brand/issuer-bound in object.GetBearerUser), or nil.
 func (c *ApiController) GetSessionUser() *iam.User {
-	claims := c.GetSessionClaims()
-	if claims == nil {
-		// No cookie session: accept a forwarded IAM Bearer JWT (API/console
-		// callers). Signature is verified in object.GetBearerUser.
-		return object.GetBearerUser(c.Ctx.Input.Header("Authorization"))
-	}
-
-	return &claims.User
+	return object.GetBearerUser(c.Ctx.Header("Authorization"))
 }
 
-func (c *ApiController) SetSessionUser(user *iam.User) {
-	if user == nil {
-		c.DelSession("user")
-		return
-	}
-
-	claims := c.GetSessionClaims()
-	if claims != nil {
-		claims.User = *user
-		c.SetSessionClaims(claims)
-	}
-}
+// SetSessionUser is a no-op in the stateless model (see SetSessionClaims).
+func (c *ApiController) SetSessionUser(user *iam.User) {}
 
 func (c *ApiController) GetSessionUsername() string {
 	user := c.GetSessionUser()

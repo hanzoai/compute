@@ -12,19 +12,101 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Command visor is the Hanzo Visor cloud compute/VM/GPU management service:
+// zip-native (HTTP over fiber/fasthttp) on the hanzoai/orm store, no Beego.
+//
+// Run it with no arguments to serve (the container contract); `visor version`
+// prints the build version.
 package main
 
 import (
-	"github.com/beego/beego"
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/spf13/cobra"
+
+	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/pkg/visor"
 )
 
+// version is set at build time via -ldflags "-X main.version=vX.Y.Z".
+var version = "(dev)"
+
 func main() {
-	// visor.Bootstrap is the single in-process boot path — DB, authz, parsers,
-	// filters, session config and background tickers. It is shared verbatim with
-	// the embedded cloud mount (pkg/visor.Handler), so standalone and fused never
-	// drift. Here main() owns the listener; beego.Run binds it and blocks.
-	visor.Bootstrap()
-	beego.Run()
+	// One context rooted at the process signals, so SIGINT/SIGTERM drives a
+	// graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var zapAddr, httpAddr string
+	var createDatabase bool
+
+	// The root command IS the server — the container runs a bare `/visor`
+	// (optionally `--createDatabase=true`), so serve is the default action.
+	root := &cobra.Command{
+		Use:           "visor",
+		Short:         "Hanzo Visor — cloud compute/VM/GPU management service (zip-native)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return serve(cmd.Context(), zapAddr, httpAddr)
+		},
+	}
+	f := root.Flags()
+	f.StringVar(&zapAddr, "zap", "", "ZAP-native listen address (empty = HTTP edge only)")
+	f.StringVar(&httpAddr, "http", defaultHTTPAddr(), "HTTP edge listen address")
+	// Accepted for container-command compatibility; the store creates its schema
+	// on open (object.InitAdapter) regardless, so this is informational.
+	f.BoolVar(&createDatabase, "createDatabase", false, "create the database schema on boot (always applied)")
+
+	root.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Print the visor build version",
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "visor %s\n", version)
+		},
+	})
+
+	if err := root.ExecuteContext(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "visor: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// serve boots visor and binds the listener(s). visor.Bootstrap is the single
+// in-process boot path — DB, authz, parsers, filters, routes and background
+// tickers — shared verbatim with the embedded cloud mount, so standalone and
+// fused never drift. Here main() owns the listener.
+func serve(ctx context.Context, zapAddr, httpAddr string) error {
+	app := visor.Bootstrap()
+
+	// Translate ctx cancellation (SIGINT/SIGTERM) into a graceful shutdown.
+	go func() {
+		<-ctx.Done()
+		_ = app.Shutdown()
+	}()
+
+	addrs := make([]string, 0, 2)
+	if zapAddr != "" {
+		addrs = append(addrs, zapAddr)
+	}
+	addrs = append(addrs, httpAddr)
+
+	if err := app.Listen(addrs...); err != nil {
+		return fmt.Errorf("serve: %w", err)
+	}
+	return nil
+}
+
+// defaultHTTPAddr honours the historical httpport (app.conf / env), defaulting
+// to :19000 — the port the container EXPOSEs and the compose maps.
+func defaultHTTPAddr() string {
+	port := conf.GetConfigString("httpport")
+	if port == "" {
+		port = "19000"
+	}
+	return "http://:" + port
 }
