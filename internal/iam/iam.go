@@ -193,7 +193,9 @@ func publicKeyFromPEM(pemBytes []byte) (interface{}, error) {
 }
 
 // GetOAuthToken performs the OAuth2 authorization-code exchange for the /v1/signin
-// browser flow, against {ISSUER}/v1/iam/oauth/access_token.
+// browser flow, against the HIP-0111 canonical {ISSUER}/v1/iam/oauth/token (the
+// path advertised by the issuer's OIDC discovery document; the Casdoor-era
+// /v1/iam/oauth/access_token alias is legacy and deliberately not used).
 func GetOAuthToken(code, state string) (*oauth2.Token, error) {
 	cfg := config()
 	endpoint := issuerEndpoint()
@@ -202,7 +204,7 @@ func GetOAuthToken(code, state string) (*oauth2.Token, error) {
 		ClientSecret: cfg.ClientSecret,
 		Endpoint: oauth2.Endpoint{
 			AuthURL:   fmt.Sprintf("%s/v1/iam/oauth/authorize", endpoint),
-			TokenURL:  fmt.Sprintf("%s/v1/iam/oauth/access_token", endpoint),
+			TokenURL:  fmt.Sprintf("%s/v1/iam/oauth/token", endpoint),
 			AuthStyle: oauth2.AuthStyleInParams,
 		},
 	}

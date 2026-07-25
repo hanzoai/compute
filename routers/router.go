@@ -15,111 +15,136 @@
 package routers
 
 import (
-	"github.com/beego/beego"
+	"github.com/zap-proto/zip"
+	"github.com/zap-proto/zip/middleware"
+
 	"github.com/hanzoai/visor/controllers"
 )
 
-func init() {
-	initAPI()
+// h adapts a controller method to a zip.Handler: it binds a fresh controller to
+// the request context and invokes the method. This is the ONE bridge from the
+// method-set controllers to the framework — every route goes through it.
+func h(fn func(*controllers.ApiController)) zip.Handler {
+	return func(c *zip.Ctx) error {
+		fn(controllers.New(c))
+		return nil
+	}
 }
 
-func initAPI() {
-	ns := beego.NewNamespace("/v1",
-		beego.NSInclude(
-			&controllers.ApiController{},
-		),
-	)
-	beego.AddNamespace(ns)
+// Route mounts the whole visor HTTP surface on app: the ambient filter chain
+// (recover, CORS, static, tenant, authz, record) followed by the /v1 API. The
+// filter order is the Beego BeforeRouter chain preserved exactly — static short-
+// circuits before the authz seam, so an asset is never gated; every /v1 route
+// registered after the chain is tenant-scoped, authorized and audited.
+func Route(app *zip.App) {
+	app.Use(middleware.Recover())
+	app.Use(middleware.CORS(middleware.CORSConfig{
+		AllowOrigins:  []string{"*"},
+		AllowMethods:  []string{"GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"},
+		AllowHeaders:  []string{"Origin", "X-Requested-With", "Content-Type", "Accept"},
+		ExposeHeaders: []string{"Content-Length"},
+		AllowCreds:    true,
+	}))
+	app.Use(TransparentStatic)
+	app.Use(TenantContextFilter)
+	app.Use(ApiFilter)
+	app.Use(RecordMessage)
 
-	beego.Router("/v1/signin", &controllers.ApiController{}, "POST:Signin")
-	beego.Router("/v1/signout", &controllers.ApiController{}, "POST:Signout")
-	beego.Router("/v1/get-account", &controllers.ApiController{}, "GET:GetAccount")
+	registerAPI(app)
+}
 
-	beego.Router("/v1/get-records", &controllers.ApiController{}, "GET:GetRecords")
-	beego.Router("/v1/get-record", &controllers.ApiController{}, "GET:GetRecord")
-	beego.Router("/v1/update-record", &controllers.ApiController{}, "POST:UpdateRecord")
-	beego.Router("/v1/add-record", &controllers.ApiController{}, "POST:AddRecord")
-	beego.Router("/v1/delete-record", &controllers.ApiController{}, "POST:DeleteRecord")
+// registerAPI registers the /v1 surface — the exact route table the Beego
+// namespace declared, one verb per line.
+func registerAPI(app *zip.App) {
+	app.Post("/v1/signin", h((*controllers.ApiController).Signin))
+	app.Post("/v1/signout", h((*controllers.ApiController).Signout))
+	app.Get("/v1/get-account", h((*controllers.ApiController).GetAccount))
 
-	beego.Router("/v1/commit-record", &controllers.ApiController{}, "POST:CommitRecord")
-	beego.Router("/v1/query-record", &controllers.ApiController{}, "GET:QueryRecord")
+	app.Get("/v1/get-records", h((*controllers.ApiController).GetRecords))
+	app.Get("/v1/get-record", h((*controllers.ApiController).GetRecord))
+	app.Post("/v1/update-record", h((*controllers.ApiController).UpdateRecord))
+	app.Post("/v1/add-record", h((*controllers.ApiController).AddRecord))
+	app.Post("/v1/delete-record", h((*controllers.ApiController).DeleteRecord))
 
-	beego.Router("/v1/get-assets", &controllers.ApiController{}, "GET:GetAssets")
-	beego.Router("/v1/get-asset", &controllers.ApiController{}, "GET:GetAsset")
-	beego.Router("/v1/update-asset", &controllers.ApiController{}, "POST:UpdateAsset")
-	beego.Router("/v1/add-asset", &controllers.ApiController{}, "POST:AddAsset")
-	beego.Router("/v1/delete-asset", &controllers.ApiController{}, "POST:DeleteAsset")
+	app.Post("/v1/commit-record", h((*controllers.ApiController).CommitRecord))
+	app.Get("/v1/query-record", h((*controllers.ApiController).QueryRecord))
 
-	beego.Router("/v1/get-providers", &controllers.ApiController{}, "GET:GetProviders")
-	beego.Router("/v1/get-provider", &controllers.ApiController{}, "GET:GetProvider")
-	beego.Router("/v1/update-provider", &controllers.ApiController{}, "POST:UpdateProvider")
-	beego.Router("/v1/add-provider", &controllers.ApiController{}, "POST:AddProvider")
-	beego.Router("/v1/delete-provider", &controllers.ApiController{}, "POST:DeleteProvider")
+	app.Get("/v1/get-assets", h((*controllers.ApiController).GetAssets))
+	app.Get("/v1/get-asset", h((*controllers.ApiController).GetAsset))
+	app.Post("/v1/update-asset", h((*controllers.ApiController).UpdateAsset))
+	app.Post("/v1/add-asset", h((*controllers.ApiController).AddAsset))
+	app.Post("/v1/delete-asset", h((*controllers.ApiController).DeleteAsset))
 
-	beego.Router("/v1/get-machines", &controllers.ApiController{}, "GET:GetMachines")
-	beego.Router("/v1/get-machine", &controllers.ApiController{}, "GET:GetMachine")
-	beego.Router("/v1/update-machine", &controllers.ApiController{}, "POST:UpdateMachine")
-	beego.Router("/v1/add-machine", &controllers.ApiController{}, "POST:AddMachine")
-	beego.Router("/v1/delete-machine", &controllers.ApiController{}, "POST:DeleteMachine")
-	beego.Router("/v1/launch-machine", &controllers.ApiController{}, "POST:LaunchMachine")
+	app.Get("/v1/get-providers", h((*controllers.ApiController).GetProviders))
+	app.Get("/v1/get-provider", h((*controllers.ApiController).GetProvider))
+	app.Post("/v1/update-provider", h((*controllers.ApiController).UpdateProvider))
+	app.Post("/v1/add-provider", h((*controllers.ApiController).AddProvider))
+	app.Post("/v1/delete-provider", h((*controllers.ApiController).DeleteProvider))
+
+	app.Get("/v1/get-machines", h((*controllers.ApiController).GetMachines))
+	app.Get("/v1/get-machine", h((*controllers.ApiController).GetMachine))
+	app.Post("/v1/update-machine", h((*controllers.ApiController).UpdateMachine))
+	app.Post("/v1/add-machine", h((*controllers.ApiController).AddMachine))
+	app.Post("/v1/delete-machine", h((*controllers.ApiController).DeleteMachine))
+	app.Post("/v1/launch-machine", h((*controllers.ApiController).LaunchMachine))
 
 	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
 	// per-org machines over Hanzo's house account (controllers/compute.go).
-	beego.Router("/v1/regions", &controllers.ApiController{}, "GET:GetComputeRegions")
-	beego.Router("/v1/sizes", &controllers.ApiController{}, "GET:GetComputeSizes")
-	beego.Router("/v1/gpus", &controllers.ApiController{}, "GET:GetComputeGPUs")
-	beego.Router("/v1/machines", &controllers.ApiController{}, "GET:ListComputeMachines")
-	beego.Router("/v1/machines/launch", &controllers.ApiController{}, "POST:LaunchComputeMachine")
-	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "GET:GetComputeMachine")
-	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "DELETE:DeleteComputeMachine")
+	app.Get("/v1/regions", h((*controllers.ApiController).GetComputeRegions))
+	app.Get("/v1/sizes", h((*controllers.ApiController).GetComputeSizes))
+	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
+	app.Get("/v1/machines", h((*controllers.ApiController).ListComputeMachines))
+	app.Post("/v1/machines/launch", h((*controllers.ApiController).LaunchComputeMachine))
+	app.Get("/v1/machines/:id", h((*controllers.ApiController).GetComputeMachine))
+	app.Delete("/v1/machines/:id", h((*controllers.ApiController).DeleteComputeMachine))
 	// Unified /v1/k8s noun — the ONE Kubernetes surface: DOKS cluster lifecycle
-	// (list / detail+nodes / create / delete) plus the worker NODES on the fleet
-	// (house hanzo-org cluster tag + BYOC Provider.ClusterID, deduped). All handlers
-	// org-scoped in controllers/compute.go. The bare /clusters literal registers
-	// before its /:id sibling so a cluster id never captures it.
-	beego.Router("/v1/k8s/clusters", &controllers.ApiController{}, "get:ListComputeKubernetesClusters;post:CreateComputeKubernetesCluster")
-	beego.Router("/v1/k8s/clusters/:id", &controllers.ApiController{}, "get:GetComputeKubernetesCluster;delete:DeleteComputeKubernetesCluster")
-	beego.Router("/v1/k8s/nodes", &controllers.ApiController{}, "GET:ListComputeKubernetesNodes")
-	beego.Router("/v1/images", &controllers.ApiController{}, "get:ListImages;post:CreateImage")
+	// (list / detail+nodes / create / delete) plus the worker NODES on the fleet.
+	app.Get("/v1/k8s/clusters", h((*controllers.ApiController).ListComputeKubernetesClusters))
+	app.Post("/v1/k8s/clusters", h((*controllers.ApiController).CreateComputeKubernetesCluster))
+	app.Get("/v1/k8s/clusters/:id", h((*controllers.ApiController).GetComputeKubernetesCluster))
+	app.Delete("/v1/k8s/clusters/:id", h((*controllers.ApiController).DeleteComputeKubernetesCluster))
+	app.Get("/v1/k8s/nodes", h((*controllers.ApiController).ListComputeKubernetesNodes))
+	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
+	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
 
 	// Agent↔machine binding — mark a machine as running the @hanzo/bot runtime for
 	// a cloud Agent (controllers/agent_binding.go). Org-scoped in the controller.
-	beego.Router("/v1/machines/:id/bind-agent", &controllers.ApiController{}, "POST:BindAgent")
-	beego.Router("/v1/machines/:id/agent-binding", &controllers.ApiController{}, "GET:GetAgentBinding")
-	beego.Router("/v1/machines/:id/agent-binding", &controllers.ApiController{}, "DELETE:UnbindAgent")
-	beego.Router("/v1/agent-bindings", &controllers.ApiController{}, "GET:GetAgentBindings")
+	app.Post("/v1/machines/:id/bind-agent", h((*controllers.ApiController).BindAgent))
+	app.Get("/v1/machines/:id/agent-binding", h((*controllers.ApiController).GetAgentBinding))
+	app.Delete("/v1/machines/:id/agent-binding", h((*controllers.ApiController).UnbindAgent))
+	app.Get("/v1/agent-bindings", h((*controllers.ApiController).GetAgentBindings))
 
-	beego.Router("/v1/get-sessions", &controllers.ApiController{}, "GET:GetSessions")
-	beego.Router("/v1/get-session", &controllers.ApiController{}, "GET:GetConnSession")
-	beego.Router("/v1/update-session", &controllers.ApiController{}, "POST:UpdateSession")
-	beego.Router("/v1/add-session", &controllers.ApiController{}, "POST:AddSession")
-	beego.Router("/v1/delete-session", &controllers.ApiController{}, "POST:DeleteSession")
-	beego.Router("/v1/start-session", &controllers.ApiController{}, "POST:StartSession")
-	beego.Router("/v1/stop-session", &controllers.ApiController{}, "POST:StopSession")
+	app.Get("/v1/get-sessions", h((*controllers.ApiController).GetSessions))
+	app.Get("/v1/get-session", h((*controllers.ApiController).GetConnSession))
+	app.Post("/v1/update-session", h((*controllers.ApiController).UpdateSession))
+	app.Post("/v1/add-session", h((*controllers.ApiController).AddSession))
+	app.Post("/v1/delete-session", h((*controllers.ApiController).DeleteSession))
+	app.Post("/v1/start-session", h((*controllers.ApiController).StartSession))
+	app.Post("/v1/stop-session", h((*controllers.ApiController).StopSession))
 
-	beego.Router("/v1/add-asset-tunnel", &controllers.ApiController{}, "POST:AddAssetTunnel")
-	beego.Router("/v1/get-asset-tunnel", &controllers.ApiController{}, "GET:GetAssetTunnel")
+	app.Post("/v1/add-asset-tunnel", h((*controllers.ApiController).AddAssetTunnel))
+	app.Get("/v1/get-asset-tunnel", h((*controllers.ApiController).GetAssetTunnel))
 
-	beego.Router("/v1/get-node-pools", &controllers.ApiController{}, "GET:GetNodePools")
-	beego.Router("/v1/get-node-pool", &controllers.ApiController{}, "GET:GetNodePool")
-	beego.Router("/v1/create-node-pool", &controllers.ApiController{}, "POST:CreateNodePool")
-	beego.Router("/v1/update-node-pool", &controllers.ApiController{}, "POST:UpdateNodePool")
-	beego.Router("/v1/delete-node-pool", &controllers.ApiController{}, "POST:DeleteNodePool")
-	beego.Router("/v1/scale-node-pool", &controllers.ApiController{}, "POST:ScaleNodePool")
+	app.Get("/v1/get-node-pools", h((*controllers.ApiController).GetNodePools))
+	app.Get("/v1/get-node-pool", h((*controllers.ApiController).GetNodePool))
+	app.Post("/v1/create-node-pool", h((*controllers.ApiController).CreateNodePool))
+	app.Post("/v1/update-node-pool", h((*controllers.ApiController).UpdateNodePool))
+	app.Post("/v1/delete-node-pool", h((*controllers.ApiController).DeleteNodePool))
+	app.Post("/v1/scale-node-pool", h((*controllers.ApiController).ScaleNodePool))
 
-	beego.Router("/v1/get-plans", &controllers.ApiController{}, "GET:GetPlans")
-	beego.Router("/v1/get-plan", &controllers.ApiController{}, "GET:GetPlan")
-	beego.Router("/v1/add-plan", &controllers.ApiController{}, "POST:AddPlan")
-	beego.Router("/v1/update-plan", &controllers.ApiController{}, "POST:UpdatePlan")
-	beego.Router("/v1/delete-plan", &controllers.ApiController{}, "POST:DeletePlan")
+	app.Get("/v1/get-plans", h((*controllers.ApiController).GetPlans))
+	app.Get("/v1/get-plan", h((*controllers.ApiController).GetPlan))
+	app.Post("/v1/add-plan", h((*controllers.ApiController).AddPlan))
+	app.Post("/v1/update-plan", h((*controllers.ApiController).UpdatePlan))
+	app.Post("/v1/delete-plan", h((*controllers.ApiController).DeletePlan))
 
-	beego.Router("/v1/get-whitelabel", &controllers.ApiController{}, "GET:GetWhitelabel")
+	app.Get("/v1/get-whitelabel", h((*controllers.ApiController).GetWhitelabel))
 
-	beego.Router("/v1/get-volumes", &controllers.ApiController{}, "GET:GetVolumes")
-	beego.Router("/v1/get-volume", &controllers.ApiController{}, "GET:GetVolume")
-	beego.Router("/v1/create-volume", &controllers.ApiController{}, "POST:CreateVolume")
-	beego.Router("/v1/delete-volume", &controllers.ApiController{}, "POST:DeleteVolume")
-	beego.Router("/v1/attach-volume", &controllers.ApiController{}, "POST:AttachVolume")
-	beego.Router("/v1/detach-volume", &controllers.ApiController{}, "POST:DetachVolume")
-	beego.Router("/v1/resize-volume", &controllers.ApiController{}, "POST:ResizeVolume")
+	app.Get("/v1/get-volumes", h((*controllers.ApiController).GetVolumes))
+	app.Get("/v1/get-volume", h((*controllers.ApiController).GetVolume))
+	app.Post("/v1/create-volume", h((*controllers.ApiController).CreateVolume))
+	app.Post("/v1/delete-volume", h((*controllers.ApiController).DeleteVolume))
+	app.Post("/v1/attach-volume", h((*controllers.ApiController).AttachVolume))
+	app.Post("/v1/detach-volume", h((*controllers.ApiController).DetachVolume))
+	app.Post("/v1/resize-volume", h((*controllers.ApiController).ResizeVolume))
 }

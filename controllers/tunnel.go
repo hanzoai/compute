@@ -16,13 +16,14 @@ package controllers
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/beego/beego"
-	"github.com/beego/beego/logs"
-	"github.com/gorilla/websocket"
+	"github.com/fasthttp/websocket"
+	"github.com/valyala/fasthttp"
+
+	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 	"github.com/hanzoai/visor/util/guacamole"
@@ -40,10 +41,10 @@ const (
 	SessionUpdateError int = 806
 )
 
-var UpGrader = websocket.Upgrader{
+var UpGrader = websocket.FastHTTPUpgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
+	CheckOrigin: func(ctx *fasthttp.RequestCtx) bool {
 		return true
 	},
 	Subprotocols: []string{"guacamole"},
@@ -57,8 +58,8 @@ var UpGrader = websocket.Upgrader{
 // @Success 200 {object} Response
 // @router /add-asset-tunnel [get]
 func (c *ApiController) AddAssetTunnel() {
-	assetId := c.Input().Get("assetId")
-	mode := c.Input().Get("mode")
+	assetId := c.Ctx.Query("assetId")
+	mode := c.Ctx.Query("mode")
 
 	user := c.GetSessionUser()
 	if user == nil {
@@ -85,199 +86,211 @@ func (c *ApiController) AddAssetTunnel() {
 }
 
 func (c *ApiController) GetAssetTunnel() {
-	c.EnableRender = false
-	ctx := c.Ctx
-	ws, err := UpGrader.Upgrade(ctx.ResponseWriter, ctx.Request, nil)
-	if err != nil {
-		c.ResponseError("WebSocket upgrade failed:", err)
-		return
-	}
+	// Read every request-scoped value BEFORE hijacking: the fiber ctx is pooled
+	// and recycled once this handler returns, so the post-upgrade callback (which
+	// runs on the hijacked connection, after the response) must close over plain
+	// values and never touch c.Ctx.
+	width := c.Ctx.Query("width")
+	height := c.Ctx.Query("height")
+	dpi := c.Ctx.Query("dpi")
+	sessionId := c.Ctx.Query("sessionId")
+	username := c.Ctx.Query("username")
+	password := c.Ctx.Query("password")
 
-	width := c.Input().Get("width")
-	height := c.Input().Get("height")
-	dpi := c.Input().Get("dpi")
-	sessionId := c.Input().Get("sessionId")
+	err := UpGrader.Upgrade(c.Ctx.Fiber().RequestCtx(), func(ws *websocket.Conn) {
+		// The callback runs in fasthttp's post-response goroutine, outside zip's
+		// recover middleware — isolate panics so a tunnel fault never crashes the
+		// process (the per-request recovery Beego gave for free).
+		defer func() {
+			if r := recover(); r != nil {
+				logs.Error(fmt.Sprintf("GetAssetTunnel(): panic recovered: %v", r))
+			}
+		}()
 
-	username := c.Input().Get("username")
-	password := c.Input().Get("password")
+		intWidth, err := strconv.Atoi(width)
+		if err != nil {
+			guacamole.Disconnect(ws, ParametersError, err.Error())
+			return
+		}
+		intHeight, err := strconv.Atoi(height)
+		if err != nil {
+			guacamole.Disconnect(ws, ParametersError, err.Error())
+			return
+		}
 
-	intWidth, err := strconv.Atoi(width)
-	if err != nil {
-		guacamole.Disconnect(ws, ParametersError, err.Error())
-		return
-	}
-	intHeight, err := strconv.Atoi(height)
-	if err != nil {
-		guacamole.Disconnect(ws, ParametersError, err.Error())
-		return
-	}
+		session, err := object.GetConnSession(sessionId)
+		if err != nil {
+			guacamole.Disconnect(ws, SessionNotFound, err.Error())
+			return
+		}
 
-	session, err := object.GetConnSession(sessionId)
-	if err != nil {
-		guacamole.Disconnect(ws, SessionNotFound, err.Error())
-		return
-	}
+		machine, err := object.GetMachine(session.Asset)
+		if err != nil || machine == nil {
+			guacamole.Disconnect(ws, AssetNotFound, err.Error())
+			return
+		}
 
-	machine, err := object.GetMachine(session.Asset)
-	if err != nil || machine == nil {
-		guacamole.Disconnect(ws, AssetNotFound, err.Error())
-		return
-	}
-
-	if machine.RemoteUsername == "" {
-		machine.RemoteUsername = username
-		machine.RemotePassword = password
-	} else {
-		if machine.RemotePassword == "" {
+		if machine.RemoteUsername == "" {
+			machine.RemoteUsername = username
 			machine.RemotePassword = password
-		}
-	}
-
-	configuration := guacamole.NewConfiguration()
-	propertyMap := configuration.LoadConfig()
-
-	setConfig(propertyMap, machine, configuration)
-	configuration.SetParameter("width", width)
-	configuration.SetParameter("height", height)
-	configuration.SetParameter("dpi", dpi)
-
-	addr := beego.AppConfig.String("guacamoleEndpoint")
-	tunnel, err := guacamole.NewTunnel(addr, configuration)
-	if err != nil {
-		guacamole.Disconnect(ws, NewTunnelError, err.Error())
-		return
-	}
-
-	guacSession := &guacamole.Session{
-		Id:          sessionId,
-		Protocol:    session.Protocol,
-		WebSocket:   ws,
-		GuacdTunnel: tunnel,
-	}
-
-	guacSession.Observer = guacamole.NewObserver(sessionId)
-	guacamole.GlobalSessionManager.Add(guacSession)
-
-	session.ConnectionId = tunnel.ConnectionID
-	session.Width = intWidth
-	session.Height = intHeight
-	session.Status = object.Connecting
-	session.Recording = configuration.GetParameter(guacamole.RecordingPath)
-
-	if session.Recording == "" {
-		// No audit is required when no screen is recorded
-		session.Reviewed = true
-	}
-
-	_, err = object.UpdateSession(sessionId, session)
-	if err != nil {
-		guacamole.Disconnect(ws, SessionUpdateError, err.Error())
-		return
-	}
-
-	guacamoleHandler := NewGuacamoleHandler(ws, tunnel)
-	guacamoleHandler.Start()
-	defer guacamoleHandler.Stop()
-
-	for {
-		_, message, err := ws.ReadMessage()
-		if err != nil {
-			logs.Error(fmt.Sprintf("GetAssetTunnel():ws.ReadMessage() error: %s", err.Error()))
-
-			_ = tunnel.Close()
-			err2 := object.CloseSession(sessionId, Normal, "Normal user exit")
-			if err2 != nil {
-				logs.Error(fmt.Sprintf("GetAssetTunnel():object.CloseSession() error: %s", err.Error()))
+		} else {
+			if machine.RemotePassword == "" {
+				machine.RemotePassword = password
 			}
+		}
+
+		configuration := guacamole.NewConfiguration()
+		propertyMap := configuration.LoadConfig()
+
+		setConfig(propertyMap, machine, configuration)
+		configuration.SetParameter("width", width)
+		configuration.SetParameter("height", height)
+		configuration.SetParameter("dpi", dpi)
+
+		addr := conf.GetConfigString("guacamoleEndpoint")
+		tunnel, err := guacamole.NewTunnel(addr, configuration)
+		if err != nil {
+			guacamole.Disconnect(ws, NewTunnelError, err.Error())
 			return
 		}
 
-		_, err = tunnel.WriteAndFlush(message)
-		if err != nil {
-			logs.Error(fmt.Sprintf("GetAssetTunnel():tunnel.WriteAndFlush() error: %s", err.Error()))
+		guacSession := &guacamole.Session{
+			Id:          sessionId,
+			Protocol:    session.Protocol,
+			WebSocket:   ws,
+			GuacdTunnel: tunnel,
+		}
 
-			err2 := object.CloseSession(sessionId, Normal, "Normal user exit")
-			if err2 != nil {
-				logs.Error(fmt.Sprintf("GetAssetTunnel():object.CloseSession() (2nd) error: %s", err.Error()))
-			}
+		guacSession.Observer = guacamole.NewObserver(sessionId)
+		guacamole.GlobalSessionManager.Add(guacSession)
+
+		session.ConnectionId = tunnel.ConnectionID
+		session.Width = intWidth
+		session.Height = intHeight
+		session.Status = object.Connecting
+		session.Recording = configuration.GetParameter(guacamole.RecordingPath)
+
+		if session.Recording == "" {
+			// No audit is required when no screen is recorded
+			session.Reviewed = true
+		}
+
+		_, err = object.UpdateSession(sessionId, session)
+		if err != nil {
+			guacamole.Disconnect(ws, SessionUpdateError, err.Error())
 			return
 		}
+
+		guacamoleHandler := NewGuacamoleHandler(ws, tunnel)
+		guacamoleHandler.Start()
+		defer guacamoleHandler.Stop()
+
+		for {
+			_, message, err := ws.ReadMessage()
+			if err != nil {
+				logs.Error(fmt.Sprintf("GetAssetTunnel():ws.ReadMessage() error: %s", err.Error()))
+
+				_ = tunnel.Close()
+				err2 := object.CloseSession(sessionId, Normal, "Normal user exit")
+				if err2 != nil {
+					logs.Error(fmt.Sprintf("GetAssetTunnel():object.CloseSession() error: %s", err.Error()))
+				}
+				return
+			}
+
+			_, err = tunnel.WriteAndFlush(message)
+			if err != nil {
+				logs.Error(fmt.Sprintf("GetAssetTunnel():tunnel.WriteAndFlush() error: %s", err.Error()))
+
+				err2 := object.CloseSession(sessionId, Normal, "Normal user exit")
+				if err2 != nil {
+					logs.Error(fmt.Sprintf("GetAssetTunnel():object.CloseSession() (2nd) error: %s", err.Error()))
+				}
+				return
+			}
+		}
+	})
+	if err != nil {
+		logs.Error(fmt.Sprintf("GetAssetTunnel(): websocket upgrade failed: %s", err.Error()))
 	}
 }
 
 func (c *ApiController) TunnelMonitor() {
-	ctx := c.Ctx
-	ws, err := UpGrader.Upgrade(ctx.ResponseWriter, ctx.Request, nil)
-	if err != nil {
-		c.ResponseError("WebSocket upgrade failed:", err)
-		return
-	}
-	sessionId := c.Input().Get("sessionId")
+	sessionId := c.Ctx.Query("sessionId")
 
-	s, err := object.GetConnSession(sessionId)
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
+	err := UpGrader.Upgrade(c.Ctx.Fiber().RequestCtx(), func(ws *websocket.Conn) {
+		defer func() {
+			if r := recover(); r != nil {
+				logs.Error(fmt.Sprintf("TunnelMonitor(): panic recovered: %v", r))
+			}
+		}()
 
-	if s.Status != object.Connected {
-		guacamole.Disconnect(ws, AssetNotActive, "Session offline")
-		return
-	}
-
-	connectionId := s.ConnectionId
-	configuration := guacamole.NewConfiguration()
-	configuration.ConnectionID = connectionId
-	configuration.SetParameter("width", strconv.Itoa(s.Width))
-	configuration.SetParameter("height", strconv.Itoa(s.Height))
-	configuration.SetParameter("dpi", "96")
-	configuration.SetReadOnlyMode()
-
-	addr := beego.AppConfig.String("guacamoleEndpoint")
-	tunnel, err := guacamole.NewTunnel(addr, configuration)
-	if err != nil {
-		guacamole.Disconnect(ws, NewTunnelError, err.Error())
-		panic(err)
-	}
-
-	guacSession := &guacamole.Session{
-		Id:          sessionId,
-		Protocol:    s.Protocol,
-		WebSocket:   ws,
-		GuacdTunnel: tunnel,
-	}
-
-	forObsSession := guacamole.GlobalSessionManager.Get(sessionId)
-	if forObsSession == nil {
-		guacamole.Disconnect(ws, SessionNotFound, "Failed to obtain session")
-		return
-	}
-	guacSession.Id = util.GenerateId()
-	forObsSession.Observer.Add(guacSession)
-
-	guacamoleHandler := NewGuacamoleHandler(ws, tunnel)
-	guacamoleHandler.Start()
-	defer guacamoleHandler.Stop()
-
-	for {
-		_, message, err := ws.ReadMessage()
+		s, err := object.GetConnSession(sessionId)
 		if err != nil {
-			_ = tunnel.Close()
-
-			observerId := guacSession.Id
-			forObsSession.Observer.Delete(observerId)
+			guacamole.Disconnect(ws, SessionNotFound, err.Error())
 			return
 		}
 
-		_, err = tunnel.WriteAndFlush(message)
+		if s.Status != object.Connected {
+			guacamole.Disconnect(ws, AssetNotActive, "Session offline")
+			return
+		}
+
+		connectionId := s.ConnectionId
+		configuration := guacamole.NewConfiguration()
+		configuration.ConnectionID = connectionId
+		configuration.SetParameter("width", strconv.Itoa(s.Width))
+		configuration.SetParameter("height", strconv.Itoa(s.Height))
+		configuration.SetParameter("dpi", "96")
+		configuration.SetReadOnlyMode()
+
+		addr := conf.GetConfigString("guacamoleEndpoint")
+		tunnel, err := guacamole.NewTunnel(addr, configuration)
 		if err != nil {
-			err := object.CloseSession(sessionId, Normal, "Normal user exit")
+			guacamole.Disconnect(ws, NewTunnelError, err.Error())
+			return
+		}
+
+		guacSession := &guacamole.Session{
+			Id:          sessionId,
+			Protocol:    s.Protocol,
+			WebSocket:   ws,
+			GuacdTunnel: tunnel,
+		}
+
+		forObsSession := guacamole.GlobalSessionManager.Get(sessionId)
+		if forObsSession == nil {
+			guacamole.Disconnect(ws, SessionNotFound, "Failed to obtain session")
+			return
+		}
+		guacSession.Id = util.GenerateId()
+		forObsSession.Observer.Add(guacSession)
+
+		guacamoleHandler := NewGuacamoleHandler(ws, tunnel)
+		guacamoleHandler.Start()
+		defer guacamoleHandler.Stop()
+
+		for {
+			_, message, err := ws.ReadMessage()
 			if err != nil {
-				c.ResponseError(err.Error())
+				_ = tunnel.Close()
+
+				observerId := guacSession.Id
+				forObsSession.Observer.Delete(observerId)
 				return
 			}
-			return
+
+			_, err = tunnel.WriteAndFlush(message)
+			if err != nil {
+				if err := object.CloseSession(sessionId, Normal, "Normal user exit"); err != nil {
+					logs.Error(fmt.Sprintf("TunnelMonitor():object.CloseSession() error: %s", err.Error()))
+				}
+				return
+			}
 		}
+	})
+	if err != nil {
+		logs.Error(fmt.Sprintf("TunnelMonitor(): websocket upgrade failed: %s", err.Error()))
 	}
 }
 

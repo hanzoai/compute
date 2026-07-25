@@ -15,10 +15,12 @@
 package routers
 
 import (
+	"encoding/base64"
 	"fmt"
-	"net/http"
+	"strings"
 
-	"github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/conf"
 	iam "github.com/hanzoai/visor/internal/iam"
 	"github.com/hanzoai/visor/object"
@@ -32,47 +34,57 @@ type Response struct {
 	Data2  interface{} `json:"data2"`
 }
 
-func GetSessionUser(ctx *context.Context) *iam.User {
-	s := ctx.Input.Session("user")
-	if s == nil {
-		// No cookie session: accept a forwarded IAM Bearer JWT (API/console
-		// callers). Signature is verified in object.GetBearerUser.
-		return object.GetBearerUser(ctx.Input.Header("Authorization"))
-	}
-
-	claims := s.(iam.Claims)
-	return &claims.User
+// GetSessionUser resolves the caller from the forwarded IAM Bearer JWT — the ONE
+// stateless identity seam. There is no cookie/redis session: an API/console
+// caller presents a short-lived Bearer, verified and brand-bound in
+// object.GetBearerUser.
+func GetSessionUser(c *zip.Ctx) *iam.User {
+	return object.GetBearerUser(c.Header("Authorization"))
 }
 
-func getUsername(ctx *context.Context) (username string) {
-	user := GetSessionUser(ctx)
+func getUsername(c *zip.Ctx) (username string) {
+	user := GetSessionUser(c)
 	if user != nil {
 		username = util.GetIdFromOwnerAndName(user.Owner, user.Name)
 	} else {
-		username, _ = getUsernameByClientIdSecret(ctx)
+		username, _ = getUsernameByClientIdSecret(c)
 	}
 	return
 }
 
-func requestDeny(ctx *context.Context) {
-	ctx.ResponseWriter.WriteHeader(http.StatusForbidden)
-
+func requestDeny(c *zip.Ctx) error {
 	response := &Response{
 		Status: "error",
 		Msg:    "Unauthorized operation",
 	}
-
-	err := ctx.Output.JSON(response, false, false)
-	if err != nil {
-		return
-	}
+	return c.JSON(403, response)
 }
 
-func getUsernameByClientIdSecret(ctx *context.Context) (string, error) {
-	clientId, clientSecret, ok := ctx.Request.BasicAuth()
+// basicAuth parses an "Authorization: Basic <base64(id:secret)>" header, RFC
+// 7617 — splitting on the FIRST colon so a secret may contain one. The ZAP
+// replacement for net/http's Request.BasicAuth.
+func basicAuth(c *zip.Ctx) (id, secret string, ok bool) {
+	const p = "Basic "
+	h := c.Header("Authorization")
+	if len(h) <= len(p) || !strings.EqualFold(h[:len(p)], p) {
+		return "", "", false
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(h[len(p):]))
+	if err != nil {
+		return "", "", false
+	}
+	id, secret, found := strings.Cut(string(raw), ":")
+	if !found {
+		return "", "", false
+	}
+	return id, secret, true
+}
+
+func getUsernameByClientIdSecret(c *zip.Ctx) (string, error) {
+	clientId, clientSecret, ok := basicAuth(c)
 	if !ok {
-		clientId = ctx.Input.Query("clientId")
-		clientSecret = ctx.Input.Query("clientSecret")
+		clientId = c.Query("clientId")
+		clientSecret = c.Query("clientSecret")
 	}
 
 	if clientId == "" || clientSecret == "" {

@@ -18,9 +18,10 @@ Visor is Hanzo's multi-provider cloud VM management platform. It provisions, mon
 ## Architecture
 
 ### Core Layers
-- **Controllers** (`/controllers/`): HTTP handlers (Beego framework), JWT auth
+- **Controllers** (`/controllers/`): HTTP handlers (ZAP-native `zip` over
+  fiber/fasthttp — Beego is gone), stateless Bearer-JWT auth
 - **Service** (`/service/`): Provider adapters implementing `MachineClientInterface`
-- **Object** (`/object/`): Data models, DB operations (XORM), plan seeds
+- **Object** (`/object/`): Data models, DB operations (`hanzoai/orm/relational`), plan seeds
 - **Billing** (`/billing/`): Pricing engine
 - **AuthZ** (`/authz/`): hanzoai/authz-based authorization
 
@@ -155,7 +156,9 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
   `COMMERCE_SERVICE_TOKEN`. Never hardcoded; absent ⇒ fail closed.
 
 ### Key Dependencies
-- Go 1.26, Beego 1.12, XORM; `github.com/hanzoai/iam` v1.28.12;
+- Go 1.26, `zap-proto/zip` + `zap-proto/fiber/v3` (no web framework),
+  `hanzoai/orm`, `luxfi/log`, `spf13/cobra`; identity via the in-repo
+  `internal/iam` OIDC/JWKS client (no Casdoor SDK);
   `github.com/hanzoai/commerce/metering`; `godo` v1.184
 - `hcloud-go/v2` v2.36, `godo` v1.175, `aws-sdk-go-v2/lightsail` v1.20
 - `hanzoid/go-sdk` v1.45 (IAM integration)
@@ -187,10 +190,12 @@ Provider mapping is internal only (`ProviderMapping` JSON field on Plan objects)
 
 ## CI / Build & Registry (state as of consolidation)
 
-vm is the consolidated Casvisor fork (visor archived; content adopted under the
-`vm` repo name + module `github.com/hanzoai/vm`). Default branch is `main`
-(master/master_old deleted; nothing lost — the flat-1.30× pricing commit was
-cherry-picked in). Image published as `ghcr.io/hanzoai/visor`.
+visor is the consolidated Casvisor fork. The repo is `hanzoai/visor`, the module
+is `github.com/hanzoai/visor`, the default branch is `main`, and the image is
+`ghcr.io/hanzoai/visor` — one name at every layer. `hanzoai/vm` is NOT a second
+repo: it is GitHub's rename-redirect to `hanzoai/visor` (same repo id
+1154119977), so there is no `github.com/hanzoai/vm` module and nothing to
+retire there. Any doc claiming otherwise is stale.
 
 ### Build pipeline
 `.github/workflows/build.yml` calls the shared `hanzoai/.github` docker-build

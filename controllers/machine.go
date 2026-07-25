@@ -17,7 +17,6 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/beego/beego/utils/pagination"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
@@ -32,13 +31,13 @@ import (
 // @Success 200 {object} object.Machine The Response object
 // @router /get-machines [get]
 func (c *ApiController) GetMachines() {
-	owner := c.Input().Get("owner")
-	limit := c.Input().Get("pageSize")
-	page := c.Input().Get("p")
-	field := c.Input().Get("field")
-	value := c.Input().Get("value")
-	sortField := c.Input().Get("sortField")
-	sortOrder := c.Input().Get("sortOrder")
+	owner := c.Ctx.Query("owner")
+	limit := c.Ctx.Query("pageSize")
+	page := c.Ctx.Query("p")
+	field := c.Ctx.Query("field")
+	value := c.Ctx.Query("value")
+	sortField := c.Ctx.Query("sortField")
+	sortOrder := c.Ctx.Query("sortOrder")
 
 	_, err := object.SyncMachinesCloud(owner)
 	if err != nil {
@@ -62,14 +61,14 @@ func (c *ApiController) GetMachines() {
 			return
 		}
 
-		paginator := pagination.SetPaginator(c.Ctx, limit, count)
-		machines, err := object.GetMaskedMachines(object.GetPaginationMachines(owner, paginator.Offset(), limit, field, value, sortField, sortOrder))
+		offset, nums := util.Paginate(page, limit, count)
+		machines, err := object.GetMaskedMachines(object.GetPaginationMachines(owner, offset, limit, field, value, sortField, sortOrder))
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
-		c.ResponseOk(machines, paginator.Nums())
+		c.ResponseOk(machines, nums)
 	}
 }
 
@@ -81,7 +80,7 @@ func (c *ApiController) GetMachines() {
 // @Success 200 {object} object.Machine The Response object
 // @router /get-machine [get]
 func (c *ApiController) GetMachine() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	owner, _ := util.GetOwnerAndNameFromId(id)
 	_, err := object.SyncMachinesCloud(owner)
@@ -108,10 +107,10 @@ func (c *ApiController) GetMachine() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-machine [post]
 func (c *ApiController) UpdateMachine() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	var machine object.Machine
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &machine)
+	err := json.Unmarshal(c.Ctx.Body(), &machine)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -130,7 +129,7 @@ func (c *ApiController) UpdateMachine() {
 // @router /add-machine [post]
 func (c *ApiController) AddMachine() {
 	var machine object.Machine
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &machine)
+	err := json.Unmarshal(c.Ctx.Body(), &machine)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -149,7 +148,7 @@ func (c *ApiController) AddMachine() {
 // @router /delete-machine [post]
 func (c *ApiController) DeleteMachine() {
 	var machine object.Machine
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &machine)
+	err := json.Unmarshal(c.Ctx.Body(), &machine)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -169,8 +168,8 @@ func (c *ApiController) DeleteMachine() {
 // @Success 200 {object} object.Machine The Response object
 // @router /launch-machine [post]
 func (c *ApiController) LaunchMachine() {
-	owner := c.Input().Get("owner")
-	provider := c.Input().Get("provider")
+	owner := c.Ctx.Query("owner")
+	provider := c.Ctx.Query("provider")
 
 	if owner == "" || provider == "" {
 		c.ResponseError("owner and provider query parameters are required")
@@ -178,7 +177,7 @@ func (c *ApiController) LaunchMachine() {
 	}
 
 	var spec service.CreateMachineSpec
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &spec)
+	err := json.Unmarshal(c.Ctx.Body(), &spec)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

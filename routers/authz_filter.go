@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/authz"
 	"github.com/hanzoai/visor/util"
 )
@@ -31,8 +32,8 @@ type Object struct {
 	AccessSecret string `json:"accessSecret"`
 }
 
-func getSubject(ctx *context.Context) (string, string) {
-	username := getUsername(ctx)
+func getSubject(c *zip.Ctx) (string, string) {
+	username := getUsername(c)
 	if username == "" {
 		return "anonymous", "anonymous"
 	}
@@ -41,36 +42,36 @@ func getSubject(ctx *context.Context) (string, string) {
 	return util.GetOwnerAndNameFromId(username)
 }
 
-func getObject(ctx *context.Context) (string, string) {
-	method := ctx.Request.Method
+func getObject(c *zip.Ctx) (string, string) {
+	method := c.Method()
 
 	if method == http.MethodGet {
 		// query == "?id=built-in/admin"
-		id := ctx.Input.Query("id")
+		id := c.Query("id")
 		if id != "" {
 			return util.GetOwnerAndNameFromIdNoCheck(id)
 		}
 
-		owner := ctx.Input.Query("owner")
+		owner := c.Query("owner")
 		if owner != "" {
 			return owner, ""
 		}
 
 		return "", ""
 	} else {
-		id := ctx.Input.Query("id")
+		id := c.Query("id")
 		if id != "" {
 			return util.GetOwnerAndNameFromIdNoCheck(id)
 		}
 
-		body := ctx.Input.RequestBody
+		body := c.Body()
 		if len(body) == 0 {
-			id := ctx.Request.Form.Get("id")
+			id := c.Fiber().FormValue("id")
 			if id != "" {
 				return util.GetOwnerAndNameFromIdNoCheck(id)
 			}
 
-			return ctx.Request.Form.Get("owner"), ctx.Request.Form.Get("name")
+			return c.Fiber().FormValue("owner"), c.Fiber().FormValue("name")
 		}
 
 		var obj Object
@@ -94,13 +95,18 @@ func getUrlPath(urlPath string) string {
 	return urlPath
 }
 
-func ApiFilter(ctx *context.Context) {
-	subOwner, subName := getSubject(ctx)
-	method := ctx.Request.Method
-	urlPath := getUrlPath(ctx.Request.URL.Path)
-	objOwner, objName := getObject(ctx)
+// ApiFilter is the ONE authorization seam — ZAP middleware that authorizes every
+// request against the static Casbin policy (authz.IsAllowed) on the resolved
+// subject/object, denying with 403 or threading the request through to the
+// handler via c.Next(). It runs after the tenant filter and before the record
+// filter, exactly as the Beego BeforeRouter chain did.
+func ApiFilter(c *zip.Ctx) error {
+	subOwner, subName := getSubject(c)
+	method := c.Method()
+	urlPath := getUrlPath(c.Path())
+	objOwner, objName := getObject(c)
 
-	user := GetSessionUser(ctx)
+	user := GetSessionUser(c)
 	isAllowed := authz.IsAllowed(user, subOwner, subName, method, urlPath, objOwner, objName)
 
 	result := "deny"
@@ -112,10 +118,12 @@ func ApiFilter(ctx *context.Context) {
 		logLine := fmt.Sprintf("subOwner = %s, subName = %s, method = %s, urlPath = %s, obj.Owner = %s, obj.Name = %s, result = %s",
 			subOwner, subName, method, urlPath, objOwner, objName, result)
 		fmt.Println(logLine)
-		util.LogInfo(ctx, logLine)
+		util.LogInfo(c, logLine)
 	}
 
 	if !isAllowed {
-		requestDeny(ctx)
+		return requestDeny(c)
 	}
+
+	return c.Next()
 }

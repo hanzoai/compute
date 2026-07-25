@@ -61,7 +61,7 @@ func (c *ApiController) resolveComputeOrg() string {
 	if u := c.GetSessionUser(); u != nil {
 		return strings.TrimSpace(u.Owner)
 	}
-	return strings.TrimSpace(c.Input().Get("owner"))
+	return strings.TrimSpace(c.Ctx.Query("owner"))
 }
 
 // resolveComputeApp / resolveComputeProject return the OPTIONAL app / project
@@ -199,7 +199,7 @@ func (c *ApiController) ListComputeMachines() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(filterMachines(machines, c.Input().Get("kind"), c.Input().Get("name"), c.Input().Get("project")))
+	c.ResponseOk(filterMachines(machines, c.Ctx.Query("kind"), c.Ctx.Query("name"), c.Ctx.Query("project")))
 }
 
 // unionMachines merges machine lists from independent sources into ONE deduped
@@ -324,7 +324,7 @@ func (c *ApiController) GetComputeKubernetesCluster() {
 		c.ResponseError("hanzo compute is not configured")
 		return
 	}
-	id := c.Ctx.Input.Param(":id")
+	id := c.Ctx.Param("id")
 	detail, err := service.GetOrgKubernetesCluster(org, id)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -354,7 +354,7 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 	}
 	// The request body IS the service spec (one shape, no re-mapping).
 	var spec service.CreateClusterSpec
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &spec); err != nil {
+	if err := json.Unmarshal(c.Ctx.Body(), &spec); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
@@ -400,7 +400,7 @@ func (c *ApiController) DeleteComputeKubernetesCluster() {
 		c.ResponseError("hanzo compute is not configured")
 		return
 	}
-	id := c.Ctx.Input.Param(":id")
+	id := c.Ctx.Param("id")
 	if err := service.DeleteOrgKubernetesCluster(org, id); err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -419,7 +419,7 @@ func (c *ApiController) GetComputeMachine() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	id := c.Ctx.Input.Param(":id")
+	id := c.Ctx.Param("id")
 	machine, err := service.GetOrgMachine(org, id)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -443,7 +443,7 @@ func (c *ApiController) DeleteComputeMachine() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	id := c.Ctx.Input.Param(":id")
+	id := c.Ctx.Param("id")
 	if err := service.DeleteOrgMachine(org, id); err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -541,7 +541,7 @@ func (c *ApiController) LaunchComputeMachine() {
 	}
 
 	var req launchComputeRequest
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
+	if err := json.Unmarshal(c.Ctx.Body(), &req); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}

@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/util"
 )
@@ -60,6 +61,12 @@ type Response struct {
 	Status string `json:"status"`
 	Msg    string `json:"msg"`
 }
+
+// RecordResponseKey is the request-context local under which a handler stashes
+// its JSON response envelope (via ResponseOk/ResponseError). The record filter
+// reads it back after the handler returns to build the audit record — the ONE
+// key shared by the writer (controllers) and the reader (routers).
+const RecordResponseKey = "record.responseJson"
 
 func GetRecordCount(owner, field, value string) (int64, error) {
 	session := GetSession(owner, -1, -1, field, value, "", "")
@@ -138,20 +145,25 @@ func UpdateRecord(id string, record *Record) (bool, error) {
 	return affected != 0, nil
 }
 
-func NewRecord(ctx *context.Context) (*Record, error) {
-	ip := strings.Replace(util.GetIPFromRequest(ctx.Request), ": ", "", -1)
-	action := strings.Replace(ctx.Request.URL.Path, "/v1/", "", -1)
-	requestUri := util.FilterQuery(ctx.Request.RequestURI, []string{"accessToken"})
+// NewRecord builds an audit record from the ZAP request context and the
+// response payload the handler produced (respJSON — the value ResponseOk/
+// ResponseError stashed for the record filter). respJSON stands in for Beego's
+// ctx.Input.Data()["json"]: the ONE thing the record needs from the response is
+// its {status,msg} envelope.
+func NewRecord(c *zip.Ctx, respJSON any) (*Record, error) {
+	ip := strings.Replace(util.ClientIPFromCtx(c), ": ", "", -1)
+	action := strings.Replace(c.Path(), "/v1/", "", -1)
+	requestUri := util.FilterQuery(c.Fiber().OriginalURL(), []string{"accessToken"})
 	if len(requestUri) > 1000 {
 		requestUri = requestUri[0:1000]
 	}
 
 	object := ""
-	if ctx.Input.RequestBody != nil && len(ctx.Input.RequestBody) != 0 {
-		object = string(ctx.Input.RequestBody)
+	if body := c.Body(); len(body) != 0 {
+		object = string(body)
 	}
 
-	respBytes, err := json.Marshal(ctx.Input.Data()["json"])
+	respBytes, err := json.Marshal(respJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +174,7 @@ func NewRecord(ctx *context.Context) (*Record, error) {
 		return nil, err
 	}
 
-	language := ctx.Request.Header.Get("Accept-Language")
+	language := c.Header("Accept-Language")
 	if len(language) > 2 {
 		language = language[0:2]
 	}
@@ -173,7 +185,7 @@ func NewRecord(ctx *context.Context) (*Record, error) {
 		CreatedTime: util.GetCurrentTime(),
 		ClientIp:    ip,
 		User:        "",
-		Method:      ctx.Request.Method,
+		Method:      c.Method(),
 		RequestUri:  requestUri,
 		Action:      action,
 		Language:    languageCode,

@@ -17,28 +17,42 @@ package routers
 import (
 	"fmt"
 
-	"github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 )
 
-func RecordMessage(ctx *context.Context) {
-	if ctx.Request.URL.Path == "/v1/login" || ctx.Request.URL.Path == "/v1/signup" || ctx.Request.URL.Path == "/v1/get-assets" {
-		return
+const recordUserIDKey = "recordUserId"
+
+// RecordMessage is the audit-record middleware. Beego split this into a
+// BeforeRouter hook (stash the acting user) and an AfterExec hook (build+persist
+// the record from the response); ZAP composes both around one c.Next() — the
+// before-work stashes the user id, the handler runs, then the after-work reads
+// the response envelope the handler stashed and writes the audit record. Login,
+// signup and get-assets are exempted from the user-id stash exactly as before.
+func RecordMessage(c *zip.Ctx) error {
+	path := c.Path()
+	if path != "/v1/login" && path != "/v1/signup" && path != "/v1/get-assets" {
+		if userId := getUsername(c); userId != "" {
+			c.Locals(recordUserIDKey, userId)
+		}
 	}
 
-	userId := getUsername(ctx)
-	ctx.Input.SetParam("recordUserId", userId)
+	err := c.Next()
+
+	afterRecordMessage(c)
+	return err
 }
 
-func AfterRecordMessage(ctx *context.Context) {
-	record, err := object.NewRecord(ctx)
+func afterRecordMessage(c *zip.Ctx) {
+	record, err := object.NewRecord(c, c.Locals(object.RecordResponseKey))
 	if err != nil {
 		fmt.Printf("AfterRecordMessage() error: %s\n", err.Error())
 		return
 	}
 
-	userId := ctx.Input.Params()["recordUserId"]
+	userId, _ := c.Locals(recordUserIDKey).(string)
 	if userId != "" {
 		record.Organization, record.User = util.GetOwnerAndNameFromId(userId)
 	}

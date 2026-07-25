@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/beego/beego/logs"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 	corev1 "k8s.io/api/core/v1"

@@ -17,7 +17,6 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/beego/beego/utils/pagination"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 )
@@ -31,13 +30,13 @@ import (
 // @Success 200 {object} object.Provider The Response object
 // @router /get-providers [get]
 func (c *ApiController) GetProviders() {
-	owner := c.Input().Get("owner")
-	limit := c.Input().Get("pageSize")
-	page := c.Input().Get("p")
-	field := c.Input().Get("field")
-	value := c.Input().Get("value")
-	sortField := c.Input().Get("sortField")
-	sortOrder := c.Input().Get("sortOrder")
+	owner := c.Ctx.Query("owner")
+	limit := c.Ctx.Query("pageSize")
+	page := c.Ctx.Query("p")
+	field := c.Ctx.Query("field")
+	value := c.Ctx.Query("value")
+	sortField := c.Ctx.Query("sortField")
+	sortOrder := c.Ctx.Query("sortOrder")
 
 	if limit == "" || page == "" {
 		providers, err := object.GetMaskedProviders(object.GetProviders(owner))
@@ -55,14 +54,14 @@ func (c *ApiController) GetProviders() {
 			return
 		}
 
-		paginator := pagination.SetPaginator(c.Ctx, limit, count)
-		providers, err := object.GetMaskedProviders(object.GetPaginationProviders(owner, paginator.Offset(), limit, field, value, sortField, sortOrder))
+		offset, nums := util.Paginate(page, limit, count)
+		providers, err := object.GetMaskedProviders(object.GetPaginationProviders(owner, offset, limit, field, value, sortField, sortOrder))
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
-		c.ResponseOk(providers, paginator.Nums())
+		c.ResponseOk(providers, nums)
 	}
 }
 
@@ -74,7 +73,7 @@ func (c *ApiController) GetProviders() {
 // @Success 200 {object} object.Provider The Response object
 // @router /get-provider [get]
 func (c *ApiController) GetProvider() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	provider, err := object.GetMaskedProvider(object.GetProvider(id))
 	if err != nil {
@@ -94,10 +93,10 @@ func (c *ApiController) GetProvider() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-provider [post]
 func (c *ApiController) UpdateProvider() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	var provider object.Provider
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &provider)
+	err := json.Unmarshal(c.Ctx.Body(), &provider)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -116,7 +115,7 @@ func (c *ApiController) UpdateProvider() {
 // @router /add-provider [post]
 func (c *ApiController) AddProvider() {
 	var provider object.Provider
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &provider)
+	err := json.Unmarshal(c.Ctx.Body(), &provider)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -135,7 +134,7 @@ func (c *ApiController) AddProvider() {
 // @router /delete-provider [post]
 func (c *ApiController) DeleteProvider() {
 	var provider object.Provider
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &provider)
+	err := json.Unmarshal(c.Ctx.Body(), &provider)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
