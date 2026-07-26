@@ -15,10 +15,46 @@
 package object
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hanzoai/visor/service"
 )
+
+// GetKubernetesNodesCloud returns DOKS worker nodes — as service.Machines — for
+// every active BYOC DigitalOcean provider that names a cluster (Provider.ClusterID).
+// This is the Provider-record cluster→org association; the house-account tag
+// association lives in service.ListOrgKubernetesNodes and the controller unions
+// both, so a cluster discovered by either path surfaces its nodes (deduped by
+// droplet id) exactly once. The DO provider selection mirrors SyncNodePoolsCloud
+// (Type=="DigitalOcean" && ClusterID!=""), so nodes come from the same clusters
+// visor already reconciles pools for.
+func GetKubernetesNodesCloud(owner string) ([]*service.Machine, error) {
+	providers, err := getActiveCloudProviders(owner)
+	if err != nil {
+		return nil, err
+	}
+	var machines []*service.Machine
+	for _, provider := range providers {
+		if provider.Type != "DigitalOcean" || provider.ClusterID == "" {
+			continue
+		}
+		token := provider.ClientSecret
+		if token == "" {
+			token = provider.ClientId
+		}
+		client, err := service.NewDOKSClient(token, provider.ClusterID)
+		if err != nil {
+			return nil, err
+		}
+		nodes, err := client.NodeMachines(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		machines = append(machines, nodes...)
+	}
+	return machines, nil
+}
 
 func getMachineFromService(owner string, provider string, clientMachine *service.Machine) *Machine {
 	return &Machine{

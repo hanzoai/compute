@@ -17,7 +17,6 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/beego/beego/utils/pagination"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 )
@@ -31,14 +30,14 @@ import (
 // @Success 200 {object} object.Session The Response object
 // @router /get-sessions [get]
 func (c *ApiController) GetSessions() {
-	owner := c.Input().Get("owner")
-	limit := c.Input().Get("pageSize")
-	page := c.Input().Get("p")
-	field := c.Input().Get("field")
-	value := c.Input().Get("value")
-	sortField := c.Input().Get("sortField")
-	sortOrder := c.Input().Get("sortOrder")
-	status := c.Input().Get("status")
+	owner := c.Ctx.Query("owner")
+	limit := c.Ctx.Query("pageSize")
+	page := c.Ctx.Query("p")
+	field := c.Ctx.Query("field")
+	value := c.Ctx.Query("value")
+	sortField := c.Ctx.Query("sortField")
+	sortOrder := c.Ctx.Query("sortOrder")
+	status := c.Ctx.Query("status")
 
 	if limit == "" || page == "" {
 		sessions, err := object.GetSessions(owner)
@@ -57,14 +56,14 @@ func (c *ApiController) GetSessions() {
 			return
 		}
 
-		paginator := pagination.SetPaginator(c.Ctx, limit, count)
-		sessions, err := object.GetPaginationSessions(owner, status, paginator.Offset(), limit, field, value, sortField, sortOrder)
+		offset, nums := util.Paginate(page, limit, count)
+		sessions, err := object.GetPaginationSessions(owner, status, offset, limit, field, value, sortField, sortOrder)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
-		c.ResponseOk(sessions, paginator.Nums())
+		c.ResponseOk(sessions, nums)
 	}
 }
 
@@ -76,7 +75,7 @@ func (c *ApiController) GetSessions() {
 // @Success 200 {object} object.Session
 // @router /get-session [get]
 func (c *ApiController) GetConnSession() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	session, err := object.GetConnSession(id)
 	if err != nil {
@@ -96,7 +95,7 @@ func (c *ApiController) GetConnSession() {
 // @router /delete-session [post]
 func (c *ApiController) DeleteSession() {
 	var session object.Session
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &session)
+	err := json.Unmarshal(c.Ctx.Body(), &session)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -121,10 +120,10 @@ func (c *ApiController) DeleteSession() {
 // @Success 200 {object} Response
 // @router /update-session [post]
 func (c *ApiController) UpdateSession() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	var session object.Session
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &session)
+	err := json.Unmarshal(c.Ctx.Body(), &session)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -143,7 +142,7 @@ func (c *ApiController) UpdateSession() {
 // @router /add-session [post]
 func (c *ApiController) AddSession() {
 	var session object.Session
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &session)
+	err := json.Unmarshal(c.Ctx.Body(), &session)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -154,7 +153,7 @@ func (c *ApiController) AddSession() {
 }
 
 func (c *ApiController) StartSession() {
-	sessionId := c.Input().Get("id")
+	sessionId := c.Ctx.Query("id")
 
 	s := &object.Session{
 		Status:    object.Connected,
@@ -171,7 +170,7 @@ func (c *ApiController) StartSession() {
 }
 
 func (c *ApiController) StopSession() {
-	sessionId := c.Input().Get("id")
+	sessionId := c.Ctx.Query("id")
 
 	err := object.CloseSession(sessionId, ForcedDisconnect, "The administrator forcibly closes the session")
 	if err != nil {

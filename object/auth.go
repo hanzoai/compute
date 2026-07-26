@@ -17,8 +17,8 @@ package object
 import (
 	"strings"
 
-	iam "github.com/hanzoai/iam"
 	"github.com/hanzoai/visor/conf"
+	iam "github.com/hanzoai/visor/internal/iam"
 )
 
 // GetBearerUser validates an "Authorization: Bearer <IAM JWT>" header and
@@ -34,6 +34,7 @@ import (
 //   - issuer must match the configured brand issuer(s) in iamIssuer, so a sibling
 //     brand's token (lux.id/zoo.id/pars.id) is rejected even though its signature
 //     verifies.
+//
 // EVERY org within this brand is accepted — the resell compute surface is
 // multi-tenant (org "hanzo", "maxpower", and every self-service customer org).
 // Each request is org-scoped downstream: resolveComputeOrg pins org = user.Owner

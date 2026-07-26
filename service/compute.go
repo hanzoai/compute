@@ -316,6 +316,118 @@ func ListOrgMachines(org, project string) ([]*Machine, error) {
 	return machines, nil
 }
 
+// ListOrgKubernetesNodes returns one Machine per DOKS worker node for every
+// cluster in Hanzo's HOUSE DigitalOcean account tagged for org — the house
+// analogue of ListOrgMachines, but for managed-Kubernetes nodes. DOKS worker
+// droplets carry k8s tags, not a hanzo-org DROPLET tag, so they never surface
+// through ListOrgMachines; this lists them via the managed-Kubernetes API and maps
+// each node to the same Machine shape. Per-org isolation is by the cluster's
+// hanzo-org tag — a tenant can only ever see its own clusters' nodes.
+func ListOrgKubernetesNodes(org string) ([]*Machine, error) {
+	if org == "" {
+		return nil, fmt.Errorf("org is required")
+	}
+	client, err := newHouseDOClient()
+	if err != nil {
+		return nil, err
+	}
+	return kubernetesNodeMachinesByTag(context.Background(), client.Client, orgTag(org))
+}
+
+// newHouseDOKSClient builds a DOKS client on Hanzo's house token for ACCOUNT-level
+// cluster operations (list/get/create/delete), which address a cluster by id rather
+// than a fixed ClusterID — so the ClusterID field is left empty. It is the cluster
+// analogue of newHouseDOClient; per-org isolation is enforced by the callers below
+// via the hanzo-org tag, never by this client.
+func newHouseDOKSClient() (*DOKSClient, error) {
+	client, err := newHouseDOClient()
+	if err != nil {
+		return nil, err
+	}
+	return &DOKSClient{Client: client.Client}, nil
+}
+
+// ListOrgKubernetesClusters returns every DOKS cluster in Hanzo's HOUSE account
+// tagged for org — the house analogue of ListOrgMachines for whole clusters. Per-org
+// isolation is by the cluster's hanzo-org tag: a tenant only ever sees its own
+// clusters, never another org's.
+func ListOrgKubernetesClusters(org string) ([]*KubernetesCluster, error) {
+	if org == "" {
+		return nil, fmt.Errorf("org is required")
+	}
+	client, err := newHouseDOKSClient()
+	if err != nil {
+		return nil, err
+	}
+	return clustersByTag(context.Background(), client.Client, orgTag(org))
+}
+
+// GetOrgKubernetesCluster returns one house cluster's detail (pools + worker nodes),
+// but ONLY if it carries the caller org's hanzo-org tag. A cluster owned by another
+// org — or a missing cluster — resolves to (nil, nil): the controller renders it as
+// "not found", so a tenant can never read another tenant's cluster by guessing an id.
+func GetOrgKubernetesCluster(org, id string) (*KubernetesClusterDetail, error) {
+	if org == "" {
+		return nil, fmt.Errorf("org is required")
+	}
+	client, err := newHouseDOKSClient()
+	if err != nil {
+		return nil, err
+	}
+	detail, err := client.GetCluster(context.Background(), id)
+	if err != nil {
+		if IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !clusterHasTag(detail.Tags, orgTag(org)) {
+		return nil, nil // isolation: not this org's cluster
+	}
+	return detail, nil
+}
+
+// CreateOrgKubernetesCluster provisions a DOKS cluster in Hanzo's house account for
+// org, stamping it managed-by + hanzo-org:<org> so it associates to the tenant
+// exactly like a droplet — which is what makes it visible to that org's cluster and
+// node listers (and invisible to every other org).
+func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
+	if org == "" {
+		return nil, fmt.Errorf("org is required")
+	}
+	client, err := newHouseDOKSClient()
+	if err != nil {
+		return nil, err
+	}
+	tags := []string{"managed-by:hanzo-visor", orgTag(org)}
+	return client.CreateCluster(context.Background(), spec, tags)
+}
+
+// DeleteOrgKubernetesCluster destroys a house cluster by id, but ONLY if it carries
+// the caller org's hanzo-org tag — the same isolation as GetOrgKubernetesCluster, so
+// a tenant can never delete another tenant's cluster. An already-absent cluster is a
+// no-op success (idempotent delete).
+func DeleteOrgKubernetesCluster(org, id string) error {
+	if org == "" {
+		return fmt.Errorf("org is required")
+	}
+	client, err := newHouseDOKSClient()
+	if err != nil {
+		return err
+	}
+	detail, err := client.GetCluster(context.Background(), id)
+	if err != nil {
+		if IsNotFound(err) {
+			return nil // already gone
+		}
+		return err
+	}
+	if !clusterHasTag(detail.Tags, orgTag(org)) {
+		return fmt.Errorf("cluster not found")
+	}
+	return client.DeleteCluster(context.Background(), id)
+}
+
 // ListRunningHouseMachines returns every RUNNING droplet in Hanzo's house
 // account that carries a hanzo-org tag — the set the recurring hourly meter
 // debits. It lists across ALL orgs (no per-org tag filter): the org is recovered

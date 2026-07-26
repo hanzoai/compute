@@ -27,7 +27,6 @@ go.work
 tmp/
 tmpFiles/
 *.tmp
-logs/
 lastupdate.tmp
 commentsRouter*.go
 /visor

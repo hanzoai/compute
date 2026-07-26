@@ -15,11 +15,10 @@
 package controllers
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	beecontext "github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
+
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
@@ -118,12 +117,10 @@ func TestFilterMachinesByProject(t *testing.T) {
 	}
 }
 
-// newLaunchCtx builds a beego request context the way the router hands one to a
+// newLaunchCtx builds a ZAP request context the way the router hands one to a
 // handler, so resolveComputeApp/Project can read the threaded tenant scope.
-func newLaunchCtx() *beecontext.Context {
-	ctx := beecontext.NewContext()
-	ctx.Reset(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/machines/launch", nil))
-	return ctx
+func newLaunchCtx() *zip.Ctx {
+	return zip.New(zip.Config{}).TestCtx("POST", "/v1/machines/launch")
 }
 
 // resolveComputeApp/Project resolve the OPTIONAL scope exactly one way: the
@@ -133,8 +130,8 @@ func newLaunchCtx() *beecontext.Context {
 func TestResolveComputeScope(t *testing.T) {
 	// Threaded context is authoritative over a body fallback.
 	ctx := newLaunchCtx()
-	ctx.Input.SetData(object.TenantContextAppIDKey, "web")
-	ctx.Input.SetData(object.TenantContextProjectIDKey, "api")
+	ctx.Locals(object.TenantContextAppIDKey, "web")
+	ctx.Locals(object.TenantContextProjectIDKey, "api")
 	c := &ApiController{}
 	c.Ctx = ctx
 	if got := c.resolveComputeApp("bodyapp"); got != "web" {
@@ -162,5 +159,49 @@ func TestResolveComputeScope(t *testing.T) {
 	}
 	if got := c3.resolveComputeApp(""); got != "" {
 		t.Fatalf("app: absent must stay empty, got %q", got)
+	}
+}
+
+// unionMachines merges the two DOKS node sources (house hanzo-org tag + BYOC
+// Provider.ClusterID) into ONE deduped fleet list. A DOKS-only node surfaces; a
+// node whose droplet is ALSO in the droplet list dedups by droplet id; a
+// same-name collision dedups by name; the FIRST source wins so its row is kept.
+func TestUnionMachinesDedup(t *testing.T) {
+	// Source 1 (house): the authoritative rows — a DOKS node and a droplet already
+	// on the fleet.
+	house := []*service.Machine{
+		{Id: "111", Name: "prod-default-aaa", Provider: "DigitalOcean", Tag: "doks-cluster:prod"},
+		{Id: "999", Name: "web-1", Provider: "DigitalOcean"},
+	}
+	// Source 2 (BYOC): the SAME droplet 111 again (must dedup by id, house wins),
+	// a row that collides by NAME only (web-1, no id overlap → dedup by name), and a
+	// genuinely new BYOC-only node 222.
+	byoc := []*service.Machine{
+		{Id: "111", Name: "prod-default-aaa", Provider: "DigitalOcean", Tag: "doks-cluster:prod"},
+		{Name: "web-1", Provider: "DigitalOcean"},
+		{Id: "222", Name: "byoc-default-zzz", Provider: "DigitalOcean", Tag: "doks-cluster:byoc"},
+	}
+
+	got := unionMachines(house, byoc)
+	if len(got) != 3 {
+		t.Fatalf("union want 3 deduped machines (111, 999/web-1, 222), got %d: %+v", len(got), got)
+	}
+	seen := map[string]*service.Machine{}
+	for _, m := range got {
+		seen[m.Id] = m
+	}
+	if _, ok := seen["111"]; !ok {
+		t.Errorf("DOKS node 111 missing from union")
+	}
+	if _, ok := seen["222"]; !ok {
+		t.Errorf("BYOC-only node 222 missing from union")
+	}
+	if _, ok := seen["999"]; !ok {
+		t.Errorf("droplet 999/web-1 missing; name-collision dedup must not drop the house row")
+	}
+
+	// Empty sources are honest empties, never nil (JSON encodes []).
+	if got := unionMachines(nil, nil); got == nil || len(got) != 0 {
+		t.Fatalf("empty union must be non-nil empty slice, got %#v", got)
 	}
 }

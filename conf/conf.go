@@ -12,22 +12,83 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package conf is visor's ONE configuration reader. It replaces Beego's global
+// AppConfig with a small, dependency-light loader: conf/app.conf is parsed once
+// (ini format), each value's ${VAR||default} form is expanded against the
+// environment exactly as Beego did, and lookups fall through env → file →
+// built-in default. A direct process env var named for the key still wins, so a
+// deployment overrides any setting without touching the file.
 package conf
 
 import (
 	"os"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 
-	"github.com/beego/beego"
+	"gopkg.in/ini.v1"
 )
+
+var (
+	loadOnce sync.Once
+	values   map[string]string
+)
+
+// appConfCandidates are the paths tried for app.conf, in order — the binary
+// runs from the repo root (conf/app.conf) while a package test runs from its
+// own dir (../conf/app.conf). A miss is not fatal: env + defaults still serve.
+var appConfCandidates = []string{
+	"conf/app.conf",
+	"../conf/app.conf",
+	"../../conf/app.conf",
+}
+
+// envExpr matches Beego's ${VAR||default} (and bare ${VAR}) interpolation.
+var envExpr = regexp.MustCompile(`\$\{([^}|]+)(?:\|\|([^}]*))?\}`)
+
+func load() {
+	values = map[string]string{}
+	var path string
+	for _, p := range appConfCandidates {
+		if _, err := os.Stat(p); err == nil {
+			path = p
+			break
+		}
+	}
+	if path == "" {
+		return
+	}
+	cfg, err := ini.Load(path)
+	if err != nil {
+		return
+	}
+	for _, key := range cfg.Section("").KeyStrings() {
+		values[key] = expand(strings.Trim(cfg.Section("").Key(key).String(), `"`))
+	}
+}
+
+// expand resolves ${VAR||default} against the environment: VAR from the env, or
+// the default when unset/empty. A raw value with no ${...} is returned as-is.
+func expand(v string) string {
+	return envExpr.ReplaceAllStringFunc(v, func(m string) string {
+		g := envExpr.FindStringSubmatch(m)
+		name, def := strings.TrimSpace(g[1]), g[2]
+		if val, ok := os.LookupEnv(name); ok && val != "" {
+			return val
+		}
+		return def
+	})
+}
 
 func GetConfigString(key string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
 
-	res := beego.AppConfig.String(key)
+	loadOnce.Do(load)
+	res := values[key]
 	if res == "" {
 		if key == "staticBaseUrl" {
 			res = "https://cdn.hanzo.ai"
@@ -74,4 +135,17 @@ func GetLanguage(language string) string {
 	} else {
 		return language
 	}
+}
+
+// ConfPath returns the resolved app.conf path (or "" if none was found) — used
+// by callers that log where config came from.
+func ConfPath() string {
+	for _, p := range appConfCandidates {
+		if abs, err := filepath.Abs(p); err == nil {
+			if _, err := os.Stat(abs); err == nil {
+				return abs
+			}
+		}
+	}
+	return ""
 }

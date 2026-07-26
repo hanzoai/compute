@@ -14,8 +14,6 @@
 
 package object
 
-import "xorm.io/core"
-
 // Volume represents a block storage volume attached to a machine.
 type Volume struct {
 	Owner string `xorm:"varchar(100) notnull pk" json:"owner"`
@@ -87,7 +85,7 @@ func UpdateVolume(owner string, name string, volume *Volume) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, err = engine.ID(core.PK{owner, name}).AllCols().Update(volume)
+	_, err = engine.ID([]any{owner, name}).AllCols().Update(volume)
 	if err != nil {
 		return false, err
 	}
@@ -99,7 +97,7 @@ func DeleteVolume(volume *Volume) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{volume.Owner, volume.Name}).Delete(&Volume{})
+	affected, err := engine.ID([]any{volume.Owner, volume.Name}).Delete(&Volume{})
 	if err != nil {
 		return false, err
 	}

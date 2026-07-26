@@ -61,7 +61,7 @@ func (c *ApiController) resolveComputeOrg() string {
 	if u := c.GetSessionUser(); u != nil {
 		return strings.TrimSpace(u.Owner)
 	}
-	return strings.TrimSpace(c.Input().Get("owner"))
+	return strings.TrimSpace(c.Ctx.Query("owner"))
 }
 
 // resolveComputeApp / resolveComputeProject return the OPTIONAL app / project
@@ -199,7 +199,213 @@ func (c *ApiController) ListComputeMachines() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(filterMachines(machines, c.Input().Get("kind"), c.Input().Get("name"), c.Input().Get("project")))
+	c.ResponseOk(filterMachines(machines, c.Ctx.Query("kind"), c.Ctx.Query("name"), c.Ctx.Query("project")))
+}
+
+// unionMachines merges machine lists from independent sources into ONE deduped
+// slice: a machine is claimed by provider id OR name, and the FIRST source to
+// carry it wins (later sources contribute only what is not already present). This
+// is the visor-side analogue of the cloud fleet dedup — a DOKS node whose droplet
+// is also in the droplet list appears once (deduped by droplet id). Ordered
+// sources let the caller pick the winner.
+func unionMachines(sources ...[]*service.Machine) []*service.Machine {
+	out := []*service.Machine{}
+	seen := map[string]struct{}{}
+	claimed := func(m *service.Machine) bool {
+		if m.Id != "" {
+			if _, ok := seen["id:"+m.Id]; ok {
+				return true
+			}
+		}
+		if m.Name != "" {
+			if _, ok := seen["name:"+m.Name]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	claim := func(m *service.Machine) {
+		if m.Id != "" {
+			seen["id:"+m.Id] = struct{}{}
+		}
+		if m.Name != "" {
+			seen["name:"+m.Name] = struct{}{}
+		}
+	}
+	for _, src := range sources {
+		for _, m := range src {
+			if claimed(m) {
+				continue
+			}
+			out = append(out, m)
+			claim(m)
+		}
+	}
+	return out
+}
+
+// ListComputeKubernetesNodes
+// @Title ListComputeKubernetesNodes
+// @Tag Compute API
+// @Description list the caller org's DOKS worker nodes (as machines): the deduped union of the house account (hanzo-org cluster tag) and BYOC providers (Provider.ClusterID)
+// @Success 200 {object} controllers.Response
+// @router /k8s/nodes [get]
+func (c *ApiController) ListComputeKubernetesNodes() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	// House-account clusters (hanzo-org tag association) require the house DO token.
+	// When compute is unconfigured, skip this source cleanly rather than hide BYOC
+	// nodes behind an error — the two sources are independent.
+	var house []*service.Machine
+	if service.ComputeConfigured() {
+		var err error
+		house, err = service.ListOrgKubernetesNodes(org)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+	}
+	// BYOC clusters (Provider.ClusterID association).
+	byoc, err := object.GetKubernetesNodesCloud(org)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(unionMachines(house, byoc))
+}
+
+// ---- k8s clusters (house-account DOKS lifecycle, org-scoped) ----
+//
+// The unified /v1/k8s noun: list clusters, one cluster's detail (pools + worker
+// nodes) and DEPLOY (create) / delete DOKS clusters. Every handler is org-scoped by
+// resolveComputeOrg (fail-closed on no org context) — the SAME tenant model the rest
+// of the resell compute surface uses. Per-org isolation lives in the service layer
+// (the hanzo-org cluster tag): a tenant can only ever see or mutate its OWN clusters.
+
+// ListComputeKubernetesClusters
+// @Title ListComputeKubernetesClusters
+// @Tag Compute API
+// @Description list the caller org's DOKS clusters (house account, hanzo-org tag)
+// @Success 200 {object} controllers.Response
+// @router /k8s/clusters [get]
+func (c *ApiController) ListComputeKubernetesClusters() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	clusters, err := service.ListOrgKubernetesClusters(org)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(clusters)
+}
+
+// GetComputeKubernetesCluster
+// @Title GetComputeKubernetesCluster
+// @Tag Compute API
+// @Description get one of the caller org's DOKS clusters by id — detail incl. node pools and worker nodes
+// @router /k8s/clusters/:id [get]
+func (c *ApiController) GetComputeKubernetesCluster() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	id := c.Ctx.Param("id")
+	detail, err := service.GetOrgKubernetesCluster(org, id)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if detail == nil {
+		c.ResponseError("cluster not found")
+		return
+	}
+	c.ResponseOk(detail)
+}
+
+// CreateComputeKubernetesCluster
+// @Title CreateComputeKubernetesCluster
+// @Tag Compute API
+// @Description provision a DOKS cluster for the caller org (body: name, region, version, nodePool{size,count})
+// @router /k8s/clusters [post]
+func (c *ApiController) CreateComputeKubernetesCluster() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	// The request body IS the service spec (one shape, no re-mapping).
+	var spec service.CreateClusterSpec
+	if err := json.Unmarshal(c.Ctx.Body(), &spec); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	spec.Name = strings.TrimSpace(spec.Name)
+	spec.Region = strings.TrimSpace(spec.Region)
+	spec.NodePool.Size = strings.TrimSpace(spec.NodePool.Size)
+	if spec.Name == "" {
+		c.ResponseError("name is required")
+		return
+	}
+	if spec.Region == "" {
+		c.ResponseError("region is required")
+		return
+	}
+	if spec.NodePool.Size == "" {
+		c.ResponseError("nodePool.size is required")
+		return
+	}
+	if spec.NodePool.Count < 1 {
+		c.ResponseError("nodePool.count must be at least 1")
+		return
+	}
+	cluster, err := service.CreateOrgKubernetesCluster(org, &spec)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(cluster)
+}
+
+// DeleteComputeKubernetesCluster
+// @Title DeleteComputeKubernetesCluster
+// @Tag Compute API
+// @Description delete one of the caller org's DOKS clusters by id
+// @router /k8s/clusters/:id [delete]
+func (c *ApiController) DeleteComputeKubernetesCluster() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	if !service.ComputeConfigured() {
+		c.ResponseError("hanzo compute is not configured")
+		return
+	}
+	id := c.Ctx.Param("id")
+	if err := service.DeleteOrgKubernetesCluster(org, id); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk("deleted")
 }
 
 // GetComputeMachine
@@ -213,7 +419,7 @@ func (c *ApiController) GetComputeMachine() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	id := c.Ctx.Input.Param(":id")
+	id := c.Ctx.Param("id")
 	machine, err := service.GetOrgMachine(org, id)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -237,7 +443,7 @@ func (c *ApiController) DeleteComputeMachine() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	id := c.Ctx.Input.Param(":id")
+	id := c.Ctx.Param("id")
 	if err := service.DeleteOrgMachine(org, id); err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -335,7 +541,7 @@ func (c *ApiController) LaunchComputeMachine() {
 	}
 
 	var req launchComputeRequest
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
+	if err := json.Unmarshal(c.Ctx.Body(), &req); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}

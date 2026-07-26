@@ -20,7 +20,6 @@ import (
 
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
-	"xorm.io/core"
 )
 
 // Agent binding lifecycle states. Honest — each reflects a real, observable
@@ -258,7 +257,7 @@ func UpdateAgentBinding(binding *AgentBinding) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{binding.Owner, binding.Name}).AllCols().Update(binding)
+	affected, err := engine.ID([]any{binding.Owner, binding.Name}).AllCols().Update(binding)
 	if err != nil {
 		return false, err
 	}
@@ -387,7 +386,7 @@ func DeleteAgentBinding(binding *AgentBinding) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(core.PK{binding.Owner, binding.Name}).Delete(&AgentBinding{})
+	affected, err := engine.ID([]any{binding.Owner, binding.Name}).Delete(&AgentBinding{})
 	if err != nil {
 		return false, err
 	}

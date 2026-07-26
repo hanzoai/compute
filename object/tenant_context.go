@@ -24,12 +24,13 @@ package object
 import (
 	"strings"
 
-	"github.com/beego/beego/context"
+	"github.com/zap-proto/zip"
 )
 
 // Tenant-scope keys under which the filter stows each header on the request
-// context. Exported so the single writer (the routers filter) and every reader
-// (controllers) share the exact same key — never a duplicated literal.
+// context (zip.Ctx locals). Exported so the single writer (the routers filter)
+// and every reader (controllers) share the exact same key — never a duplicated
+// literal.
 const (
 	TenantContextOrgIDKey     = "tenant.orgId"
 	TenantContextAppIDKey     = "tenant.appId"
@@ -39,48 +40,48 @@ const (
 	TenantContextEnvKey       = "tenant.env"
 )
 
-// SetTenantContextValue stows a non-empty scope value on the request context.
-// Empty values are skipped so an absent header leaves the key unset and every
-// getter falls through to "" — the caller decides whether a missing scope is
-// fatal (org) or optional (app/project).
-func SetTenantContextValue(ctx *context.Context, key, value string) {
-	if ctx == nil || value == "" {
+// SetTenantContextValue stows a non-empty scope value on the request context
+// locals. Empty values are skipped so an absent header leaves the key unset and
+// every getter falls through to "" — the caller decides whether a missing scope
+// is fatal (org) or optional (app/project).
+func SetTenantContextValue(c *zip.Ctx, key, value string) {
+	if c == nil || value == "" {
 		return
 	}
-	ctx.Input.SetData(key, value)
+	c.Locals(key, value)
 }
 
 // GetTenantContextValue reads a scope value back, trimmed; "" when unset or when
-// ctx is nil. This is the ONE read-back; the typed getters below are thin adapters.
-func GetTenantContextValue(ctx *context.Context, key string) string {
-	if ctx == nil {
+// c is nil. This is the ONE read-back; the typed getters below are thin adapters.
+func GetTenantContextValue(c *zip.Ctx, key string) string {
+	if c == nil {
 		return ""
 	}
-	text, _ := ctx.Input.GetData(key).(string)
+	text, _ := c.Locals(key).(string)
 	return strings.TrimSpace(text)
 }
 
 // GetTenantOrgID returns the request's owning org scope (or "").
-func GetTenantOrgID(ctx *context.Context) string {
-	return GetTenantContextValue(ctx, TenantContextOrgIDKey)
+func GetTenantOrgID(c *zip.Ctx) string {
+	return GetTenantContextValue(c, TenantContextOrgIDKey)
 }
 
 // GetTenantAppID returns the request's optional app scope beneath org (or "").
-func GetTenantAppID(ctx *context.Context) string {
-	return GetTenantContextValue(ctx, TenantContextAppIDKey)
+func GetTenantAppID(c *zip.Ctx) string {
+	return GetTenantContextValue(c, TenantContextAppIDKey)
 }
 
 // GetTenantProjectID returns the request's optional project scope beneath app (or "").
-func GetTenantProjectID(ctx *context.Context) string {
-	return GetTenantContextValue(ctx, TenantContextProjectIDKey)
+func GetTenantProjectID(c *zip.Ctx) string {
+	return GetTenantContextValue(c, TenantContextProjectIDKey)
 }
 
 // GetTenantActorID returns the request's acting principal scope (or "").
-func GetTenantActorID(ctx *context.Context) string {
-	return GetTenantContextValue(ctx, TenantContextActorIDKey)
+func GetTenantActorID(c *zip.Ctx) string {
+	return GetTenantContextValue(c, TenantContextActorIDKey)
 }
 
 // GetTenantEnv returns the request's environment scope (or "").
-func GetTenantEnv(ctx *context.Context) string {
-	return GetTenantContextValue(ctx, TenantContextEnvKey)
+func GetTenantEnv(c *zip.Ctx) string {
+	return GetTenantContextValue(c, TenantContextEnvKey)
 }

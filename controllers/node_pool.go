@@ -17,7 +17,6 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/beego/beego/utils/pagination"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
@@ -33,13 +32,13 @@ import (
 // @Success 200 {object} object.NodePool The Response object
 // @router /get-node-pools [get]
 func (c *ApiController) GetNodePools() {
-	owner := c.Input().Get("owner")
-	limit := c.Input().Get("pageSize")
-	page := c.Input().Get("p")
-	field := c.Input().Get("field")
-	value := c.Input().Get("value")
-	sortField := c.Input().Get("sortField")
-	sortOrder := c.Input().Get("sortOrder")
+	owner := c.Ctx.Query("owner")
+	limit := c.Ctx.Query("pageSize")
+	page := c.Ctx.Query("p")
+	field := c.Ctx.Query("field")
+	value := c.Ctx.Query("value")
+	sortField := c.Ctx.Query("sortField")
+	sortOrder := c.Ctx.Query("sortOrder")
 
 	_, err := object.SyncNodePoolsCloud(owner)
 	if err != nil {
@@ -63,14 +62,14 @@ func (c *ApiController) GetNodePools() {
 			return
 		}
 
-		paginator := pagination.SetPaginator(c.Ctx, limit, count)
-		pools, err := object.GetPaginationNodePools(owner, paginator.Offset(), limit, field, value, sortField, sortOrder)
+		offset, nums := util.Paginate(page, limit, count)
+		pools, err := object.GetPaginationNodePools(owner, offset, limit, field, value, sortField, sortOrder)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
-		c.ResponseOk(pools, paginator.Nums())
+		c.ResponseOk(pools, nums)
 	}
 }
 
@@ -82,7 +81,7 @@ func (c *ApiController) GetNodePools() {
 // @Success 200 {object} object.NodePool The Response object
 // @router /get-node-pool [get]
 func (c *ApiController) GetNodePool() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	pool, err := object.GetNodePool(id)
 	if err != nil {
@@ -104,9 +103,9 @@ func (c *ApiController) GetNodePool() {
 // @Success 200 {object} object.NodePool The Response object
 // @router /create-node-pool [post]
 func (c *ApiController) CreateNodePool() {
-	owner := c.Input().Get("owner")
-	provider := c.Input().Get("provider")
-	clusterID := c.Input().Get("clusterId")
+	owner := c.Ctx.Query("owner")
+	provider := c.Ctx.Query("provider")
+	clusterID := c.Ctx.Query("clusterId")
 
 	if owner == "" || provider == "" {
 		c.ResponseError("owner and provider query parameters are required")
@@ -114,7 +113,7 @@ func (c *ApiController) CreateNodePool() {
 	}
 
 	var spec service.CreateNodePoolSpec
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &spec)
+	err := json.Unmarshal(c.Ctx.Body(), &spec)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -138,10 +137,10 @@ func (c *ApiController) CreateNodePool() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-node-pool [post]
 func (c *ApiController) UpdateNodePool() {
-	id := c.Input().Get("id")
+	id := c.Ctx.Query("id")
 
 	var pool object.NodePool
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &pool)
+	err := json.Unmarshal(c.Ctx.Body(), &pool)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -160,7 +159,7 @@ func (c *ApiController) UpdateNodePool() {
 // @router /delete-node-pool [post]
 func (c *ApiController) DeleteNodePool() {
 	var pool object.NodePool
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &pool)
+	err := json.Unmarshal(c.Ctx.Body(), &pool)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -182,11 +181,11 @@ func (c *ApiController) DeleteNodePool() {
 // @Success 200 {object} object.NodePool The Response object
 // @router /scale-node-pool [post]
 func (c *ApiController) ScaleNodePool() {
-	owner := c.Input().Get("owner")
-	provider := c.Input().Get("provider")
-	clusterID := c.Input().Get("clusterId")
-	poolID := c.Input().Get("poolId")
-	countStr := c.Input().Get("count")
+	owner := c.Ctx.Query("owner")
+	provider := c.Ctx.Query("provider")
+	clusterID := c.Ctx.Query("clusterId")
+	poolID := c.Ctx.Query("poolId")
+	countStr := c.Ctx.Query("count")
 
 	if owner == "" || provider == "" || poolID == "" || countStr == "" {
 		c.ResponseError("owner, provider, poolId, and count query parameters are required")

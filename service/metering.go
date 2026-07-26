@@ -28,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beego/beego/logs"
 	"github.com/hanzoai/commerce/metering"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/telemetry"
 )
 

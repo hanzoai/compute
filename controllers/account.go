@@ -15,11 +15,11 @@
 package controllers
 
 import (
-	"encoding/base64"
 	_ "embed"
+	"encoding/base64"
 
-	"github.com/beego/beego"
-	iam "github.com/hanzoai/iam"
+	"github.com/hanzoai/visor/conf"
+	iam "github.com/hanzoai/visor/internal/iam"
 )
 
 //go:embed token_jwt_key.pem
@@ -33,7 +33,7 @@ func init() {
 // read either the canonical iam* keys or the legacy casdoor* keys.
 func cfg(keys ...string) string {
 	for _, k := range keys {
-		if v := beego.AppConfig.String(k); v != "" {
+		if v := conf.GetConfigString(k); v != "" {
 			return v
 		}
 	}
@@ -65,8 +65,8 @@ func InitAuthConfig() {
 }
 
 func (c *ApiController) Signin() {
-	code := c.Input().Get("code")
-	state := c.Input().Get("state")
+	code := c.Ctx.Query("code")
+	state := c.Ctx.Query("state")
 
 	token, err := iam.GetOAuthToken(code, state)
 	if err != nil {
@@ -81,7 +81,7 @@ func (c *ApiController) Signin() {
 	claims.AccessToken = token.AccessToken
 	c.SetSessionClaims(claims)
 	userId := claims.User.Owner + "/" + claims.User.Name
-	c.Ctx.Input.SetParam("recordUserId", userId)
+	c.Ctx.Locals("recordUserId", userId)
 
 	c.ResponseOk(claims)
 }

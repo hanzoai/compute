@@ -20,8 +20,8 @@ import (
 	authz "github.com/hanzoai/authz"
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
-	iam "github.com/hanzoai/iam"
 	"github.com/hanzoai/visor/conf"
+	iam "github.com/hanzoai/visor/internal/iam"
 )
 
 var Enforcer *authz.Enforcer
