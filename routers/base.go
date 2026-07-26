@@ -35,7 +35,7 @@ type Response struct {
 }
 
 // GetSessionUser resolves the caller from the forwarded IAM Bearer JWT — the ONE
-// stateless identity seam. There is no cookie/redis session: an API/console
+// stateless identity seam. There is no cookie or server-side session: an API/console
 // caller presents a short-lived Bearer, verified and brand-bound in
 // object.GetBearerUser.
 func GetSessionUser(c *zip.Ctx) *iam.User {

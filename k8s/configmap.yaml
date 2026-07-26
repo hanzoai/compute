@@ -17,7 +17,6 @@ stringData:
     tableNamePrefix =
     isDemoMode = false
     logPostOnly = true
-    redisEndpoint =
     guacamoleEndpoint = 127.0.0.1:4822
     iamEndpoint = http://iam.hanzo.svc.cluster.local:8000
     clientId = ${IAM_CLIENT_ID}

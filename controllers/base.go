@@ -27,7 +27,7 @@ import (
 // context (zip.Ctx) and the buffered JSON response body (Data["json"]) the
 // record filter reads back. It replaces the Beego controller one-for-one:
 // handlers keep their method receiver, but the framework underneath is zip over
-// fiber/fasthttp — no cookie/redis session. A caller authenticates statelessly
+// fiber/fasthttp — no cookie or server-side session. A caller authenticates statelessly
 // with a forwarded IAM Bearer JWT (object.GetBearerUser); the resolved Principal
 // is the ONE identity seam.
 type ApiController struct {
