@@ -34,8 +34,8 @@ hanzoai/base per-org SQLite. The seam is one interface -- `engineProvider` in
 `object/store.go` -- resolving the `*xorm.Engine` that serves an owner:
 - `pgStore` (default): one shared engine for every owner (WHERE owner=?).
 - `baseStore`: one per-org SQLite engine at `DBPath = <dataRoot>/orgs/<org>/visor.db`
-  (HIP-0302 layout, mirrors hanzo/cloud), CGO-free via `modernc.org/sqlite`
-  (xorm driver name `"sqlite"`).
+  (HIP-0302 layout, mirrors hanzo/cloud), CGO-free via `github.com/hanzoai/sqlite`
+  (the one Hanzo SQLite driver: cgo→SQLCipher, !cgo→modernc; xorm driver name `"sqlite"`).
 
 Selected at boot by `storageBackend` (app.conf / `STORAGE_BACKEND`, default
 `postgres`) + `dataRoot` (`DATA_ROOT`, default `/data`). Every model routes its

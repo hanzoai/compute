@@ -20,18 +20,19 @@ import (
 	"path/filepath"
 	"sync"
 
-	// modernc registers the CGO-free "sqlite" database/sql driver; xorm maps
-	// the "sqlite" driver name onto its sqlite3 dialect (see
-	// xorm.io/xorm/dialects/dialect.go). This is the same driver hanzoai/base
-	// uses, so visor and base share one SQLite engine under CGO_ENABLED=0.
-	_ "modernc.org/sqlite"
+	// hanzoai/sqlite registers the "sqlite" database/sql driver — the one Hanzo
+	// SQLite driver (cgo→SQLCipher/mattn, !cgo→modernc). xorm maps the "sqlite"
+	// driver name onto its sqlite3 dialect (see xorm.io/xorm/dialects/dialect.go).
+	// This is the same driver hanzoai/base uses, so visor and base share one
+	// SQLite engine under CGO_ENABLED=0.
+	_ "github.com/hanzoai/sqlite"
 	"xorm.io/xorm"
 )
 
 // sqlitePragmas mirrors the durability profile hanzoai/base applies to its
 // per-tenant SQLite files: a generous busy timeout, WAL, NORMAL sync, and
-// foreign keys on. modernc reads these from the DSN query string; xorm passes
-// the full DSN through to the driver.
+// foreign keys on. hanzoai/sqlite's pure-Go backend reads these _pragma params
+// from the DSN query string; xorm passes the full DSN through to the driver.
 const sqlitePragmas = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
 
 // baseStore serves each owner's per-tenant tables from its own SQLite file under
