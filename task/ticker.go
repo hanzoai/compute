@@ -143,14 +143,14 @@ func (t *Ticker) deleteUnUsedSession() {
 			if now.Sub(startTime).Hours() > 1 {
 				_, err := object.DeleteSessionById(session.GetId())
 				if err != nil {
-					logs.Info("delete session failed: ", err)
+					logs.Info("delete session failed: %v", err)
 					return
 				}
 			}
 		} else {
 			_, err := object.DeleteSessionById(session.GetId())
 			if err != nil {
-				logs.Info("delete session failed: ", err)
+				logs.Info("delete session failed: %v", err)
 				return
 			}
 		}
