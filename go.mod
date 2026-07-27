@@ -37,16 +37,15 @@ require (
 	github.com/fasthttp/websocket v1.5.12
 	github.com/hanzoai/commerce/metering v0.1.4
 	github.com/hanzoai/ha v0.1.1
-	github.com/hanzoai/orm v0.6.14
+	github.com/hanzoai/orm v0.6.16
 	github.com/hanzoai/sqlite v0.3.2
 	github.com/hanzoai/vfs v0.6.5
 	github.com/hanzoai/xorm v1.4.4
-	github.com/luxfi/log v1.5.0
 	github.com/luxfi/trace v1.3.0
 	github.com/spf13/cobra v1.10.2
 	github.com/valyala/fasthttp v1.72.0
 	github.com/zap-proto/fiber/v3 v3.2.1
-	github.com/zap-proto/zip v1.8.3
+	github.com/zap-proto/zip v1.10.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
@@ -202,6 +201,7 @@ require (
 	github.com/luxfi/database v1.21.1 // indirect
 	github.com/luxfi/geth v1.20.1 // indirect
 	github.com/luxfi/ids v1.3.2 // indirect
+	github.com/luxfi/log v1.5.0 // indirect
 	github.com/luxfi/math v1.5.1 // indirect
 	github.com/luxfi/math/big v0.1.0 // indirect
 	github.com/luxfi/mdns v0.1.1 // indirect
@@ -275,7 +275,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zap-proto/go v1.3.0 // indirect
-	github.com/zap-proto/http v0.2.0 // indirect
+	github.com/zap-proto/http v0.3.0 // indirect
 	github.com/zap-proto/md v0.1.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
