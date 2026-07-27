@@ -192,8 +192,35 @@ vm is the consolidated Casvisor fork (visor archived; content adopted under the
 (master/master_old deleted; nothing lost — the flat-1.30× pricing commit was
 cherry-picked in). Image published as `ghcr.io/hanzoai/visor`.
 
+### How this ships
+
+One way, and it runs on our own stack:
+
+    push  ->  github.com/hanzoai/visor        (a mirror)
+              .github/workflows/sync.yml       carries refs onward
+      ->  git.hanzo.ai/hanzoai/visor           CANONICAL
+              .hanzo/workflows/build.yml       builds ghcr.io/hanzoai/visor
+      ->  hanzoai/universe crs/visor.yaml      names the tag that is live
+      ->  hanzoai/operator                     reconciles the App
+      ->  hanzoai/ingress                      serves visor.hanzo.ai
+
+**git.hanzo.ai is canonical; GitHub is a mirror.** `.github/workflows/` holds
+exactly one file, `sync.yml`, and its only job is getting refs to the forge. Every
+build, check and deploy is a workflow under `.hanzo/workflows/`, which the forge
+reads. `.hanzo/workflows` uses GitHub Actions syntax, so a workflow moves between
+the two by changing directory and nothing else.
+
+`build.yml` was briefly deleted with no replacement anywhere, which left the
+promoted, live `visor` App with **nothing that could build its image** — and no
+failing run to show it, because a workflow that does not exist cannot go red. It is
+restored at the path the forge reads. That failure mode is the whole reason a
+migration is `git mv` and never a delete.
+
+A build never deploys itself: it publishes an image, and `crs/visor.yaml` in
+`hanzoai/universe` names which tag is live.
+
 ### Build pipeline
-`.github/workflows/build.yml` calls the shared `hanzoai/.github` docker-build
+`.hanzo/workflows/build.yml` calls the shared `hanzoai/.github` docker-build
 workflow. Native per-arch build (no QEMU): amd64 on the `hanzo-build-linux-amd64`
 runner, arm64 on spark's arcd (`self-hosted,linux,arm64`); a multi-arch manifest
 is composed from the per-arch tags. `build.sh` cross-compiles via

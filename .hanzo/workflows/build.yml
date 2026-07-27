@@ -1,0 +1,23 @@
+name: Docker
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+jobs:
+  docker:
+    uses: hanzoai/.github/.github/workflows/docker-build.yml@main
+    with:
+      image: ghcr.io/hanzoai/visor
+      target: STANDARD
+      # amd64-only: DOKS has no arm64 droplets (no deploy target) and no arm64
+      # build runner is currently online, so a queued arm64 job would block the
+      # manifest/deploy jobs. Matches the cloud + kms callers. Re-add
+      # linux/arm64 when an arm64 target + runner exist.
+      platforms: linux/amd64
+      runner-amd64: '["hanzo-build-linux-amd64"]'
+    secrets: inherit
