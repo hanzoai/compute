@@ -37,10 +37,10 @@ require (
 	github.com/fasthttp/websocket v1.5.12
 	github.com/hanzoai/commerce/metering v0.1.4
 	github.com/hanzoai/ha v0.1.1
-	github.com/hanzoai/orm v0.6.4
-	github.com/hanzoai/sqlite v0.3.1
+	github.com/hanzoai/orm v0.6.14
+	github.com/hanzoai/sqlite v0.3.2
 	github.com/hanzoai/vfs v0.6.5
-	github.com/hanzoai/xorm v1.4.3
+	github.com/hanzoai/xorm v1.4.4
 	github.com/luxfi/log v1.5.0
 	github.com/luxfi/trace v1.3.0
 	github.com/spf13/cobra v1.10.2
@@ -161,7 +161,7 @@ require (
 	github.com/hanzoai/csqlite v0.1.0 // indirect
 	github.com/hanzoai/dashscope-go-sdk v0.0.2 // indirect
 	github.com/hanzoai/dashscopego v0.6.0 // indirect
-	github.com/hanzoai/dbx v1.16.0 // indirect
+	github.com/hanzoai/dbx v1.17.2 // indirect
 	github.com/hanzoai/decimal v0.1.1 // indirect
 	github.com/hanzoai/go-cosyvoice v1.0.0 // indirect
 	github.com/hanzoai/go-openai v1.41.0 // indirect
