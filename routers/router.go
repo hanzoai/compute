@@ -63,6 +63,16 @@ func initAPI() {
 	beego.Router("/v1/delete-machine", &controllers.ApiController{}, "POST:DeleteMachine")
 	beego.Router("/v1/launch-machine", &controllers.ApiController{}, "POST:LaunchMachine")
 
+	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
+	// per-org machines over Hanzo's house account (controllers/compute.go).
+	beego.Router("/v1/regions", &controllers.ApiController{}, "GET:GetComputeRegions")
+	beego.Router("/v1/sizes", &controllers.ApiController{}, "GET:GetComputeSizes")
+	beego.Router("/v1/gpus", &controllers.ApiController{}, "GET:GetComputeGPUs")
+	beego.Router("/v1/machines", &controllers.ApiController{}, "GET:ListComputeMachines")
+	beego.Router("/v1/machines/launch", &controllers.ApiController{}, "POST:LaunchComputeMachine")
+	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "GET:GetComputeMachine")
+	beego.Router("/v1/machines/:id", &controllers.ApiController{}, "DELETE:DeleteComputeMachine")
+
 	beego.Router("/v1/get-sessions", &controllers.ApiController{}, "GET:GetSessions")
 	beego.Router("/v1/get-session", &controllers.ApiController{}, "GET:GetConnSession")
 	beego.Router("/v1/update-session", &controllers.ApiController{}, "POST:UpdateSession")
