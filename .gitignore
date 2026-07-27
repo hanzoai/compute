@@ -27,7 +27,10 @@ go.work
 tmp/
 tmpFiles/
 *.tmp
-logs/
+# Runtime log OUTPUT, at the repo root only. Unanchored `logs/` matched any
+# directory named logs at any depth — including the logs PACKAGE, whose
+# source was silently dropped from commits while building fine locally.
+/logs/*.log
 lastupdate.tmp
 commentsRouter*.go
 /visor
