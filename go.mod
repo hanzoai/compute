@@ -37,7 +37,7 @@ require (
 	github.com/fasthttp/websocket v1.5.12
 	github.com/hanzoai/commerce/metering v0.1.4
 	github.com/hanzoai/ha v0.1.1
-	github.com/hanzoai/orm v0.6.16
+	github.com/hanzoai/orm v0.6.18
 	github.com/hanzoai/sqlite v0.3.2
 	github.com/hanzoai/vfs v0.6.5
 	github.com/hanzoai/xorm v1.4.4
@@ -108,6 +108,7 @@ require (
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
@@ -174,6 +175,7 @@ require (
 	github.com/hanzoai/search-go v0.36.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.0 // indirect
 	github.com/hanzoai/tasks v1.51.1 // indirect
+	github.com/hanzokv/go/v9 v9.22.0 // indirect
 	github.com/henomis/lingoose v0.1.0 // indirect
 	github.com/hhrutter/lzw v1.0.0 // indirect
 	github.com/hhrutter/pkcs7 v0.2.0 // indirect
@@ -282,6 +284,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20260529124908-c761662dc8c9 // indirect
