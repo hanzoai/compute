@@ -233,7 +233,7 @@ func (provider *Provider) isManagedCluster() bool {
 }
 
 // clusterEvent builds the analytics fleet event for the DOKS cluster this
-// provider registers (kind=cluster). org is the provider's Casdoor owner; the
+// provider registers (kind=cluster). org is the provider's IAM owner; the
 // cluster UUID identifies the unit and Region is its size lens. Price is 0 — the
 // DOKS control plane is free; a cluster's compute cost lives in its node pools
 // (kind=nodepool).

@@ -48,7 +48,7 @@ func (pool *NodePool) GetId() string {
 }
 
 // computeEvent builds this node pool's analytics fleet event (kind=nodepool).
-// org falls back to the pool's Casdoor owner when no explicit billing OrgID is
+// org falls back to the pool's IAM owner when no explicit billing OrgID is
 // set; the DOKS PoolID identifies the unit (its owner/name id when the pool is
 // not yet provisioned), Size is its node slug, and priceCents is the caller's
 // per-event price (CostPerHour on create/scale, 0 on destroy). The single

@@ -30,30 +30,19 @@ func init() {
 	InitAuthConfig()
 }
 
-// cfg returns the first non-empty app.conf value among keys — lets the rebrand
-// read either the canonical iam* keys or the legacy casdoor* keys.
-func cfg(keys ...string) string {
-	for _, k := range keys {
-		if v := conf.GetConfigString(k); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func InitAuthConfig() {
-	iamEndpoint := cfg("iamEndpoint", "casdoorEndpoint")
-	clientId := cfg("clientId")
-	clientSecret := cfg("clientSecret")
-	iamOrganization := cfg("iamOrganization", "casdoorOrganization")
-	iamApplication := cfg("iamApplication", "casdoorApplication")
+	iamEndpoint := conf.GetConfigString("iamEndpoint")
+	clientId := conf.GetConfigString("clientId")
+	clientSecret := conf.GetConfigString("clientSecret")
+	iamOrganization := conf.GetConfigString("iamOrganization")
+	iamApplication := conf.GetConfigString("iamApplication")
 
 	// The JWT verification cert is config-driven (KMS-synced) so a deployment
 	// verifies its own org's tokens (e.g. cert-hanzo) rather than the embedded
 	// upstream default. Delivered base64 to stay single-line-safe in the
 	// app.conf ini; falls back to the embedded PEM when unset.
-	jwtPublicKey := cfg("jwtPublicKey")
-	if b64 := cfg("jwtPublicKeyBase64"); b64 != "" {
+	jwtPublicKey := conf.GetConfigString("jwtPublicKey")
+	if b64 := conf.GetConfigString("jwtPublicKeyBase64"); b64 != "" {
 		if dec, err := base64.StdEncoding.DecodeString(b64); err == nil {
 			jwtPublicKey = string(dec)
 		}
