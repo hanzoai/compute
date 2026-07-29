@@ -17,12 +17,12 @@ package object
 import (
 	"strings"
 
-	iam "github.com/hanzoai/iam-v1"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/hanzoai/visor/conf"
 )
 
 // GetBearerUser validates an "Authorization: Bearer <IAM JWT>" header and
-// returns the authenticated user, or nil. iam.ParseJwtToken verifies the token
+// returns the authenticated user, or nil. iamsdk.ParseJwtToken verifies the token
 // SIGNATURE (jwt.ParseWithClaims + x509), so a forged/tampered token is rejected.
 //
 // Signature alone is NOT sufficient: Hanzo IAM publishes ONE shared JWKS holding
@@ -42,7 +42,7 @@ import (
 // one org can never reach another's machines. This is how API/console callers
 // authenticate as a user (org = user.Owner) from a forwarded short-lived Bearer,
 // without a browser cookie session.
-func GetBearerUser(authHeader string) *iam.User {
+func GetBearerUser(authHeader string) *iamsdk.User {
 	const prefix = "Bearer "
 	if len(authHeader) <= len(prefix) || !strings.EqualFold(authHeader[:len(prefix)], prefix) {
 		return nil
@@ -51,7 +51,7 @@ func GetBearerUser(authHeader string) *iam.User {
 	if token == "" {
 		return nil
 	}
-	claims, err := iam.ParseJwtToken(token)
+	claims, err := iamsdk.ParseJwtToken(token)
 	if err != nil || claims == nil {
 		return nil
 	}

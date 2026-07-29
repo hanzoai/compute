@@ -18,7 +18,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 
-	iam "github.com/hanzoai/iam-v1"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 
 	"github.com/hanzoai/visor/conf"
 )
@@ -51,19 +51,19 @@ func InitAuthConfig() {
 		jwtPublicKey = JwtPublicKey
 	}
 
-	iam.InitConfig(iamEndpoint, clientId, clientSecret, jwtPublicKey, iamOrganization, iamApplication)
+	iamsdk.InitConfig(iamEndpoint, clientId, clientSecret, jwtPublicKey, iamOrganization, iamApplication)
 }
 
 func (c *ApiController) Signin() {
 	code := c.Ctx.Query("code")
 	state := c.Ctx.Query("state")
 
-	token, err := iam.GetOAuthToken(code, state)
+	token, err := iamsdk.GetOAuthToken(code, state)
 	if err != nil {
 		panic(err)
 	}
 
-	claims, err := iam.ParseJwtToken(token.AccessToken)
+	claims, err := iamsdk.ParseJwtToken(token.AccessToken)
 	if err != nil {
 		panic(err)
 	}

@@ -20,7 +20,7 @@ import (
 	authz "github.com/hanzoai/authz"
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
-	iam "github.com/hanzoai/iam-v1"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/hanzoai/visor/conf"
 )
 
@@ -86,7 +86,7 @@ p, *, *, GET, /v1/gpus, *, *
 	}
 }
 
-func IsAllowed(user *iam.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
+func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
 	if conf.GetConfigBool("IsDemoMode") {
 		if !isAllowedInDemoMode(method, urlPath) {
 			return false

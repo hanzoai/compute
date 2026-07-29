@@ -17,7 +17,7 @@ package controllers
 import (
 	"strings"
 
-	iam "github.com/hanzoai/iam-v1"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/visor/object"
@@ -41,7 +41,7 @@ func New(c *zip.Ctx) *ApiController {
 	return &ApiController{Ctx: c, Data: map[string]interface{}{}}
 }
 
-func GetUserName(user *iam.User) string {
+func GetUserName(user *iamsdk.User) string {
 	if user == nil {
 		return ""
 	}
@@ -61,9 +61,9 @@ func wrapActionResponse(affected bool, e ...error) *Response {
 
 // GetSessionClaims parses the forwarded IAM Bearer JWT into its claims — the
 // stateless replacement for the Beego cookie session. Signature is verified by
-// iam.ParseJwtToken; brand/issuer binding is enforced by the ApiFilter (via
+// iamsdk.ParseJwtToken; brand/issuer binding is enforced by the ApiFilter (via
 // object.GetBearerUser) before any handler runs, so this is a plain decode.
-func (c *ApiController) GetSessionClaims() *iam.Claims {
+func (c *ApiController) GetSessionClaims() *iamsdk.Claims {
 	const prefix = "Bearer "
 	h := c.Ctx.Header("Authorization")
 	if len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
@@ -73,7 +73,7 @@ func (c *ApiController) GetSessionClaims() *iam.Claims {
 	if token == "" {
 		return nil
 	}
-	claims, err := iam.ParseJwtToken(token)
+	claims, err := iamsdk.ParseJwtToken(token)
 	if err != nil || claims == nil {
 		return nil
 	}
@@ -83,16 +83,16 @@ func (c *ApiController) GetSessionClaims() *iam.Claims {
 // SetSessionClaims is a no-op in the stateless model: there is no server-side
 // session to write. Signin returns the claims (and access token) to the client,
 // which then carries the token as a Bearer on every subsequent request.
-func (c *ApiController) SetSessionClaims(claims *iam.Claims) {}
+func (c *ApiController) SetSessionClaims(claims *iamsdk.Claims) {}
 
 // GetSessionUser resolves the authenticated user from the forwarded IAM Bearer
 // JWT (brand/issuer-bound in object.GetBearerUser), or nil.
-func (c *ApiController) GetSessionUser() *iam.User {
+func (c *ApiController) GetSessionUser() *iamsdk.User {
 	return object.GetBearerUser(c.Ctx.Header("Authorization"))
 }
 
 // SetSessionUser is a no-op in the stateless model (see SetSessionClaims).
-func (c *ApiController) SetSessionUser(user *iam.User) {}
+func (c *ApiController) SetSessionUser(user *iamsdk.User) {}
 
 func (c *ApiController) GetSessionUsername() string {
 	user := c.GetSessionUser()

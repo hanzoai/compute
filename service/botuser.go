@@ -15,7 +15,7 @@
 package service
 
 import (
-	iam "github.com/hanzoai/iam-v1"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 )
 
 // botuser.go — a launched bot IS an org member. registerBotUser creates an IAM
@@ -27,7 +27,7 @@ import (
 // Best-effort by design: a registration failure never fails the launch (the
 // machine + bot still run; the identity reconciles later). Idempotent — a
 // re-launch of a same-named fleet member no-ops on the existing user. IAM is
-// configured at startup (controllers.InitAuthConfig -> iam.InitConfig), so the
+// configured at startup (controllers.InitAuthConfig -> iamsdk.InitConfig), so the
 // global client is ready by the time any launch runs.
 func registerBotUser(org, name, displayName string) {
 	if org == "" || name == "" {
@@ -36,7 +36,7 @@ func registerBotUser(org, name, displayName string) {
 	if displayName == "" {
 		displayName = name
 	}
-	_, _ = iam.AddUser(&iam.User{
+	_, _ = iamsdk.AddUser(&iamsdk.User{
 		Owner:       org,
 		Name:        name,
 		DisplayName: displayName,

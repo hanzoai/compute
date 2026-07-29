@@ -155,10 +155,22 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
   `COMMERCE_SERVICE_TOKEN`. Never hardcoded; absent ⇒ fail closed.
 
 ### Key Dependencies
-- Go 1.26, Beego 1.12, XORM; `github.com/hanzoai/iam` v1.28.12;
-  `github.com/hanzoai/commerce/metering`; `godo` v1.184
-- `hcloud-go/v2` v2.36, `godo` v1.175, `aws-sdk-go-v2/lightsail` v1.20
-- `hanzoid/go-sdk` v1.45 (IAM integration)
+- Go 1.26, `zap-proto/zip` (no Beego), XORM;
+  `github.com/hanzoai/commerce/metering` v0.1.4
+- `hcloud-go/v2` v2.37, `godo` v1.197, `aws-sdk-go-v2/lightsail`
+- **IAM client: `github.com/hanzoai/iamsdk/v2` — the ONE Go client for Hanzo
+  IAM.** `InitConfig` is called once at startup (`controllers.InitAuthConfig`)
+  and everything else rides the resulting global client: `ParseJwtToken`
+  (verify + decode a forwarded Bearer), `GetOAuthToken` (the `/v1/signin`
+  callback), `AddUser` (bot registration). `iamsdk.User` / `iamsdk.Claims` are
+  the identity types the whole service passes around.
+
+  This used to be `github.com/hanzoai/iam-v1`, whose ROOT package was a second
+  copy of the same SDK — 67 of 73 files byte-identical. That repo is ARCHIVED:
+  it cannot take a push, so it cannot take a security fix, and a deployed
+  service must not depend on one. `deps_test.go` fails the build if it returns.
+  `hanzoai/iam` (v2, the server) is still linked transitively through cloud for
+  its `pkg/model` types — that is the same lineage, not a second one.
 
 ## Key Files
 | Path | Purpose |

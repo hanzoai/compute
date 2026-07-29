@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	iam "github.com/hanzoai/iam-v1"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/visor/conf"
@@ -38,7 +38,7 @@ type Response struct {
 // stateless identity seam. There is no cookie or server-side session: an API/console
 // caller presents a short-lived Bearer, verified and brand-bound in
 // object.GetBearerUser.
-func GetSessionUser(c *zip.Ctx) *iam.User {
+func GetSessionUser(c *zip.Ctx) *iamsdk.User {
 	return object.GetBearerUser(c.Header("Authorization"))
 }
 
