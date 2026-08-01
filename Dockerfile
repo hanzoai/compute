@@ -9,6 +9,10 @@ RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
 
 FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/golang:1.26-alpine AS BACK
+# go.mod pins the toolchain. The golang base image sets GOTOOLCHAIN=local,
+# which turns a `go` directive newer than the image into a hard build
+# failure instead of a download.
+ENV GOTOOLCHAIN=auto
 # build.sh is #!/bin/bash and fetches private modules over git (GOPRIVATE direct)
 RUN apk add --no-cache bash git
 WORKDIR /go/src/hanzo-visor

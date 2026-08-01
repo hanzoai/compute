@@ -260,8 +260,23 @@ The actual reason no image existed for any tag after v1.108.12:
 ships 1.26.4 and sets `GOTOOLCHAIN=local`, so every build died at the first go
 command. The routes added in v1.108.13 therefore never reached an image, and
 `/v1/k8s/nodes` answered `visor: upstream 404` for weeks while the code that
-served it was sitting on main. Fixed in `build.sh` (v1.108.17) with
-`GOTOOLCHAIN=auto`: the module pins the toolchain, the base image is free to lag.
+served it was sitting on main. Fixed with `GOTOOLCHAIN=auto`: the module pins the
+toolchain, the base image is free to lag. First landed in `build.sh` (v1.108.17),
+now set once as `ENV GOTOOLCHAIN=auto` in the Dockerfile's BACK stage — the same
+place every other Hanzo Go builder sets it, and it covers every `go` command in
+the stage rather than only the ones inside `build.sh`.
+
+**The base image stays on `ghcr.io/hanzoai/golang:1.26-alpine`.** An anonymous
+puller gets HTTP 403 with zero listable tags, which reads like a dead mirror and
+has now been mistaken for one twice. It is not: `hanzoai/golang`, `alpine` and
+`guacd` are *private* packages, so GHCR refuses to mint an anonymous scope token
+(`hanzoai/node` and `hanzoai/visor` are public and do mint one — that asymmetry
+is the tell). The builder authenticates with the org-level `GH_PAT`, and a real
+BuildKit run reached `[back 6/6]`, past every `FROM`. The tag is deliberately
+left floating rather than pinned to a patch: the mirror's tag list cannot be
+enumerated without `read:packages`, so pinning to a tag nobody can confirm exists
+would trade a working build for a `manifest unknown` failure. `GOTOOLCHAIN=auto`
+is what makes a floating base tag safe.
 
 Lesson worth keeping: a RED build had a plausible, documented, and *false*
 cause recorded next to it. Nobody had run the build since writing it down. Read
