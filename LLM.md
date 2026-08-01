@@ -245,13 +245,67 @@ The Dockerfile pulls golang/node/alpine/guacd from `ghcr.io/hanzoai/*` (mirrored
 there; alpine variants, small/reliable). Docker Hub is rate-limited (429) for
 the shared-egress runners; ECR is not used (not ours).
 
-**OPEN — build is RED until these 4 packages are made public:**
-`golang`, `node`, `alpine`, `guacd` under github.com/orgs/hanzoai/packages →
-each → Package settings → Change visibility → Public. The shared workflow logs
-into ghcr with `GITHUB_TOKEN`, which cannot pull *cross-repo private* packages
-(403 on `FROM ghcr.io/hanzoai/golang`). Making them public fixes it; then
-re-run the build and both arches go green. (Flipping visibility needs a
-packages-scoped token / the org web UI — not doable from the build host.)
+**RESOLVED — and the diagnosis above was wrong.** The 403 story was never
+verified against a real run. On the platform build lane the base images pull
+FINE (`golang`, `alpine`, `guacd` are still private to an anonymous puller, and
+it does not matter: the builder authenticates with the org-level `GH_PAT`, not
+`GITHUB_TOKEN`). A real BuildKit run reached `[back 6/6]` — i.e. past every
+`FROM` — before failing.
+
+The actual reason no image existed for any tag after v1.108.12:
+
+    go: go.mod requires go >= 1.26.5 (running go 1.26.4; GOTOOLCHAIN=local)
+
+`cd0530f` bumped the go directive to 1.26.5; `ghcr.io/hanzoai/golang:1.26-alpine`
+ships 1.26.4 and sets `GOTOOLCHAIN=local`, so every build died at the first go
+command. The routes added in v1.108.13 therefore never reached an image, and
+`/v1/k8s/nodes` answered `visor: upstream 404` for weeks while the code that
+served it was sitting on main. Fixed in `build.sh` (v1.108.17) with
+`GOTOOLCHAIN=auto`: the module pins the toolchain, the base image is free to lag.
+
+Lesson worth keeping: a RED build had a plausible, documented, and *false*
+cause recorded next to it. Nobody had run the build since writing it down. Read
+the failing log, not the note about the failing log.
+
+### Cutting a release — which lane actually works
+
+Two lanes exist and they fail differently. Know which one you are on.
+
+**Tags must reach the FORGE.** `git.hanzo.ai/hanzoai/visor` is canonical; GitHub
+is a mirror. The build lane lives at `.hanzo/workflows/build.yml`, which only
+Gitea Actions reads — `.github/` has carried zero workflows since `942e2f4`.
+v1.108.15 and v1.108.16 were pushed to GitHub ONLY, so the forge never saw the
+tag, nothing triggered, and the tag looked cut while no image existed. Push tags
+to BOTH remotes, and confirm with
+`git ls-remote --tags https://git.hanzo.ai/hanzoai/visor.git 'refs/tags/v*'`.
+
+**Gitea Actions can be wedged instance-wide, and it looks like "queued".**
+Hanzo Git runs on SQLite (`/data/git/git.db`, `SQLITE_TIMEOUT = 5000`). When the
+DB bloats, `CreateTaskForRunner` exceeds 5000ms, every `FetchTask` returns 500,
+and NO runner is ever assigned ANY task in ANY repo — while the runners sit
+online and idle and the UI just says `queued`. Seen at 8.25 GB with 1,853,355 of
+2,013,625 pages on the free list (92% bloat) and a 4.1 GB WAL that would not
+checkpoint (`wal_checkpoint(TRUNCATE)` -> `BUSY`, 50 of 1,000,794 frames). Check
+`kubectl logs -n hanzo deploy/hanzo-git | grep "pick task failed"` before
+believing a queue is just slow. Real fix needs Gitea quiesced (VACUUM), so it is
+a planned-downtime decision, not something to do mid-release.
+
+**The image-build lane that does NOT depend on any of that** is platform, and it
+is the documented one way to build (universe/LLM.md):
+
+    curl -X POST https://platform.hanzo.ai/v1/runner \
+      -H "Authorization: Bearer $PLATFORM_BUILD_CALLBACK_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"repo":"hanzoai/visor","sha":"<sha>",
+           "image":"ghcr.io/hanzoai/visor:<tag>",
+           "organizationId":"Yb5GFGDBEwcLsv2O8qWjS",
+           "ref":"refs/tags/<tag>","dockerTarget":"STANDARD"}'
+
+`organizationId` is required and is a FOREIGN KEY into platform's `organization`
+table — the slug `hanzo` and an IAM UUID both fail with `FOREIGN KEY constraint
+failed`. The value is `Yb5GFGDBEwcLsv2O8qWjS`. Watch it with
+`kubectl logs -n hanzo-build job/build-visor-<id>`. This is how v1.108.17 was
+built; it runs BuildKit in-cluster, so it never builds on anyone's laptop.
 
 ### Preferred future: registry.hanzo.ai + platform.hanzo.ai (off GitHub)
 Directive: build on our own platform, images in our own registry, not GitHub.
