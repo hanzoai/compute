@@ -17,12 +17,11 @@ package service
 import (
 	"context"
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/digitalocean/godo"
+	"github.com/hanzoai/money"
 	"golang.org/x/oauth2"
 )
 
@@ -58,20 +57,9 @@ func (r *doCostReader) MonthToDateCents(ctx context.Context, _ time.Time) (int64
 	if err != nil {
 		return 0, fmt.Errorf("do cost: get balance: %w", err)
 	}
-	return dollarStringToCents(bal.MonthToDateUsage), nil
-}
-
-// dollarStringToCents parses a DigitalOcean decimal dollar string ("12.34") into
-// whole cents, rounding to the nearest cent. Empty/unparseable → 0 (treated as no
-// spend, never a fabricated charge).
-func dollarStringToCents(s string) int64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
+	cents, err := money.ParseCents(bal.MonthToDateUsage)
+	if err != nil {
+		return 0, fmt.Errorf("do cost: month-to-date usage %q: %w", bal.MonthToDateUsage, err)
 	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil || f <= 0 {
-		return 0
-	}
-	return int64(math.Round(f * 100))
+	return cents, nil
 }

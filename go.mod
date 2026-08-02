@@ -36,6 +36,7 @@ require (
 	github.com/fasthttp/websocket v1.5.12
 	github.com/hanzoai/commerce/metering v0.1.4
 	github.com/hanzoai/ha v0.1.1
+	github.com/hanzoai/money v0.2.2
 	github.com/hanzoai/orm v0.6.18
 	github.com/hanzoai/sqlite v0.4.0
 	github.com/hanzoai/vfs v0.6.6
@@ -65,19 +66,14 @@ require (
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
-	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
-	github.com/dop251/goja v0.0.0-20260627200808-0b76000cabdb // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/evanw/esbuild v0.28.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/gofiber/schema v1.7.1 // indirect
 	github.com/gofiber/utils/v2 v2.0.4 // indirect
-	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
 	github.com/gorilla/rpc v1.2.1 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/hanzo-ds/go v1.0.1 // indirect
@@ -88,11 +84,10 @@ require (
 	github.com/hanzoai/commerce v1.49.29 // indirect
 	github.com/hanzoai/csqlite v0.1.0 // indirect
 	github.com/hanzoai/dbx v1.17.2 // indirect
-	github.com/hanzoai/decimal v0.1.1 // indirect
+	github.com/hanzoai/decimal v0.1.2 // indirect
 	github.com/hanzoai/go-openai v1.41.0 // indirect
 	github.com/hanzoai/iam v1.33.26 // indirect
 	github.com/hanzoai/metrics v1.110.2 // indirect
-	github.com/hanzoai/money v0.2.1 // indirect
 	github.com/hanzoai/s3-go v1.0.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/hanzoai/tasks v1.52.1 // indirect

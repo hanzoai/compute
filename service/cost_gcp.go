@@ -20,11 +20,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hanzoai/money"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -130,21 +131,33 @@ func (r *gcpCostReader) MonthToDateCents(ctx context.Context, now time.Time) (in
 	if len(qr.Rows) == 0 || len(qr.Rows[0].F) == 0 {
 		return 0, nil // no rows this month → no spend
 	}
-	return gcpCellToCents(qr.Rows[0].F[0].V), nil
+	return gcpCellToCents(qr.Rows[0].F[0].V)
 }
 
-// gcpCellToCents converts a BigQuery result cell (a string for numeric columns, or
-// null when SUM has no rows) into cents.
-func gcpCellToCents(v any) int64 {
+// gcpCellToCents converts a BigQuery result cell into cents. BigQuery sends numeric
+// columns as decimal STRINGS, and null when the SUM matched no rows.
+//
+// A null is a real answer — no rows means no spend — so it is 0 with no error. A
+// value that is present but unreadable is not: it returns an error rather than the
+// same 0, because a caller that cannot tell "GCP billed nothing" from "we could not
+// read what GCP billed" reports the second as the first and the spend disappears.
+func gcpCellToCents(v any) (int64, error) {
 	switch x := v.(type) {
+	case nil:
+		return 0, nil
 	case string:
-		return dollarStringToCents(x)
-	case float64:
-		if x <= 0 {
-			return 0
+		cents, err := money.ParseCents(x)
+		if err != nil {
+			return 0, fmt.Errorf("gcp cost: cell %q: %w", x, err)
 		}
-		return int64(math.Round(x * 100))
+		return cents, nil
+	case float64:
+		// JSON numbers decode here. The float is already an approximation, so it
+		// goes through its shortest exact decimal form and the SAME converter —
+		// never a second *100, which would round differently from the string path
+		// and make the answer depend on how BigQuery happened to encode the cell.
+		return money.ParseCents(strconv.FormatFloat(x, 'f', -1, 64))
 	default:
-		return 0
+		return 0, fmt.Errorf("gcp cost: unexpected cell type %T", v)
 	}
 }

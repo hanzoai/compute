@@ -24,6 +24,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	cetypes "github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
+	"github.com/hanzoai/money"
 )
 
 // awsCostReader reads a BYOC AWS account's spend via Cost Explorer
@@ -72,7 +73,11 @@ func (r *awsCostReader) MonthToDateCents(ctx context.Context, now time.Time) (in
 	var cents int64
 	for _, rbt := range out.ResultsByTime {
 		if m, ok := rbt.Total["UnblendedCost"]; ok && m.Amount != nil {
-			cents += dollarStringToCents(*m.Amount)
+			c, err := money.ParseCents(*m.Amount)
+			if err != nil {
+				return 0, fmt.Errorf("aws cost: UnblendedCost %q: %w", *m.Amount, err)
+			}
+			cents += c
 		}
 	}
 	return cents, nil
