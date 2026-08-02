@@ -20,8 +20,6 @@ import (
 	"io/ioutil"
 	"strconv"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 func IndexAt(s, sep string, n int) int {
@@ -129,10 +127,6 @@ func WriteBytesToPath(b []byte, path string) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func GenerateId() string {
-	return uuid.NewString()
 }
 
 // SnakeString transform XxYy to xx_yy

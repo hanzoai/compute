@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/visor/conf"
@@ -181,7 +182,7 @@ func NewRecord(c *zip.Ctx, respJSON any) (*Record, error) {
 	languageCode := conf.GetLanguage(language)
 
 	record := Record{
-		Name:        util.GenerateId(),
+		Name:        uuid.NewString(),
 		CreatedTime: util.GetCurrentTime(),
 		ClientIp:    ip,
 		User:        "",

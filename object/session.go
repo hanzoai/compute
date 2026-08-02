@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/hanzoai/visor/util"
 	"github.com/hanzoai/visor/util/guacamole"
 	"github.com/hanzoai/xorm/schemas"
@@ -210,7 +211,7 @@ func CreateSession(session *Session, machineId string, mode string) (*Session, e
 	}
 
 	session.Owner = machine.Owner
-	session.Name = util.GenerateId()
+	session.Name = uuid.NewString()
 	session.CreatedTime = util.GetCurrentTime()
 	session.Protocol = machine.RemoteProtocol
 	session.Asset = machineId
