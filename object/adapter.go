@@ -172,7 +172,20 @@ func GetSession(owner string, offset, limit int, field, value, sortField, sortOr
 			session = session.And(fmt.Sprintf("%s like ?", util.SnakeString(field)), fmt.Sprintf("%%%s%%", value))
 		}
 	}
-	if sortField == "" || sortOrder == "" {
+	// The sort column is whitelisted exactly like the filter column above, and
+	// for the same reason: both are caller-supplied and both land in an
+	// IDENTIFIER position, where a bound parameter cannot protect them.
+	// SnakeString does not sanitize — it only lowercases and inserts "_" before
+	// capitals — so an all-lowercase payload reaches ORDER BY unchanged, and
+	// "/**/" stands in for the spaces. Every paginated list endpoint takes this
+	// parameter.
+	//
+	// A rejected value falls back to the default rather than erroring: sort
+	// order is presentation, and the UI sends Ant Design dataIndex names
+	// ("createdTime", "displayName"), which are alphanumeric and pass. The
+	// default is a literal, so it is set AFTER the check and never has to
+	// satisfy it (it contains "_", which the whitelist deliberately excludes).
+	if sortField == "" || sortOrder == "" || !util.FilterField(sortField) {
 		sortField = "created_time"
 	}
 	if sortOrder == "ascend" {
