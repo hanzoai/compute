@@ -17,7 +17,8 @@ package util
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -98,7 +99,7 @@ func GetIdFromOwnerAndName(owner string, name string) string {
 }
 
 func ReadStringFromPath(path string) string {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		panic(err)
 	}
@@ -107,14 +108,14 @@ func ReadStringFromPath(path string) string {
 }
 
 func WriteStringToPath(s string, path string) {
-	err := ioutil.WriteFile(path, []byte(s), 0o644)
+	err := os.WriteFile(path, []byte(s), 0o644)
 	if err != nil {
 		panic(err)
 	}
 }
 
 func ReadBytesFromPath(path string) []byte {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		panic(err)
 	}
@@ -122,25 +123,34 @@ func ReadBytesFromPath(path string) []byte {
 	return data
 }
 
-func WriteBytesToPath(b []byte, path string) {
-	err := ioutil.WriteFile(path, b, 0o644)
-	if err != nil {
-		panic(err)
-	}
+func WriteBytesToPath(b []byte, path string) error {
+	return os.WriteFile(path, b, 0o644)
 }
 
 // SnakeString transform XxYy to xx_yy
+//
+// The output names a SQL column (see the ORDER BY and LIKE call sites in
+// object/), so it is schema, not cosmetics. Two rules are load-bearing and both
+// have a test in string_test.go:
+//
+//   - Every capital gets its own separator, acronyms included: "OrgID" is
+//     "org_i_d", not "org_id". That is how the live columns were named.
+//   - A leading underscore already separates, so no second one is emitted:
+//     "_Foo" is "_foo", not "__foo".
 func SnakeString(s string) string {
-	newstr := make([]byte, 0, len(s)+1)
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if isUpper := 'A' <= c && c <= 'Z'; isUpper {
-			if i > 0 {
-				newstr = append(newstr, '_')
-			}
-			c += 'a' - 'A'
+	data := make([]byte, 0, len(s)*2)
+	j := false
+	num := len(s)
+	for i := 0; i < num; i++ {
+		d := s[i]
+		if i > 0 && d >= 'A' && d <= 'Z' && j {
+			data = append(data, '_')
 		}
-		newstr = append(newstr, c)
+		if d != '_' {
+			j = true
+		}
+		data = append(data, d)
 	}
-	return strings.ReplaceAll(string(newstr), " ", "")
+	result := strings.ToLower(string(data[:]))
+	return strings.ReplaceAll(result, " ", "")
 }
