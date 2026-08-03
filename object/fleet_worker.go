@@ -16,7 +16,7 @@ package object
 
 import (
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/xorm/schemas"
+	"github.com/hanzoai/orm/relational/schemas"
 )
 
 // Fleet worker kinds — the BILLING LINEAGE of a connected compute source, resolved

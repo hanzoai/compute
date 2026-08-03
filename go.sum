@@ -314,8 +314,8 @@ github.com/hanzoai/metrics v1.110.2 h1:Q79loK4YKNF255hIaf0CJsd5oq+yMRTsxZyoZREwT
 github.com/hanzoai/metrics v1.110.2/go.mod h1:+XOENte7ldQwSEsY/ASrvCifQqhIG+PFqTGzLxBLvYY=
 github.com/hanzoai/money v0.2.2 h1:moW+8TMcyuD68CktY9HCcgUAFmtL6LAbS6c0dzR+Wvc=
 github.com/hanzoai/money v0.2.2/go.mod h1:V1/RwypNNDjOArVFkkbNrgUXNUKorAiV1WtDNqfx95Q=
-github.com/hanzoai/orm v0.6.18 h1:yRVsJBp6xAzrugjxUWjK0OYY/f3BIIYTVcOYQ4nbbO4=
-github.com/hanzoai/orm v0.6.18/go.mod h1:PqGd9Jv+BOeBZ4UkR7lyb9hy45ROgF+EHk/fXFgwb4o=
+github.com/hanzoai/orm v0.6.20 h1:JRijDR4MzOXYabMTSWIeOSidIG3Ln49A3qzp3uTqkTA=
+github.com/hanzoai/orm v0.6.20/go.mod h1:PqGd9Jv+BOeBZ4UkR7lyb9hy45ROgF+EHk/fXFgwb4o=
 github.com/hanzoai/s3-go v1.0.0 h1:bDdAsy76iWiraHX+zLZALxICDPtmci0ma6mIhdNlViw=
 github.com/hanzoai/s3-go v1.0.0/go.mod h1:2Lp7RS4JS2HSbZ1NEbS5Xx/hnO5PKbnn56D77kOdSBw=
 github.com/hanzoai/sqlcipher v0.1.1 h1:GARjSiUEa1lwhd1/f87XRaujZBG5s1ZwxrZW2Es/ADI=

@@ -14,7 +14,7 @@
 
 package object
 
-import "github.com/hanzoai/xorm/schemas"
+import "github.com/hanzoai/orm/relational/schemas"
 
 // Volume represents a block storage volume attached to a machine.
 type Volume struct {

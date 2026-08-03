@@ -37,10 +37,9 @@ require (
 	github.com/hanzoai/commerce/metering v0.1.4
 	github.com/hanzoai/ha v0.1.1
 	github.com/hanzoai/money v0.2.2
-	github.com/hanzoai/orm v0.6.18
+	github.com/hanzoai/orm v0.6.20
 	github.com/hanzoai/sqlite v0.4.0
 	github.com/hanzoai/vfs v0.6.6
-	github.com/hanzoai/xorm v1.4.4
 	github.com/luxfi/trace v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/valyala/fasthttp v1.72.0
@@ -91,6 +90,7 @@ require (
 	github.com/hanzoai/s3-go v1.0.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/hanzoai/tasks v1.52.1 // indirect
+	github.com/hanzoai/xorm v1.4.4 // indirect
 	github.com/hanzokv/go/v9 v9.22.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect

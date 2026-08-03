@@ -18,7 +18,7 @@ import (
 	"fmt"
 
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/xorm/schemas"
+	"github.com/hanzoai/orm/relational/schemas"
 )
 
 type Service struct {

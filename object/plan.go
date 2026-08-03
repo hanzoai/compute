@@ -14,7 +14,7 @@
 
 package object
 
-import "github.com/hanzoai/xorm/schemas"
+import "github.com/hanzoai/orm/relational/schemas"
 
 // Plan represents a resale VM plan available to customers.
 type Plan struct {

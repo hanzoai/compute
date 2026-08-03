@@ -20,7 +20,7 @@ import (
 
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/xorm/schemas"
+	"github.com/hanzoai/orm/relational/schemas"
 )
 
 type NodePool struct {

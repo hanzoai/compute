@@ -17,7 +17,7 @@ package object
 import (
 	"time"
 
-	"github.com/hanzoai/xorm/schemas"
+	"github.com/hanzoai/orm/relational/schemas"
 )
 
 // CostCursor is the per-account watermark for BYOC cost billing (fleet tier a). It
