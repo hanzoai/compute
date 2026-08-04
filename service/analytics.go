@@ -60,12 +60,25 @@ const (
 //	container — a container workload
 //	function  — a FaaS function (hanzoai/functions)
 //
-// Every bot is a machine with the agent role; not every machine is a bot.
+//	tab       — a machine you can OPEN: it runs `hanzo link`, so it publishes a
+//	            terminal and appears in Tabs. A shell in the cloud, and nothing
+//	            more — no agent, no runtime to keep fed.
+//
+// The kinds NEST, they are not parallel cases. Every kind is at least a machine's
+// worth of compute; a tab is a machine that also published a terminal; a bot is a
+// tab that also runs the agent. Writing it that way means a bot is openable in
+// Tabs for free — which is the thing that was missing, because you could launch a
+// bot and then have no way to look inside it.
+//
+// It also means `tab` is the useful default for a human: launching a bot to get a
+// shell bootstraps an agent runtime nobody asked for, and the runtime is the
+// expensive half.
 // admin.hanzo.ai renders one lens per kind over the one table. Only machine and
 // bot emit today; cluster/nodepool/container/function land later on this SAME
 // table + kind — no schema migration needed (the column is open-ended).
 const (
 	KindMachine   = "machine"
+	KindTab       = "tab"
 	KindBot       = "bot"
 	KindCluster   = "cluster"
 	KindNodePool  = "nodepool"
@@ -78,6 +91,7 @@ const (
 // compute) for anything outside it.
 var knownKinds = map[string]bool{
 	KindMachine:   true,
+	KindTab:       true,
 	KindBot:       true,
 	KindCluster:   true,
 	KindNodePool:  true,
@@ -312,4 +326,20 @@ func writeComputeEvent(ev ComputeEvent) {
 		return
 	}
 	_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
+}
+
+// Opens reports whether a kind publishes a terminal — whether you can open it in
+// Tabs. It is the one place that fact lives, so the launch path, the UI and any
+// sweep agree by construction instead of by three matching switch statements.
+//
+// The kinds nest, so this is a threshold and not a set: tab is where a terminal
+// first appears, and everything richer than a tab has one too. A bot is a tab
+// that also runs the agent, which is exactly why you can look inside one.
+func Opens(kind string) bool {
+	switch CanonicalKind(kind) {
+	case KindTab, KindBot:
+		return true
+	default:
+		return false
+	}
 }
