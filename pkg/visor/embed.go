@@ -78,6 +78,8 @@ func Handler() (h http.Handler, err error) {
 		}
 	}()
 	app := Bootstrap()
-	app.Prepare()
+	if err := app.Build(); err != nil {
+		return nil, fmt.Errorf("visor.Handler: %w", err)
+	}
 	return adaptor.FiberApp(app.Fiber()), nil
 }

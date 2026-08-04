@@ -45,10 +45,10 @@ func Route(app *zip.App) {
 		ExposeHeaders: []string{"Content-Length"},
 		AllowCreds:    true,
 	}))
-	app.Use(TransparentStatic)
-	app.Use(TenantContextFilter)
-	app.Use(ApiFilter)
-	app.Use(RecordMessage)
+	app.Use(zip.H(TransparentStatic))
+	app.Use(zip.H(TenantContextFilter))
+	app.Use(zip.H(ApiFilter))
+	app.Use(zip.H(RecordMessage))
 
 	registerAPI(app)
 }
