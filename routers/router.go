@@ -89,6 +89,46 @@ func registerHealth(app *zip.App) {
 	)
 }
 
+// registerAgent declares a machine's AGENT — the record that it runs the
+// @hanzo/bot runtime for one cloud Agent (controllers/agent_binding.go). Four
+// TYPED ops, so this noun is in the registry every projection reads (OpenAPI,
+// MCP, CLI, the by-name call plane) rather than only on the wire.
+//
+// ONE noun, ONE address, and the METHOD carries the verb. PUT rather than POST
+// because binding is idempotent: re-binding the same agent to the same machine
+// is the state the caller asked for, not a second binding.
+//
+// It is called next to the other /v1/machines routes because that is where the
+// noun lives, and NOT because the position decides anything: fiber prefers a
+// static segment over a `:param` at the same position however the two were
+// registered, so /v1/machines/agents beats /v1/machines/:id on specificity.
+// Measured, not assumed — moving this call below the :id routes leaves the
+// literal still winning. What is worth pinning is the OUTCOME rather than an
+// ordering rule that turns out not to be one, so TestAgentsIsNotAMachineId
+// asserts which handler answers.
+func registerAgent(app *zip.App) {
+	zip.Get(app, "/v1/machines/agents", controllers.ListAgents,
+		zip.WithSummary("List the caller org's agent bindings"),
+		zip.WithOperationID("listAgents"),
+		zip.WithTags("AgentBinding"),
+	)
+	zip.Put(app, "/v1/machines/:id/agent", controllers.BindAgent,
+		zip.WithSummary("Bind a cloud Agent to a machine"),
+		zip.WithOperationID("bindAgent"),
+		zip.WithTags("AgentBinding"),
+	)
+	zip.Get(app, "/v1/machines/:id/agent", controllers.GetAgent,
+		zip.WithSummary("Read a machine's agent binding"),
+		zip.WithOperationID("getAgent"),
+		zip.WithTags("AgentBinding"),
+	)
+	zip.Delete(app, "/v1/machines/:id/agent", controllers.UnbindAgent,
+		zip.WithSummary("Unbind a machine's agent"),
+		zip.WithOperationID("unbindAgent"),
+		zip.WithTags("AgentBinding"),
+	)
+}
+
 // registerAPI registers the /v1 surface, one verb per line. The table is pinned
 // by router_contract_test.go: a route added here without a contract line fails,
 // and so does a contract line with no route.
@@ -132,6 +172,7 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
 	app.Get("/v1/machines", h((*controllers.ApiController).ListComputeMachines))
 	app.Post("/v1/machines/launch", h((*controllers.ApiController).LaunchComputeMachine))
+	registerAgent(app)
 	app.Get("/v1/machines/:id", h((*controllers.ApiController).GetComputeMachine))
 	app.Delete("/v1/machines/:id", h((*controllers.ApiController).DeleteComputeMachine))
 	// Unified /v1/k8s noun — the ONE Kubernetes surface: DOKS cluster lifecycle
@@ -143,13 +184,6 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/k8s/nodes", h((*controllers.ApiController).ListComputeKubernetesNodes))
 	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
 	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
-
-	// Agent↔machine binding — mark a machine as running the @hanzo/bot runtime for
-	// a cloud Agent (controllers/agent_binding.go). Org-scoped in the controller.
-	app.Post("/v1/machines/:id/bind-agent", h((*controllers.ApiController).BindAgent))
-	app.Get("/v1/machines/:id/agent-binding", h((*controllers.ApiController).GetAgentBinding))
-	app.Delete("/v1/machines/:id/agent-binding", h((*controllers.ApiController).UnbindAgent))
-	app.Get("/v1/agent-bindings", h((*controllers.ApiController).GetAgentBindings))
 
 	app.Get("/v1/get-sessions", h((*controllers.ApiController).GetSessions))
 	app.Get("/v1/get-session", h((*controllers.ApiController).GetConnSession))

@@ -28,11 +28,11 @@ func TestIsResellComputePath(t *testing.T) {
 		{"POST", "/v1/machines/launch"},
 		{"GET", "/v1/machines/abc-123"},
 		{"DELETE", "/v1/machines/abc-123"},
-		// Agent↔machine binding surface.
-		{"GET", "/v1/agent-bindings"},
-		{"GET", "/v1/machines/abc-123/agent-binding"},
-		{"DELETE", "/v1/machines/abc-123/agent-binding"},
-		{"POST", "/v1/machines/abc-123/bind-agent"},
+		// A machine's agent — one address, the method carrying the verb.
+		{"GET", "/v1/machines/agents"},
+		{"GET", "/v1/machines/abc-123/agent"},
+		{"DELETE", "/v1/machines/abc-123/agent"},
+		{"PUT", "/v1/machines/abc-123/agent"},
 	}
 	for _, c := range allow {
 		if !isResellComputePath(c.method, c.path) {
@@ -47,12 +47,14 @@ func TestIsResellComputePath(t *testing.T) {
 		{"GET", "/v1/plans"},              // not a resell-compute route
 		{"POST", "/v1/start-session"},     // legacy surface, gated separately
 		{"GET", "/v1/get-account"},
-		{"PUT", "/v1/machines/abc-123"},                // only GET/DELETE by id
-		{"POST", "/v1/machines/abc-123"},               // no blanket POST by id
-		{"POST", "/v1/machines/abc-123/agent-binding"}, // agent-binding is GET/DELETE only
-		{"PUT", "/v1/machines/abc-123/bind-agent"},     // bind-agent is POST only
-		{"POST", "/v1/agent-bindings"},                 // bindings list is read-only
-		{"DELETE", "/v1/agent-bindings"},               // bindings list is read-only
+		{"PUT", "/v1/machines/abc-123"},             // only GET/DELETE by id
+		{"POST", "/v1/machines/abc-123"},            // no blanket POST by id
+		{"POST", "/v1/machines/abc-123/agent"},      // the bind is PUT, and only PUT
+		{"PUT", "/v1/machines/abc-123/tag"},         // PUT is admitted for /agent alone
+		{"POST", "/v1/machines/agents"},             // the binding list is read-only
+		{"PUT", "/v1/machines/agents"},              // …and is not a bind target
+		{"GET", "/v1/agent-bindings"},               // the old list address is gone
+		{"POST", "/v1/machines/abc-123/bind-agent"}, // the old bind address is gone
 	}
 	for _, c := range deny {
 		if isResellComputePath(c.method, c.path) {

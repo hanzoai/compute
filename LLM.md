@@ -61,8 +61,10 @@ bound — so a caller dialling in the instant after start can legitimately get
 `/v1/health` is visor's first TYPED op (`zip.Get[Ping, Health]`, `routers/health.go`),
 which is what puts visor in the op registry every projection reads: OpenAPI,
 MCP, CLI, SDK, and the by-name call plane. `zip.Here` reaches it in-process with
-no wire. The remaining 72 routes are still untyped controller methods, so they
-project nowhere — see "Typed ops: what is left".
+no wire. A machine's AGENT is the second noun to land typed (4 ops,
+`controllers/agent_binding.go`, registered by `routers.registerAgent`). The
+remaining 68 routes are still untyped controller methods, so they project
+nowhere — see "Typed ops: what is left".
 
 Two defects it fixed, both silent:
 1. The k8s probes requested `/api/health`, which is not a route. Being outside
@@ -96,10 +98,35 @@ must not be renamed: `hanzoai/orm` reads that exact tag
 breaks the schema mapping. The migration is done; the tag name is just the
 tag name.
 
-### Typed ops: what is left (NOT done)
-72 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
+### Typed ops: what is left (IN PROGRESS, noun by noun)
+68 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
 registered through `h()`. They serve fine and project NOWHERE — no OpenAPI
 schema, no MCP tool, no CLI verb, no `zip.Here`.
+
+Two nouns have landed: `/v1/health`, and a machine's AGENT — four ops in
+`controllers/agent_binding.go`, registered by `routers.registerAgent`, at ONE
+address with the method carrying the verb:
+
+| Method | Path | Was |
+|--------|------|-----|
+| GET | `/v1/machines/agents` | `GET /v1/agent-bindings` |
+| PUT | `/v1/machines/:id/agent` | `POST /v1/machines/:id/bind-agent` |
+| GET | `/v1/machines/:id/agent` | `GET /v1/machines/:id/agent-binding` |
+| DELETE | `/v1/machines/:id/agent` | `DELETE /v1/machines/:id/agent-binding` |
+
+Those four DROPPED the envelope, exactly as the order below requires: the answer
+is the value, the status is the outcome (absent read → 404, unbind → 204), and
+the org-scoped list is `{"agentBindings":[…]}`. It landed with its cloud caller
+in the same change (`hanzoai/cloud` `apps/visor/{client,bots,visor}.go`), which
+is what makes the break safe. `controllers/agent_wire_test.go` pins those
+answers; the fake vm in cloud's `apps/visor/bots_http_test.go` is written to
+match it.
+
+An op declares the identity it reads — `header:"Authorization"` plus
+`url:"owner"` on the embedded `caller` — because a typed handler is given a
+`context.Context` and no request to reach into. `principal()` is the ONE rule
+resolving those two into an org, and `resolveComputeOrg` now calls it rather
+than restating it.
 
 Converting them is not a mechanical rewrite, and the reason is the wire, not the
 handlers. Visor answers the casibase envelope — HTTP 200 with
@@ -112,18 +139,31 @@ right call — there are no external clients — but it is a two-repo change, an
 half-converted visor has two handler styles and two error shapes, which is worse
 than either.
 
-Order to do it in, when it is done:
+Order to do it in:
 1. Convert cloud's `client.go` off HTTP onto the plane (`zip.Ask`/`zip.Call` by
-   name) — the socket it needs now exists. No visor change required.
-2. Then convert visor's routes to typed ops noun by noun (machines, k8s,
-   node-pools, volumes, plans), each with its cloud caller, dropping the
-   envelope as each lands.
+   name) — the socket it needs now exists. No visor change required. NOT DONE.
+2. Convert visor's routes to typed ops noun by noun (machines, k8s, node-pools,
+   volumes, plans), each with its cloud caller, dropping the envelope as each
+   lands. Started: agent DONE.
 3. `pkg/visor/embed.go`'s fiber→`http.Handler` adaptor goes when step 1 lands.
 
+Step 2 before step 1 costs one thing, and it is paid: while the migration runs,
+cloud's client reads TWO upstream wires and has to be told which — `cl.call` for
+the enveloped legacy ops (23 call sites) and `cl.op` for the typed ones (9).
+They share one request half, and `call` disappears when the last noun lands.
+
 Route/contract bookkeeping: `routers/router_contract_test.go` pins the surface
-at 73 (GET 32, POST 38, DELETE 3) and reads the LIVE fiber router, so a typed op
-swapped in for an untyped route keeps the same contract line and the test keeps
-holding. Health is the one row whose handler is not an `ApiController` method.
+at 73 (GET 32, POST 37, DELETE 3, PUT 1) and reads the LIVE fiber router, so a
+typed op swapped in for an untyped route keeps the same contract line and the
+test keeps holding. The typed rows name package functions rather than
+`ApiController` methods.
+
+One piece of folklore worth not repeating: registering a literal ahead of a
+`:param` sibling does NOT decide the match. Fiber prefers the static segment
+whatever the order — measured by moving `registerAgent` below the `:id` routes
+and watching `/v1/machines/agents` still reach `ListAgents`. What is pinned is
+the outcome (`routers.TestAgentsIsNotAMachineId`), not an ordering rule that is
+not one.
 
 ### Storage backends (Postgres -> Base, additive)
 Visor persists 10 XORM tables (Asset, Provider, Machine, Record, Session,
@@ -286,6 +326,16 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 | GET | `/v1/machines` | Caller org's machines (DO tag `hanzo-org:<org>`) |
 | POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
 | GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |
+
+A machine's AGENT hangs off the same noun and is the exception to the envelope
+row above — those four are TYPED ops with no envelope at all (see "Typed ops"):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/v1/machines/agents` | The caller org's bindings, `{"agentBindings":[…]}` |
+| PUT | `/v1/machines/:id/agent` | Bind a cloud Agent (idempotent) |
+| GET | `/v1/machines/:id/agent` | Read one, reconciled; 404 when unbound |
+| DELETE | `/v1/machines/:id/agent` | Unbind; 204, the machine stays |
 
 - **Auth (IAM-native, multi-tenant per-org):** callers forward an IAM **Bearer
   JWT** (`object.GetBearerUser`, signature-verified) or a cookie session. The

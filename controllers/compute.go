@@ -51,17 +51,15 @@ import (
 //     KMS-held visor client secret reaches this branch.
 //
 // Empty result means "no org context" and the caller fails closed.
+//
+// The rule itself lives in principal (agent_binding.go) and is read from there,
+// not restated here: a typed op declares the Bearer and the ?owner as INPUTS and
+// so cannot reach a request to ask, while these untyped handlers fetch both off
+// the Ctx. Two ways to obtain the same two strings is fine; two answers to
+// "whose org is this" would not be.
 func (c *ApiController) resolveComputeOrg() string {
-	// An authenticated principal's org (session or Bearer) is authoritative and
-	// NOT overridable by a client-supplied ?owner. An authenticated user with an
-	// empty Owner claim resolves to "" and the caller fails closed — it does NOT
-	// fall through to ?owner. Only an unauthenticated service/app call (Basic
-	// client-id/secret; no session/Bearer user) may pass ?owner, and ApiFilter
-	// has already authorized it as subOwner=="app".
-	if u := c.GetSessionUser(); u != nil {
-		return strings.TrimSpace(u.Owner)
-	}
-	return strings.TrimSpace(c.Ctx.Query("owner"))
+	_, org := principal(c.Ctx.Header("Authorization"), c.Ctx.Query("owner"))
+	return org
 }
 
 // resolveComputeApp / resolveComputeProject return the OPTIONAL app / project

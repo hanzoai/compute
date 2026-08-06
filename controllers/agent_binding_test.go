@@ -16,7 +16,7 @@ package controllers
 
 import "testing"
 
-// splitOwnerName is the panic-safety core of machineIdFromPath: the `:id` path
+// splitOwnerName is the panic-safety core of the tenant guard: the `:id` path
 // param is attacker-controlled and must never crash the request. util's
 // GetOwnerAndNameFromId panics on != 2 tokens and NoCheck index-panics on a
 // single token; splitOwnerName must fail closed instead.

@@ -47,9 +47,9 @@ type route struct{ method, path, handler string }
 //
 // Changing a line here changes visor's public API. That is the point.
 var apiContract = []route{
-	// The one TYPED op, and the only row whose handler is not an ApiController
-	// method: health is declared as zip.Get[Ping, Health], so it is in the
-	// registry every projection reads rather than only on the wire.
+	// The TYPED ops, whose handlers are package functions rather than
+	// ApiController methods: health here, and a machine's agent below. A typed op
+	// is in the registry every projection reads rather than only on the wire.
 	{"GET", "/v1/health", "health"},
 
 	{"POST", "/v1/signin", "Signin"},
@@ -83,6 +83,14 @@ var apiContract = []route{
 	{"GET", "/v1/gpus", "GetComputeGPUs"},
 	{"GET", "/v1/machines", "ListComputeMachines"},
 	{"POST", "/v1/machines/launch", "LaunchComputeMachine"},
+	// A machine's AGENT — four TYPED ops (see registerAgent), so like health
+	// these rows name package functions rather than ApiController methods. The
+	// literal /v1/machines/agents is declared here, ahead of /v1/machines/:id,
+	// in the order registerAPI installs them.
+	{"GET", "/v1/machines/agents", "ListAgents"},
+	{"PUT", "/v1/machines/:id/agent", "BindAgent"},
+	{"GET", "/v1/machines/:id/agent", "GetAgent"},
+	{"DELETE", "/v1/machines/:id/agent", "UnbindAgent"},
 	{"GET", "/v1/machines/:id", "GetComputeMachine"},
 	{"DELETE", "/v1/machines/:id", "DeleteComputeMachine"},
 	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
@@ -92,10 +100,6 @@ var apiContract = []route{
 	{"GET", "/v1/k8s/nodes", "ListComputeKubernetesNodes"},
 	{"GET", "/v1/images", "ListImages"},
 	{"POST", "/v1/images", "CreateImage"},
-	{"POST", "/v1/machines/:id/bind-agent", "BindAgent"},
-	{"GET", "/v1/machines/:id/agent-binding", "GetAgentBinding"},
-	{"DELETE", "/v1/machines/:id/agent-binding", "UnbindAgent"},
-	{"GET", "/v1/agent-bindings", "GetAgentBindings"},
 	{"GET", "/v1/get-sessions", "GetSessions"},
 	{"GET", "/v1/get-session", "GetConnSession"},
 	{"POST", "/v1/update-session", "UpdateSession"},
@@ -208,7 +212,7 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 32, "POST": 38, "DELETE": 3}
+	want := map[string]int{"GET": 32, "POST": 37, "DELETE": 3, "PUT": 1}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {
@@ -238,10 +242,11 @@ func TestAPIContractNoDuplicatePaths(t *testing.T) {
 	}
 }
 
-// TestAPIContractHandlersExist proves every handler named in the contract is a
-// real method on *controllers.ApiController. registerAPI takes the method values
-// directly, so this is enforced at compile time; the explicit check keeps the
-// contract table honest if a route is ever registered via a string indirection.
+// TestAPIContractHandlersExist proves every contract row names a handler.
+// registerAPI takes the function values directly — an ApiController method for
+// an untyped route, a package function for a typed op — so existence is enforced
+// at compile time; the explicit check keeps the table honest if a route is ever
+// registered via a string indirection.
 func TestAPIContractHandlersExist(t *testing.T) {
 	for _, r := range apiContract {
 		if r.handler == "" {
