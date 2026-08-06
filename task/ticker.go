@@ -18,9 +18,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/billing"
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
@@ -40,31 +39,23 @@ func (t *Ticker) SetupTicker() {
 		}
 	}()
 
-	// billing: report node pool usage every hour.
+	// compute metering: debit every RUNNING resell resource one hour of its resale
+	// price to its owning org, every hour, on the canonical commerce/metering path
+	// (same client the launch debit uses). A running machine and a running node
+	// pool both keep drawing down the org's credit balance.
 	//
-	// Wired UNCONDITIONALLY, and the reporter is built per tick. Both halves
-	// matter: a startup-time config check silently disables billing FOREVER for
-	// a pod that booted before its KMS-synced credential landed, and a reporter
-	// built once captures whatever the config said at boot. Deciding per tick
-	// means a late credential starts billing on the next hour, and a missing one
-	// is reported every hour instead of never (ReportAllNodePools is loud).
-	billingTicker := time.NewTicker(time.Hour)
-	go func() {
-		for range billingTicker.C {
-			billing.NewBillingReporter(
-				conf.GetConfigString("commerceUrl"),
-				conf.GetConfigString("commerceToken"),
-			).ReportAllNodePools(context.Background())
-		}
-	}()
-	logs.Info("billing: hourly node pool usage reporting enabled")
-
-	// compute metering: debit every RUNNING /v1 resell machine one hour of its
-	// resale price to its owning org, every hour, on the canonical commerce/
-	// metering path (same client the launch debit uses). A running bound machine
-	// keeps drawing down the org's credit balance. Enablement is decided inside
-	// MeterRunningMachines (no-op when commerce or compute is unconfigured), so
-	// this is wired unconditionally — no second config gate to drift.
+	// ONE sweep, TWO resource kinds, ONE lease. Machines are enumerated from the
+	// house DigitalOcean account and node pools from the store, but they are the
+	// same billable hour, so they share the per-hour claim below. Two tickers each
+	// calling ClaimMeterHour would have one starve the other: the hour is a single
+	// PK, so whichever claimed first would win it and the other kind would never be
+	// billed at all. (Node pools used to run on a second, unleased ticker — so
+	// every replica swept them, and nothing stopped a rolling deploy re-billing an
+	// hour.)
+	//
+	// Enablement is decided inside each sweep (no-op when commerce or compute is
+	// unconfigured), so this is wired unconditionally — no second config gate to
+	// drift.
 	//
 	// SINGLE-FLIGHT ACROSS REPLICAS (money safety): visor runs replicas: 2+ with no
 	// external coordinator, and commerce does NOT dedup the withdraw on requestId, so an
@@ -90,12 +81,16 @@ func (t *Ticker) SetupTicker() {
 	computeTicker := time.NewTicker(time.Hour)
 	go func() {
 		for range computeTicker.C {
-			if object.IsBillingOwner() && object.ClaimMeterHour(time.Now()) {
-				service.MeterRunningMachines(context.Background())
+			now := time.Now()
+			if !object.IsBillingOwner() || !object.ClaimMeterHour(now) {
+				continue
 			}
+			ctx := context.Background()
+			service.MeterRunningMachines(ctx)
+			billing.MeterRunningNodePools(ctx, now)
 		}
 	}()
-	logs.Info("compute metering: hourly running-machine drawdown enabled (single-flight per hour, elected owner)")
+	logs.Info("compute metering: hourly running-resource drawdown enabled (machines + node pools, single-flight per hour, elected owner)")
 }
 
 func (t *Ticker) deleteUnUsedSession() {
