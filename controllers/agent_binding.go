@@ -85,9 +85,11 @@ type AgentBind struct {
 	caller
 }
 
-// AgentScope is the whole input of the list: the caller, and nothing else. The
-// collection IS the caller's org, so there is nothing to address.
-type AgentScope struct {
+// Scope is the whole input of a read whose collection IS the caller's org: the
+// caller, and nothing else to address. Shared by every such op (the agent list
+// here, the k8s worker nodes in compute.go) because it is one shape, and one
+// shape published under two names is two schemas a generated client must learn.
+type Scope struct {
 	caller
 }
 
@@ -269,7 +271,7 @@ func UnbindAgent(_ context.Context, in *AgentRef) (*struct{}, error) {
 // machines run which cloud Agent, newest first, each with its reconciled status.
 //
 // Response: {"agentBindings": [{"owner": "acme", "name": "drop-a", "agentName": "bot-a", "status": "Bound"}]}
-func ListAgents(_ context.Context, in *AgentScope) (*Agents, error) {
+func ListAgents(_ context.Context, in *Scope) (*Agents, error) {
 	// The org is the caller's resolved org (spoof-proof): a client-supplied
 	// ?owner is honored only for the service/app subject, exactly as principal
 	// governs the rest of the resell compute surface. A user can therefore only

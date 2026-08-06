@@ -181,7 +181,17 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/k8s/clusters", h((*controllers.ApiController).CreateComputeKubernetesCluster))
 	app.Get("/v1/k8s/clusters/:id", h((*controllers.ApiController).GetComputeKubernetesCluster))
 	app.Delete("/v1/k8s/clusters/:id", h((*controllers.ApiController).DeleteComputeKubernetesCluster))
-	app.Get("/v1/k8s/nodes", h((*controllers.ApiController).ListComputeKubernetesNodes))
+	// The worker NODES are a TYPED op. Every other line in this table registers a
+	// handler and nothing else: the route exists on the wire and in none of the
+	// projections, so the OpenAPI document, the MCP tool list, the CLI and the
+	// generated SDKs do not know it is there. This one is declared with its In and
+	// Out, so it appears in all of them — and cloud, which folds these nodes into
+	// the fleet, can be generated against it instead of hand-written to match.
+	zip.Get[controllers.Scope, controllers.Nodes](app, "/v1/k8s/nodes", controllers.ListNodes,
+		zip.WithSummary("List the org's managed-Kubernetes worker nodes as machines"),
+		zip.WithOperationID("nodes"),
+		zip.WithTags("Compute"),
+	)
 	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
 	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
 

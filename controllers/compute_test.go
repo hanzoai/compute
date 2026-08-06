@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/zap-proto/zip"
@@ -203,5 +204,22 @@ func TestUnionMachinesDedup(t *testing.T) {
 	// Empty sources are honest empties, never nil (JSON encodes []).
 	if got := unionMachines(nil, nil); got == nil || len(got) != 0 {
 		t.Fatalf("empty union must be non-nil empty slice, got %#v", got)
+	}
+}
+
+// Nodes must put an ARRAY on the wire even when the org has none.
+//
+// It is the difference between "no nodes" and "this service does not serve this
+// op", and a reader on the far side of a version skew has nothing else to tell
+// them apart: a build that answers `{}` or `{"nodes":null}` decodes into a caller
+// as an empty fleet and reports nothing wrong. cloud folds these nodes into the
+// world fleet, so the wrong answer there is a silently smaller estate.
+func TestNodesIsAlwaysAnArray(t *testing.T) {
+	b, err := json.Marshal(&Nodes{Nodes: unionMachines(nil, nil)})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got, want := string(b), `{"nodes":[]}`; got != want {
+		t.Fatalf("empty Nodes = %s, want %s", got, want)
 	}
 }

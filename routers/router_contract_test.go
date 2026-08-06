@@ -48,9 +48,11 @@ type route struct{ method, path, handler string }
 // Changing a line here changes visor's public API. That is the point.
 var apiContract = []route{
 	// The TYPED ops, whose handlers are package functions rather than
-	// ApiController methods: health here, and a machine's agent below. A typed op
-	// is in the registry every projection reads rather than only on the wire.
+	// ApiController methods: health and the k8s worker nodes here, a machine's
+	// agent below. A typed op is in the registry every projection reads rather
+	// than only on the wire.
 	{"GET", "/v1/health", "health"},
+	{"GET", "/v1/k8s/nodes", "ListNodes"},
 
 	{"POST", "/v1/signin", "Signin"},
 	{"POST", "/v1/signout", "Signout"},
@@ -97,7 +99,6 @@ var apiContract = []route{
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
 	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},
 	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
-	{"GET", "/v1/k8s/nodes", "ListComputeKubernetesNodes"},
 	{"GET", "/v1/images", "ListImages"},
 	{"POST", "/v1/images", "CreateImage"},
 	{"GET", "/v1/get-sessions", "GetSessions"},

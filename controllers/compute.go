@@ -33,8 +33,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/commerce/metering"
 	"github.com/hanzoai/visor/object"
@@ -242,37 +245,43 @@ func unionMachines(sources ...[]*service.Machine) []*service.Machine {
 	return out
 }
 
-// ListComputeKubernetesNodes
-// @Title ListComputeKubernetesNodes
-// @Tag Compute API
-// @Description list the caller org's DOKS worker nodes (as machines): the deduped union of the house account (hanzo-org cluster tag) and BYOC providers (Provider.ClusterID)
-// @Success 200 {object} controllers.Response
-// @router /k8s/nodes [get]
-func (c *ApiController) ListComputeKubernetesNodes() {
-	org := c.resolveComputeOrg()
+// Nodes is an org's managed-Kubernetes worker inventory, one row per node.
+//
+// The field is ALWAYS an array on the wire, never null and never absent: a reader
+// tells "this service does not serve this op" from "this org has no nodes" by
+// whether the field arrived at all, and that distinction is the only thing between
+// a version skew and a fleet that silently reads as empty.
+type Nodes struct {
+	Nodes []*service.Machine `json:"nodes"`
+}
+
+// ListNodes lists the caller org's DOKS worker nodes as machines: the deduped
+// union of the house account (clusters carrying the hanzo-org tag) and BYOC
+// providers (clusters named by Provider.ClusterID). A DOKS node's droplet carries
+// k8s tags rather than a hanzo-org droplet tag, so it appears on no other list —
+// this op is how a cluster's workers are visible as machines at all.
+//
+// The two sources are independent, and the house one needs the house DO token: an
+// unconfigured compute deployment skips it rather than failing the whole read and
+// hiding the BYOC nodes behind an error.
+func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
+	_, org := principal(in.Authorization, in.Owner)
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
-		return
+		return nil, zip.ErrForbidden("no org context")
 	}
-	// House-account clusters (hanzo-org tag association) require the house DO token.
-	// When compute is unconfigured, skip this source cleanly rather than hide BYOC
-	// nodes behind an error — the two sources are independent.
 	var house []*service.Machine
 	if service.ComputeConfigured() {
 		var err error
 		house, err = service.ListOrgKubernetesNodes(org)
 		if err != nil {
-			c.ResponseError(err.Error())
-			return
+			return nil, zip.Errorf(http.StatusBadGateway, "%s", err.Error())
 		}
 	}
-	// BYOC clusters (Provider.ClusterID association).
 	byoc, err := object.GetKubernetesNodesCloud(org)
 	if err != nil {
-		c.ResponseError(err.Error())
-		return
+		return nil, zip.Errorf(http.StatusBadGateway, "%s", err.Error())
 	}
-	c.ResponseOk(unionMachines(house, byoc))
+	return &Nodes{Nodes: unionMachines(house, byoc)}, nil
 }
 
 // ---- k8s clusters (house-account DOKS lifecycle, org-scoped) ----
