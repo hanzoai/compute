@@ -23,12 +23,15 @@ import (
 // GetPlans
 // @Title GetPlans
 // @Tag Plan API
-// @Description get active plans for a given owner
-// @Param   owner  query  string  true  "The owner"
+// @Description get the caller org's active plans
 // @Success 200 {array} object.Plan
 // @router /get-plans [get]
 func (c *ApiController) GetPlans() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	plans, err := object.GetPlans(owner)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -41,12 +44,16 @@ func (c *ApiController) GetPlans() {
 // @Title GetPlan
 // @Tag Plan API
 // @Description get a single plan
-// @Param   owner  query  string  true  "The owner"
 // @Param   name   query  string  true  "The plan name"
 // @Success 200 {object} object.Plan
 // @router /get-plan [get]
 func (c *ApiController) GetPlan() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	// The query names WHICH plan; it never names WHOSE.
 	name := c.Ctx.Query("name")
 
 	plan, err := object.GetPlan(owner, name)
@@ -79,13 +86,16 @@ func (c *ApiController) AddPlan() {
 // @Title UpdatePlan
 // @Tag Plan API
 // @Description update a plan
-// @Param   owner  query  string  true  "The owner"
 // @Param   name   query  string  true  "The plan name"
 // @Param   body   body   object.Plan  true  "The plan"
 // @Success 200 {object} controllers.Response
 // @router /update-plan [post]
 func (c *ApiController) UpdatePlan() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	name := c.Ctx.Query("name")
 
 	var plan object.Plan

@@ -30,7 +30,11 @@ import (
 // @Success 200 {object} object.Asset The Response object
 // @router /get-assets [get]
 func (c *ApiController) GetAssets() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	limit := c.Ctx.Query("pageSize")
 	page := c.Ctx.Query("p")
 	field := c.Ctx.Query("field")

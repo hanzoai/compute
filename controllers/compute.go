@@ -59,6 +59,14 @@ import (
 // so cannot reach a request to ask, while these untyped handlers fetch both off
 // the Ctx. Two ways to obtain the same two strings is fine; two answers to
 // "whose org is this" would not be.
+//
+// This is the ONLY place in the package that reads `?owner`, and that is an
+// invariant a test holds (controllers/agreement_test.go). A handler that reads
+// it directly gets a SECOND answer to whose org this is, and the authorization
+// filter is judging the first one: it derives the object's owner from `?id=` or
+// the request body (routers/authz_filter.go), so a request naming the caller
+// there and somebody else in `?owner` was authorized against one org and served
+// against another.
 func (c *ApiController) resolveComputeOrg() string {
 	_, org := principal(c.Ctx.Header("Authorization"), c.Ctx.Query("owner"))
 	return org

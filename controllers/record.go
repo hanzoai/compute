@@ -30,7 +30,11 @@ import (
 // @Success 200 {object} object.Record The Response object
 // @router /get-records [get]
 func (c *ApiController) GetRecords() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	limit := c.Ctx.Query("pageSize")
 	page := c.Ctx.Query("p")
 	field := c.Ctx.Query("field")
