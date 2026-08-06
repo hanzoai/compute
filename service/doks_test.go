@@ -14,7 +14,10 @@
 
 package service
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // TestNodePoolMachines pins the DOKS node -> fleet Machine mapping: one Machine
 // per WORKER NODE (not per pool), keyed by the node's DropletID so it dedups
@@ -73,5 +76,39 @@ func TestNodePoolMachines(t *testing.T) {
 	// A cluster with no pools maps to no machines (no panic, honest empty).
 	if got := nodePoolMachines(&KubernetesCluster{Name: "empty"}, nil); len(got) != 0 {
 		t.Fatalf("empty cluster want 0 machines, got %d", len(got))
+	}
+}
+
+// An autoscaling pool grows and shrinks without a request reaching visor, so
+// nothing writes the new number down anywhere visor controls. The nodes the
+// provider reports are the only ground truth, and every one of them is a droplet
+// Hanzo is paying for — so the count that bills is the count that exists.
+//
+// The declared Count is the fallback for a pool returned without node detail: a
+// missing list must never be read as "free".
+func TestLiveNodesCountsTheNodesThatExist(t *testing.T) {
+	nodes := func(n int) []NodeInfo {
+		out := make([]NodeInfo, n)
+		for i := range out {
+			out[i] = NodeInfo{ID: fmt.Sprintf("n-%d", i), DropletID: fmt.Sprintf("%d", 100+i)}
+		}
+		return out
+	}
+	for name, tc := range map[string]struct {
+		pool *NodePool
+		want int
+	}{
+		"an autoscaled pool bills what it grew to": {&NodePool{Count: 1, Nodes: nodes(16)}, 16},
+		"a shrunk pool bills what is left":         {&NodePool{Count: 16, Nodes: nodes(2)}, 2},
+		"an agreeing pool is itself":               {&NodePool{Count: 4, Nodes: nodes(4)}, 4},
+		"no node detail falls back to the count":   {&NodePool{Count: 3}, 3},
+		"an empty pool costs nothing":              {&NodePool{Count: 0}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := liveNodes(tc.pool); got != tc.want {
+				t.Fatalf("liveNodes(count=%d nodes=%d) = %d, want %d",
+					tc.pool.Count, len(tc.pool.Nodes), got, tc.want)
+			}
+		})
 	}
 }
