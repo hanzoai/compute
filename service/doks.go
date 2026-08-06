@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/digitalocean/godo"
-	"golang.org/x/oauth2"
 )
 
 type NodeInfo struct {
@@ -71,11 +70,7 @@ func NewDOKSClient(token, clusterID string) (*DOKSClient, error) {
 		return nil, fmt.Errorf("DOKS cluster ID is required")
 	}
 
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	oauthClient := oauth2.NewClient(context.Background(), tokenSource)
-	client := godo.NewClient(oauthClient)
-
-	return &DOKSClient{Client: client, ClusterID: clusterID}, nil
+	return &DOKSClient{Client: newDOClient(token), ClusterID: clusterID}, nil
 }
 
 func nodePoolFromGodo(pool *godo.KubernetesNodePool) *NodePool {

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/digitalocean/godo"
 	"golang.org/x/oauth2"
@@ -29,6 +30,30 @@ type MachineDigitalOceanClient struct {
 	region string
 }
 
+// doAPITimeout bounds every call visor makes to DigitalOcean.
+//
+// An HTTP client with no timeout waits for as long as the socket stays open, and
+// a provision waits UNDER the org's provisioning hold (service.Provision). So one
+// hung api.digitalocean.com did not fail a request — it wedged that org's every
+// subsequent provision behind a mutex nobody was going to release, with no error,
+// no log and no recovery short of a restart. Bounding the call is what bounds the
+// hold.
+//
+// Thirty seconds is generous for a single DO API call and short enough that a
+// stuck one surfaces as an error a caller can see and a retry can clear.
+const doAPITimeout = 30 * time.Second
+
+// newDOClient is the ONE DigitalOcean client constructor: token auth, bounded.
+// Every DO surface visor drives — droplets, volumes, managed Kubernetes, cost —
+// builds through it, so "a DigitalOcean call cannot hang forever" is one
+// statement in one place rather than four that have to agree.
+func newDOClient(token string) *godo.Client {
+	httpClient := oauth2.NewClient(context.Background(),
+		oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
+	httpClient.Timeout = doAPITimeout
+	return godo.NewClient(httpClient)
+}
+
 func newMachineDigitalOceanClient(accessKeyId string, accessKeySecret string, region string) (MachineDigitalOceanClient, error) {
 	// DigitalOcean uses a single API token (passed as accessKeySecret).
 	token := accessKeySecret
@@ -36,11 +61,7 @@ func newMachineDigitalOceanClient(accessKeyId string, accessKeySecret string, re
 		token = accessKeyId
 	}
 
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	oauthClient := oauth2.NewClient(context.Background(), tokenSource)
-	client := godo.NewClient(oauthClient)
-
-	return MachineDigitalOceanClient{Client: client, region: region}, nil
+	return MachineDigitalOceanClient{Client: newDOClient(token), region: region}, nil
 }
 
 func getMachineFromDroplet(droplet godo.Droplet) *Machine {

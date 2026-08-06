@@ -242,3 +242,44 @@ func TestBuildDropletTags_ACustomerCannotForgeTheKubernetesExclusion(t *testing.
 		t.Fatalf("a customer escaped the machine meter with launch tags: %v", tags)
 	}
 }
+
+// A DigitalOcean call with no timeout does not fail — it waits for as long as the
+// socket stays open. That matters here more than usual because a provision waits
+// UNDER the org's provisioning hold, so one hung api.digitalocean.com wedges that
+// org's every subsequent provision behind a mutex nobody will release.
+//
+// Every DO surface builds through the one constructor, so the bound is one
+// statement rather than four that have to agree.
+func TestEveryDigitalOceanClientIsBounded(t *testing.T) {
+	machine, err := newMachineDigitalOceanClient("", "tok", "nyc3")
+	if err != nil {
+		t.Fatalf("machine client: %v", err)
+	}
+	volume, err := newVolumeDigitalOceanClient("", "tok", "nyc3")
+	if err != nil {
+		t.Fatalf("volume client: %v", err)
+	}
+	doks, err := NewDOKSClient("tok", "cl-1")
+	if err != nil {
+		t.Fatalf("doks client: %v", err)
+	}
+	cost, err := newDOCostReader("", "tok")
+	if err != nil {
+		t.Fatalf("cost reader: %v", err)
+	}
+
+	for name, c := range map[string]*godo.Client{
+		"droplets":   machine.Client,
+		"volumes":    volume.Client,
+		"kubernetes": doks.Client,
+		"cost":       cost.(*doCostReader).client,
+	} {
+		if c.HTTPClient == nil {
+			t.Fatalf("%s: no HTTP client at all", name)
+		}
+		if c.HTTPClient.Timeout != doAPITimeout {
+			t.Fatalf("%s: DigitalOcean calls are unbounded (timeout=%v), so a hung upstream holds the org's provisioning lease forever",
+				name, c.HTTPClient.Timeout)
+		}
+	}
+}
