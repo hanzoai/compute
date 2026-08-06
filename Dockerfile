@@ -1,5 +1,3 @@
-FROM ghcr.io/hanzoai/guacd:1.5.4 as guacd
-
 FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/node:18.19.0-alpine AS FRONT
 WORKDIR /web
 # alpine node build toolchain for any node-gyp native deps in `yarn install`
@@ -57,28 +55,3 @@ COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/conf/app.conf ./conf/ap
 COPY --from=FRONT --chown=$USER:$USER /web/build ./web/build
 
 ENTRYPOINT ["/visor"]
-
-
-FROM guacd AS ALLINONE
-LABEL MAINTAINER="https://hanzo.ai/"
-
-WORKDIR /
-
-USER root
-RUN apt-get update \
-    && apt-get install -y      \
-        mariadb-server         \
-        mariadb-client         \
-        ca-certificates        \
-    && update-ca-certificates  \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=BACK /go/src/hanzo-visor/visor ./visor
-COPY --from=BACK /go/src/hanzo-visor/data ./data
-COPY --from=BACK /go/src/hanzo-visor/docker-entrypoint.sh /docker-entrypoint.sh
-COPY --from=BACK /go/src/hanzo-visor/conf/app.conf ./conf/app.conf
-COPY --from=FRONT /web/build ./web/build
-
-EXPOSE 19000
-ENTRYPOINT ["/bin/bash"]
-CMD ["/docker-entrypoint.sh"]
