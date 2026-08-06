@@ -32,16 +32,39 @@ var (
 	swaggerFS = os.DirFS("swagger")
 )
 
-// TransparentStatic is the FIRST request filter after recover/CORS. It replaces
-// Beego's BeforeRouter static filter one-for-one: a /v1/ request threads through
-// (c.Next()) to the tenant/authz/record chain and the API routes; anything else
-// is served from the web build with an index.html SPA fallback (or from the
-// swagger root), short-circuiting the chain so no static asset is ever
-// authz-gated or audit-recorded.
+// MCPPath is where visor serves its MCP door. Stated here, in the package that
+// owns the HTTP surface, and handed to zip.Config — so the path the static filter
+// lets through and the path zip mounts are the same string and cannot drift into
+// a door that exists and cannot be reached.
+const MCPPath = "/mcp"
+
+// control are the paths zip serves on visor's behalf: the OpenAPI document, the
+// page over it, and the MCP door. They are PROJECTIONS of the typed ops rather
+// than routes visor wrote, which is exactly why static swallowed them — the rule
+// below is "anything that is not /v1/ is a file", and these are neither.
+//
+// The failure was quiet, which is the reason for naming them explicitly. With no
+// web build present the request 404s; in the image web/build exists, so
+// /.well-known/openapi.json answered 200 with index.html and a client parsing
+// JSON got HTML.
+var control = []string{zip.SpecPath, zip.DocsPath, MCPPath}
+
+// TransparentStatic is the FIRST request filter after recover/CORS: a /v1/
+// request threads through (c.Next()) to the tenant/authz/record chain and the
+// API routes; anything else is served from the web build with an index.html SPA
+// fallback (or from the swagger root), short-circuiting the chain so no static
+// asset is ever authz-gated or audit-recorded.
+//
+// Static is a FALLBACK, so it yields to anything the app itself answers.
 func TransparentStatic(c *zip.Ctx) error {
 	urlPath := c.Path()
 	if strings.HasPrefix(urlPath, "/v1/") {
 		return c.Next()
+	}
+	for _, p := range control {
+		if urlPath == p || strings.HasPrefix(urlPath, p+"/") {
+			return c.Next()
+		}
 	}
 
 	if strings.HasPrefix(urlPath, "/swagger") {
