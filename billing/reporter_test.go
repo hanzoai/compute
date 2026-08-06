@@ -19,12 +19,36 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/service"
 )
+
+// TestMain gives this package a REAL per-org store. The property that matters
+// here — a cluster's seed pool is billed every hour after its first — spans the
+// write (object.RecordSeedPool) and the read (object.GetAllNodePools, the exact
+// query the sweep runs) and is a property of neither alone. Testing the halves
+// separately is how a create that writes no row at all went unnoticed.
+//
+// DATA_ROOT is set before anything reads conf, so ${DATA_ROOT||/data} expands to
+// a temp dir and the Base backend opens its per-org SQLite there.
+func TestMain(m *testing.M) {
+	root, err := os.MkdirTemp("", "visor-billing-store-")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("DATA_ROOT", root); err != nil {
+		panic(err)
+	}
+	object.InitAdapter()
+	code := m.Run()
+	_ = os.RemoveAll(root)
+	os.Exit(code)
+}
 
 // ---- fake commerce, recording the WIRE ----
 
@@ -238,6 +262,112 @@ func TestPoolHourlyCents_PrefersTheStoredRate(t *testing.T) {
 	}
 	if cents != 3178 {
 		t.Fatalf("poolHourlyCents = %d, want the stored 3178", cents)
+	}
+}
+
+// ---- end to end: a provisioned cluster keeps billing ----
+
+// The whole leak, closed, through the real store: a metered cluster create
+// records its seed pool, the sweep reads it back through the same query the
+// ticker runs, and bills it EVERY hour after the one the create already paid for.
+//
+// Before this, a /v1/k8s/clusters cluster wrote no row and no org-tagged droplet,
+// so both meters were blind to it: it was gated and debited exactly once, at
+// create, and then ran on Hanzo's house DigitalOcean account for free.
+func TestSeedPoolIsBilledEveryHourAfterTheCreateHour(t *testing.T) {
+	f := commerceOf(t)
+
+	seed := service.SeedPool{
+		Org: "acme-e2e", Project: "research", ClusterID: "cl-e2e",
+		Name: "acme-gpu-pool", Size: "gpu-h100x8-640gb", Count: 4, CentsHour: 3178,
+	}
+	if err := object.RecordSeedPool(seed); err != nil {
+		t.Fatalf("RecordSeedPool: %v", err)
+	}
+
+	// The sweep's own query — no hand-built row stands in for the stored one.
+	pools := []*object.NodePool{}
+	if err := object.GetAllNodePools(&pools); err != nil {
+		t.Fatalf("GetAllNodePools: %v", err)
+	}
+	var stored *object.NodePool
+	for _, p := range pools {
+		if p.Owner == "acme-e2e" && p.Name == "acme-gpu-pool" {
+			stored = p
+		}
+	}
+	if stored == nil {
+		t.Fatal("the cluster's seed pool must be a row the cross-org sweep can see")
+	}
+	if stored.State != "Active" || stored.Count != 4 || stored.CostPerHour != 3178 ||
+		stored.OrgID != "acme-e2e" || stored.ProjectID != "research" || stored.ClusterID != "cl-e2e" ||
+		stored.Size != "gpu-h100x8-640gb" {
+		t.Fatalf("stored pool does not describe what was provisioned: %+v", stored)
+	}
+
+	created, err := time.Parse(time.RFC3339, stored.CreatedTime)
+	if err != nil {
+		t.Fatalf("a billable row needs a parseable create time, got %q: %v", stored.CreatedTime, err)
+	}
+
+	// Hour one belongs to the create path, which already debited it.
+	if metered, _ := meterPools(context.Background(), []*object.NodePool{stored}, created); metered != 0 {
+		t.Fatalf("the create hour must not be billed twice, metered=%d", metered)
+	}
+	// Hour two, and every hour after.
+	for i := 1; i <= 3; i++ {
+		if metered, skipped := meterPools(context.Background(), []*object.NodePool{stored}, created.Add(time.Duration(i)*time.Hour)); metered != 1 {
+			t.Fatalf("hour %d must be billed: metered=%d skipped=%d", i+1, metered, skipped)
+		}
+	}
+	debits := f.all()
+	if len(debits) != 3 {
+		t.Fatalf("three hours of running must be three debits, got %d", len(debits))
+	}
+	for _, d := range debits {
+		if d.amount != 3178*4 || d.org != "acme-e2e" || d.path != "/v1/billing/usage" {
+			t.Fatalf("debit does not bill the stored pool to its org on the one meter: %+v", d)
+		}
+	}
+
+	// And the teardown stops it: a row outliving its cluster invoices nodes that
+	// no longer exist.
+	if err := object.ForgetClusterPools("acme-e2e", "cl-e2e"); err != nil {
+		t.Fatalf("ForgetClusterPools: %v", err)
+	}
+	pools = []*object.NodePool{}
+	if err := object.GetAllNodePools(&pools); err != nil {
+		t.Fatalf("GetAllNodePools after teardown: %v", err)
+	}
+	for _, p := range pools {
+		if p.Owner == "acme-e2e" && p.ClusterID == "cl-e2e" {
+			t.Fatalf("a deleted cluster's pool must stop metering, still present: %+v", p)
+		}
+	}
+}
+
+// Re-recording the same seed pool updates it in place and keeps its ORIGINAL
+// create hour, so a retried create can never re-open the exactly-once window on
+// an hour the first attempt already debited.
+func TestRecordSeedPoolIsIdempotent(t *testing.T) {
+	seed := service.SeedPool{Org: "acme-retry", ClusterID: "cl-retry", Name: "p",
+		Size: "gpu-h100x8-640gb", Count: 2, CentsHour: 3178}
+	if err := object.RecordSeedPool(seed); err != nil {
+		t.Fatalf("first record: %v", err)
+	}
+	first, err := object.GetNodePool("acme-retry/p")
+	if err != nil || first == nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if err := object.RecordSeedPool(seed); err != nil {
+		t.Fatalf("second record must not fail the primary key: %v", err)
+	}
+	again, err := object.GetNodePool("acme-retry/p")
+	if err != nil || again == nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if again.CreatedTime != first.CreatedTime {
+		t.Fatalf("a retried create must keep the original create hour: %q then %q", first.CreatedTime, again.CreatedTime)
 	}
 }
 

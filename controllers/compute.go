@@ -384,7 +384,7 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 		c.ResponseError("nodePool.count must be at least 1")
 		return
 	}
-	cluster, err := service.CreateOrgKubernetesCluster(org, &spec)
+	cluster, err := service.CreateOrgKubernetesCluster(org, c.resolveComputeProject(""), &spec, object.RecordSeedPool)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -408,7 +408,7 @@ func (c *ApiController) DeleteComputeKubernetesCluster() {
 		return
 	}
 	id := c.Ctx.Param("id")
-	if err := service.DeleteOrgKubernetesCluster(org, id); err != nil {
+	if err := service.DeleteOrgKubernetesCluster(org, id, object.ForgetClusterPools); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}

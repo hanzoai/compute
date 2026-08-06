@@ -395,14 +395,41 @@ type clusterCreator interface {
 	CreateCluster(ctx context.Context, spec *CreateClusterSpec, tags []string) (*KubernetesCluster, error)
 }
 
+// SeedPool is the node pool a cluster create provisions, in the terms the store
+// needs to make it BILLABLE. A cluster's nodes are the cluster's whole cost, and
+// the hourly sweep bills node-pool rows — so a cluster that provisions a pool and
+// writes no row is billed its first hour by the provision path and then runs free
+// forever. That is what this type exists to prevent.
+type SeedPool struct {
+	Org       string
+	Project   string
+	ClusterID string
+	Name      string
+	Size      string
+	Count     int
+	CentsHour int64
+}
+
+// recordSeed / forgetCluster are the node-pool store as the cluster provision path
+// sees it: where a metered create writes its seed pool, and where a teardown
+// clears what it wrote. They are plain functions because each call site depends on
+// exactly one of them, and they are PARAMETERS because service cannot import
+// object (object imports service) — handing the store in at the composition root
+// is also what lets a test fake observe "a create wrote its billable row" and
+// "a delete stopped the meter" instead of taking either on faith.
+type recordSeed func(SeedPool) error
+
+type forgetCluster func(org, clusterID string) error
+
 // CreateOrgKubernetesCluster provisions a DOKS cluster in Hanzo's house account for
 // org, stamping it managed-by + hanzo-org:<org> so it associates to the tenant
 // exactly like a droplet — which is what makes it visible to that org's cluster and
 // node listers (and invisible to every other org).
 //
 // HOUSE ACCOUNT means Hanzo pays the upstream bill for every node in the seed
-// pool, so this goes through the money gate exactly like a droplet launch.
-func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
+// pool, so this goes through the money gate exactly like a droplet launch — and
+// records the pool it provisioned, so the sweep keeps billing it.
+func CreateOrgKubernetesCluster(org, project string, spec *CreateClusterSpec, record recordSeed) (*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
@@ -410,24 +437,27 @@ func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*Kubernete
 	if err != nil {
 		return nil, err
 	}
-	return createClusterMetered(context.Background(), client, org, "", spec)
+	return createClusterMetered(context.Background(), client, record, org, project, spec)
 }
 
 // createClusterMetered is the ONE metered cluster provision: price the seed pool
 // from the resale catalog, authorize the org for its first hour at that price,
-// provision, then record the hour. Fail-closed on the balance AND on the price —
-// an org that cannot be authorized and a size that cannot be priced both
-// provision nothing.
+// provision, PERSIST the pool as a billable row, then record the first hour.
+// Fail-closed on the balance AND on the price — an org that cannot be authorized
+// and a size that cannot be priced both provision nothing.
 //
-// The charge is the seed pool's FULL first hour (hourly × node count), matching
-// what buildClusterCreateRequest actually asks the upstream for; its count floor
-// of 1 is applied here too, so the quantity authorized is the quantity
-// provisioned. Every subsequent hour is billed by the node-pool sweep.
-func createClusterMetered(ctx context.Context, client clusterCreator, org, project string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
-	count := spec.NodePool.Count
-	if count < 1 {
-		count = 1
-	}
+// The charge is the seed pool's FULL first hour (hourly × node count), read from
+// the same seedPoolCount the upstream request is built with, so the quantity
+// authorized is the quantity provisioned.
+//
+// Hour one is this function's. EVERY HOUR AFTER IS THE SWEEP'S, and the sweep
+// reads node-pool rows — so the row is not bookkeeping, it IS the recurring bill.
+// Without it a cluster was gated and debited exactly once and then ran free: it
+// writes no droplet tag either, so neither meter could see it. The row is written
+// BEFORE the debit, because a debit with no row is a cluster that bills once, and
+// a row with no debit is one reconciled hour.
+func createClusterMetered(ctx context.Context, client clusterCreator, record recordSeed, org, project string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
+	count := seedPoolCount(spec)
 	hourly, err := HourlyCents(spec.NodePool.Size)
 	if err != nil {
 		return nil, err
@@ -441,6 +471,16 @@ func createClusterMetered(ctx context.Context, client clusterCreator, org, proje
 	if err != nil {
 		return nil, err
 	}
+	if err := record(SeedPool{
+		Org: org, Project: project, ClusterID: cluster.ID, Name: seedPoolName(spec),
+		Size: spec.NodePool.Size, Count: count, CentsHour: hourly,
+	}); err != nil {
+		// The cluster is up and drawing upstream cost; refusing to return it would
+		// leave the customer paying for something they were told they did not get.
+		// But an unrecorded pool is an UNBILLED pool for every hour it runs, so
+		// this is the loudest line in the file. Nothing reconciles it.
+		logs.Warning("compute metering: cluster %s (org %s) provisioned but its seed pool was NOT recorded — it will be billed for its first hour only: %v", cluster.ID, org, err)
+	}
 	if err := RecordCompute(ctx, org, project, firstHour, spec.NodePool.Size, "launched", "cluster-"+cluster.ID); err != nil {
 		logs.Warning("compute metering: debit cluster %s (org %s, %d cents): %v", cluster.ID, org, firstHour, err)
 	}
@@ -451,7 +491,12 @@ func createClusterMetered(ctx context.Context, client clusterCreator, org, proje
 // the caller org's hanzo-org tag — the same isolation as GetOrgKubernetesCluster, so
 // a tenant can never delete another tenant's cluster. An already-absent cluster is a
 // no-op success (idempotent delete).
-func DeleteOrgKubernetesCluster(org, id string) error {
+//
+// The cluster's billable rows go with it. They are what the hourly sweep bills, so
+// a row outliving its cluster is not stale data — it is an invoice for nodes that
+// no longer exist. The meter is stopped even for an already-absent cluster, so a
+// retry after a partial delete still closes the bill.
+func DeleteOrgKubernetesCluster(org, id string, forget forgetCluster) error {
 	if org == "" {
 		return fmt.Errorf("org is required")
 	}
@@ -459,17 +504,50 @@ func DeleteOrgKubernetesCluster(org, id string) error {
 	if err != nil {
 		return err
 	}
-	detail, err := client.GetCluster(context.Background(), id)
+	return deleteClusterMetered(context.Background(), client, forget, org, id)
+}
+
+// clusterDestroyer is the minimal cloud surface a metered cluster teardown needs
+// — the mirror of clusterCreator, and satisfied by the same *DOKSClient, so
+// "a delete stops the meter" is observable against a fake exactly like
+// "a refused create provisions nothing" is.
+type clusterDestroyer interface {
+	GetCluster(ctx context.Context, id string) (*KubernetesClusterDetail, error)
+	DeleteCluster(ctx context.Context, id string) error
+}
+
+// deleteClusterMetered is the ONE metered cluster teardown: verify the cluster is
+// this org's, destroy it, then stop its meter. A cluster already absent upstream
+// still has its meter stopped, so a retry after a partial delete closes the bill.
+//
+// Clearing the rows is not tidiness. The hourly sweep bills node-pool rows, so a
+// row that outlives its cluster is an invoice for nodes that no longer exist.
+func deleteClusterMetered(ctx context.Context, client clusterDestroyer, forget forgetCluster, org, id string) error {
+	detail, err := client.GetCluster(ctx, id)
 	if err != nil {
 		if IsNotFound(err) {
-			return nil // already gone
+			stopClusterMeter(forget, org, id) // already gone upstream; stop billing it
+			return nil
 		}
 		return err
 	}
 	if !clusterHasTag(detail.Tags, orgTag(org)) {
 		return fmt.Errorf("cluster not found")
 	}
-	return client.DeleteCluster(context.Background(), id)
+	if err := client.DeleteCluster(ctx, id); err != nil {
+		return err
+	}
+	stopClusterMeter(forget, org, id)
+	return nil
+}
+
+// stopClusterMeter drops the cluster's billable rows. A failure is loud and never
+// fails the delete — the cluster is gone either way, and the operator needs to
+// know that a row is still metering nodes that no longer run.
+func stopClusterMeter(forget forgetCluster, org, id string) {
+	if err := forget(org, id); err != nil {
+		logs.Warning("compute metering: cluster %s (org %s) deleted but its node-pool rows were NOT cleared — they will keep billing: %v", id, org, err)
+	}
 }
 
 // ListRunningHouseMachines returns every RUNNING droplet in Hanzo's house

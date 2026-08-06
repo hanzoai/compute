@@ -173,6 +173,190 @@ func TestAuthorizeCompute_RefusesZeroCharge(t *testing.T) {
 	}
 }
 
+// ---- the billable row a cluster's seed pool becomes ----
+
+// poolLedger is the node-pool store, faked. A metered cluster create hands its
+// seed pool here; the hourly sweep bills what lands. Recording it is what makes
+// "the cluster is billed for hour two" a property a test can observe.
+type poolLedger struct {
+	mu       sync.Mutex
+	recorded []SeedPool
+	err      error
+}
+
+func newPoolLedger() *poolLedger { return &poolLedger{} }
+
+func (l *poolLedger) record(p SeedPool) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.err != nil {
+		return l.err
+	}
+	l.recorded = append(l.recorded, p)
+	return nil
+}
+
+// clusterLedger records which clusters a teardown asked the store to forget.
+type clusterLedger struct {
+	forgotten []string
+	err       error
+}
+
+func (l *clusterLedger) forget(org, clusterID string) error {
+	if l.err != nil {
+		return l.err
+	}
+	l.forgotten = append(l.forgotten, org+"/"+clusterID)
+	return nil
+}
+
+// A cluster's nodes ARE the cluster's cost, and the hourly sweep bills node-pool
+// rows. A create that provisions a pool and records no row is therefore billed
+// its first hour by this function and then runs free for every hour after — and
+// nothing else catches it, because a DOKS cluster writes no org-tagged droplet
+// either. So the row is not bookkeeping; it is the recurring bill.
+func TestCreateClusterMetered_RecordsTheSeedPoolItProvisioned(t *testing.T) {
+	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	commerceOf(t, funded, 10000000)
+	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
+	pools := newPoolLedger()
+
+	cluster, err := createClusterMetered(context.Background(), newDOKSTestClient(t, do), pools.record,
+		"acme", "research", &CreateClusterSpec{Name: "acme-gpu", Region: "nyc3",
+			NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: 4}})
+	if err != nil {
+		t.Fatalf("funded launch: %v", err)
+	}
+
+	if len(pools.recorded) != 1 {
+		t.Fatalf("a provisioned cluster must record exactly one billable pool, got %d", len(pools.recorded))
+	}
+	got := pools.recorded[0]
+	want := SeedPool{Org: "acme", Project: "research", ClusterID: cluster.ID,
+		Name: "acme-gpu-pool", Size: "gpu-h100x8-640gb", Count: 4, CentsHour: 3178}
+	if got != want {
+		t.Fatalf("billable pool = %+v, want %+v", got, want)
+	}
+	// The row must name the pool the UPSTREAM actually got — a row describing a
+	// different pool bills the wrong thing forever.
+	up := do.created.NodePools[0]
+	if got.Name != up.Name || got.Size != up.Size || got.Count != up.Count {
+		t.Fatalf("the recorded pool (%s/%s x%d) is not the provisioned pool (%s/%s x%d)",
+			got.Name, got.Size, got.Count, up.Name, up.Size, up.Count)
+	}
+}
+
+// The count floor is ONE expression now, so the pool the upstream gets, the
+// quantity the org is charged, and the quantity the row meters cannot disagree.
+func TestCreateClusterMetered_RecordedCountIsTheProvisionedCount(t *testing.T) {
+	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	commerceOf(t, funded, 10000000)
+
+	for name, tc := range map[string]struct{ ask, want int }{
+		"four nodes":       {4, 4},
+		"zero floors to 1": {0, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
+			pools := newPoolLedger()
+			if _, err := createClusterMetered(context.Background(), newDOKSTestClient(t, do), pools.record,
+				"acme", "", &CreateClusterSpec{Name: "g", Region: "nyc3",
+					NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: tc.ask}}); err != nil {
+				t.Fatalf("funded launch: %v", err)
+			}
+			if pools.recorded[0].Count != tc.want || do.created.NodePools[0].Count != tc.want {
+				t.Fatalf("recorded %d and provisioned %d nodes, want %d for both",
+					pools.recorded[0].Count, do.created.NodePools[0].Count, tc.want)
+			}
+		})
+	}
+}
+
+// A named seed pool keeps its name, so the row and the upstream pool are the
+// same pool whichever way the caller spelled it.
+func TestCreateClusterMetered_RecordsANamedSeedPool(t *testing.T) {
+	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	commerceOf(t, funded, 10000000)
+	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
+	pools := newPoolLedger()
+
+	if _, err := createClusterMetered(context.Background(), newDOKSTestClient(t, do), pools.record,
+		"acme", "", &CreateClusterSpec{Name: "acme-gpu", Region: "nyc3",
+			NodePool: CreateClusterNodePool{Name: "trainers", Size: "gpu-h100x8-640gb", Count: 2}}); err != nil {
+		t.Fatalf("funded launch: %v", err)
+	}
+	if pools.recorded[0].Name != "trainers" || do.created.NodePools[0].Name != "trainers" {
+		t.Fatalf("recorded %q, provisioned %q, want trainers for both",
+			pools.recorded[0].Name, do.created.NodePools[0].Name)
+	}
+}
+
+// A store failure never fails the create — the cluster is up and the customer
+// must be told so — but it also never silently passes: the cluster is returned
+// and the debit still happens, and the operator gets the loudest line in the file.
+func TestCreateClusterMetered_StoreFailureStillReturnsTheCluster(t *testing.T) {
+	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	debits, mu := commerceOf(t, funded, 10000000)
+	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
+	pools := &poolLedger{err: errors.New("disk on fire")}
+
+	cluster, err := createClusterMetered(context.Background(), newDOKSTestClient(t, do), pools.record,
+		"acme", "", &CreateClusterSpec{Name: "g", Region: "nyc3",
+			NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: 1}})
+	if err != nil || cluster == nil {
+		t.Fatalf("a provisioned cluster must be returned even when the row could not be written: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if *debits != 1 {
+		t.Fatalf("the first hour is still owed, got %d debits", *debits)
+	}
+}
+
+// Deleting a cluster stops its meter. The rows are what the hourly sweep bills,
+// so one that outlives its cluster invoices nodes that no longer exist.
+func TestDeleteClusterMetered_StopsTheMeter(t *testing.T) {
+	for name, tc := range map[string]struct {
+		clusters map[string]*godo.KubernetesCluster
+		id       string
+		wantErr  bool
+		want     []string
+	}{
+		"deletes and forgets": {
+			clusters: map[string]*godo.KubernetesCluster{"cl-1": {ID: "cl-1", Tags: []string{"hanzo-org:acme"}}},
+			id:       "cl-1", want: []string{"acme/cl-1"},
+		},
+		"already gone upstream still forgets": {
+			clusters: map[string]*godo.KubernetesCluster{},
+			id:       "cl-1", want: []string{"acme/cl-1"},
+		},
+		"another org's cluster is neither deleted nor forgotten": {
+			clusters: map[string]*godo.KubernetesCluster{"cl-1": {ID: "cl-1", Tags: []string{"hanzo-org:other"}}},
+			id:       "cl-1", wantErr: true, want: nil,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			do := &doksTestServer{clusters: tc.clusters}
+			ledger := &clusterLedger{}
+			err := deleteClusterMetered(context.Background(), newDOKSTestClient(t, do), ledger.forget, "acme", tc.id)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if len(ledger.forgotten) != len(tc.want) {
+				t.Fatalf("forgot %v, want %v", ledger.forgotten, tc.want)
+			}
+			for i := range tc.want {
+				if ledger.forgotten[i] != tc.want[i] {
+					t.Fatalf("forgot %v, want %v", ledger.forgotten, tc.want)
+				}
+			}
+			if _, still := do.clusters[tc.id]; still && !tc.wantErr {
+				t.Fatal("the cluster must be gone upstream")
+			}
+		})
+	}
+}
+
 // ---- the composition: refused means NOTHING was provisioned ----
 
 // The whole point of a pre-provision gate is that a refusal costs nothing. For
@@ -200,10 +384,11 @@ func TestCreateClusterMetered_ProvisionsNothingWhenRefused(t *testing.T) {
 			debits, mu := commerceOf(t, c.mood, 0)
 			do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 			client := newDOKSTestClient(t, do)
+			pools := newPoolLedger()
 
 			s := *spec
 			s.NodePool.Size = c.size
-			cluster, err := createClusterMetered(context.Background(), client, "acme", "", &s)
+			cluster, err := createClusterMetered(context.Background(), client, pools.record, "acme", "", &s)
 
 			if err == nil {
 				t.Fatal("the provision must be refused")
@@ -213,6 +398,9 @@ func TestCreateClusterMetered_ProvisionsNothingWhenRefused(t *testing.T) {
 			}
 			if do.created != nil {
 				t.Fatalf("REFUSED BUT PROVISIONED: upstream received %+v", do.created)
+			}
+			if got := len(pools.recorded); got != 0 {
+				t.Fatalf("a refused provision must record no billable pool, got %d", got)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -232,7 +420,7 @@ func TestCreateClusterMetered_FundedOrgLaunchesAndPaysTheRealRate(t *testing.T) 
 	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 	client := newDOKSTestClient(t, do)
 
-	cluster, err := createClusterMetered(context.Background(), client, "acme", "", &CreateClusterSpec{
+	cluster, err := createClusterMetered(context.Background(), client, newPoolLedger().record, "acme", "", &CreateClusterSpec{
 		Name: "acme-gpu", Region: "nyc3",
 		NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: 4},
 	})
@@ -294,7 +482,7 @@ func TestCreateClusterMetered_BillsEveryNodeAndFloorsTheCount(t *testing.T) {
 			t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 
 			do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
-			if _, err := createClusterMetered(context.Background(), newDOKSTestClient(t, do), "acme", "",
+			if _, err := createClusterMetered(context.Background(), newDOKSTestClient(t, do), newPoolLedger().record, "acme", "",
 				&CreateClusterSpec{Name: "g", Region: "nyc3",
 					NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: tc.ask}},
 			); err != nil {

@@ -174,6 +174,71 @@ func UpdateNodePool(id string, pool *NodePool) (bool, error) {
 	return affected != 0, nil
 }
 
+// RecordSeedPool persists a cluster's seed pool as the row the hourly sweep
+// bills. It is the object half of service's recordSeed seam, handed to the
+// metered cluster provision at the composition root.
+//
+// The row is written with the rate the org was authorized at (CostPerHour) and
+// CreatedTime NOW, which is what makes the hour exactly-once: the provision path
+// debited this hour, and the sweep's one launch-hour rule (service.CreatedInHour)
+// skips a pool created in the current hour. Hour two is the sweep's, and every
+// hour after.
+//
+// Idempotent on (Owner, Name): a re-recorded pool updates in place rather than
+// failing the PK, so a retried create never leaves the cluster unbilled.
+func RecordSeedPool(p service.SeedPool) error {
+	if p.Org == "" || p.Name == "" {
+		return fmt.Errorf("a billable pool needs an org and a name (got org=%q name=%q)", p.Org, p.Name)
+	}
+	now := time.Now().Format(time.RFC3339)
+	pool := &NodePool{
+		Owner:       p.Org,
+		Name:        p.Name,
+		ClusterID:   p.ClusterID,
+		Size:        p.Size,
+		Count:       p.Count,
+		State:       "Active",
+		CostPerHour: p.CentsHour,
+		OrgID:       p.Org,
+		ProjectID:   p.Project,
+		CreatedTime: now,
+		UpdatedTime: now,
+	}
+	existing, err := getNodePool(p.Org, p.Name)
+	if err != nil {
+		return err
+	}
+	engine, err := EngineFor(p.Org)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		pool.CreatedTime = existing.CreatedTime
+		_, err = engine.ID(schemas.PK{p.Org, p.Name}).AllCols().Update(pool)
+		return err
+	}
+	_, err = engine.Insert(pool)
+	return err
+}
+
+// ForgetClusterPools removes every billable row belonging to a cluster — the
+// object half of service's forgetCluster seam. A row that outlives its cluster
+// keeps invoicing nodes that no longer exist, so a teardown clears them.
+func ForgetClusterPools(org, clusterID string) error {
+	if org == "" || clusterID == "" {
+		return fmt.Errorf("clearing a cluster's billable rows needs an org and a cluster id (got org=%q cluster=%q)", org, clusterID)
+	}
+	engine, err := EngineFor(org)
+	if err != nil {
+		return err
+	}
+	// Conditions come from the bean, not from hand-written column names: the ORM
+	// owns the field→column mapping, and a name spelled here is a name that can
+	// drift from the one the table actually has.
+	_, err = engine.Delete(&NodePool{Owner: org, ClusterID: clusterID})
+	return err
+}
+
 func AddNodePool(pool *NodePool) (bool, error) {
 	engine, err := EngineFor(pool.Owner)
 	if err != nil {

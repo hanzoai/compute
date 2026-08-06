@@ -448,25 +448,38 @@ func buildClusterCreateRequest(spec *CreateClusterSpec, tags []string) *godo.Kub
 	if version == "" {
 		version = "latest"
 	}
-	poolName := strings.TrimSpace(spec.NodePool.Name)
-	if poolName == "" {
-		poolName = spec.Name + "-pool"
-	}
-	count := spec.NodePool.Count
-	if count < 1 {
-		count = 1
-	}
 	return &godo.KubernetesClusterCreateRequest{
 		Name:        spec.Name,
 		RegionSlug:  spec.Region,
 		VersionSlug: version,
 		Tags:        tags,
 		NodePools: []*godo.KubernetesNodePoolCreateRequest{{
-			Name:  poolName,
+			Name:  seedPoolName(spec),
 			Size:  spec.NodePool.Size,
-			Count: count,
+			Count: seedPoolCount(spec),
 		}},
 	}
+}
+
+// seedPoolName and seedPoolCount are the ONE answer to "what pool does this
+// cluster get". Three places need them to agree and none may restate them: the
+// upstream create request, the amount the org is authorized and debited for, and
+// the billable row the hourly sweep reads. When the count floor lived separately
+// in the request builder and in the money gate, "the quantity authorized is the
+// quantity provisioned" was a coincidence of two matching literals; now it is one
+// expression.
+func seedPoolName(spec *CreateClusterSpec) string {
+	if name := strings.TrimSpace(spec.NodePool.Name); name != "" {
+		return name
+	}
+	return spec.Name + "-pool"
+}
+
+func seedPoolCount(spec *CreateClusterSpec) int {
+	if spec.NodePool.Count < 1 {
+		return 1 // a cluster must have at least one worker
+	}
+	return spec.NodePool.Count
 }
 
 // CreateCluster provisions a DOKS cluster from spec, tagging it with tags so it
