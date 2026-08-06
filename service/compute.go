@@ -32,6 +32,7 @@ import (
 
 	"github.com/digitalocean/godo"
 	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/logs"
 )
 
 // orgTagKey/orgTag namespace droplets by the Hanzo org that owns them. Per-org
@@ -387,10 +388,20 @@ func GetOrgKubernetesCluster(org, id string) (*KubernetesClusterDetail, error) {
 	return detail, nil
 }
 
+// clusterCreator is the minimal cloud surface a metered cluster create needs. It
+// is satisfied by *DOKSClient and by a test fake, which is what makes "refused
+// requests provision NOTHING" a property a test can observe rather than a claim.
+type clusterCreator interface {
+	CreateCluster(ctx context.Context, spec *CreateClusterSpec, tags []string) (*KubernetesCluster, error)
+}
+
 // CreateOrgKubernetesCluster provisions a DOKS cluster in Hanzo's house account for
 // org, stamping it managed-by + hanzo-org:<org> so it associates to the tenant
 // exactly like a droplet — which is what makes it visible to that org's cluster and
 // node listers (and invisible to every other org).
+//
+// HOUSE ACCOUNT means Hanzo pays the upstream bill for every node in the seed
+// pool, so this goes through the money gate exactly like a droplet launch.
 func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
@@ -399,8 +410,41 @@ func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*Kubernete
 	if err != nil {
 		return nil, err
 	}
+	return createClusterMetered(context.Background(), client, org, "", spec)
+}
+
+// createClusterMetered is the ONE metered cluster provision: price the seed pool
+// from the resale catalog, authorize the org for its first hour at that price,
+// provision, then record the hour. Fail-closed on the balance AND on the price —
+// an org that cannot be authorized and a size that cannot be priced both
+// provision nothing.
+//
+// The charge is the seed pool's FULL first hour (hourly × node count), matching
+// what buildClusterCreateRequest actually asks the upstream for; its count floor
+// of 1 is applied here too, so the quantity authorized is the quantity
+// provisioned. Every subsequent hour is billed by the node-pool sweep.
+func createClusterMetered(ctx context.Context, client clusterCreator, org, project string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
+	count := spec.NodePool.Count
+	if count < 1 {
+		count = 1
+	}
+	hourly, err := HourlyCents(spec.NodePool.Size)
+	if err != nil {
+		return nil, err
+	}
+	firstHour := hourly * int64(count)
+	if err := AuthorizeCompute(ctx, org, project, firstHour); err != nil {
+		return nil, err
+	}
 	tags := []string{"managed-by:hanzo-visor", orgTag(org)}
-	return client.CreateCluster(context.Background(), spec, tags)
+	cluster, err := client.CreateCluster(ctx, spec, tags)
+	if err != nil {
+		return nil, err
+	}
+	if err := RecordCompute(ctx, org, project, firstHour, spec.NodePool.Size, "launched", "cluster-"+cluster.ID); err != nil {
+		logs.Warning("compute metering: debit cluster %s (org %s, %d cents): %v", cluster.ID, org, firstHour, err)
+	}
+	return cluster, nil
 }
 
 // DeleteOrgKubernetesCluster destroys a house cluster by id, but ONLY if it carries

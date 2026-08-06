@@ -15,12 +15,14 @@
 package object
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	"github.com/hanzoai/orm/relational/schemas"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/orm/relational/schemas"
 )
 
 type NodePool struct {
@@ -289,6 +291,13 @@ func SyncNodePoolsCloud(owner string) (bool, error) {
 }
 
 // CreateNodePoolCloud creates a new node pool in DOKS via the cloud provider and persists it.
+//
+// Money gate: the pool is priced from the resale catalog and the owner is
+// authorized for its FULL first hour (hourly × node count) BEFORE anything is
+// provisioned. A size that cannot be priced and an owner that cannot be
+// authorized both provision nothing — the pool used to be created with no gate
+// at all and then billed at CostPerHour, which was never computed here, so a
+// GPU pool ran at $0/hr for as long as it stayed up.
 func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.CreateNodePoolSpec) (*NodePool, error) {
 	provider, err := getProvider(owner, providerName)
 	if err != nil {
@@ -309,6 +318,19 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 	}
 	if cid == "" {
 		return nil, fmt.Errorf("no cluster ID specified and provider %q has no default cluster", providerName)
+	}
+
+	count := spec.Count
+	if count < 1 {
+		count = 1
+	}
+	hourly, err := service.HourlyCents(spec.Size)
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	if err := service.AuthorizeCompute(ctx, owner, provider.Project, hourly*int64(count)); err != nil {
+		return nil, err
 	}
 
 	client, err := service.NewDOKSClient(token, cid)
@@ -334,6 +356,9 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 		MaxNodes:    servicePool.MaxNodes,
 		AutoScale:   servicePool.AutoScale,
 		State:       "Active",
+		CostPerHour: hourly,
+		OrgID:       owner,
+		ProjectID:   provider.Project,
 		CreatedTime: now,
 		UpdatedTime: now,
 	}
@@ -341,6 +366,16 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 	_, err = AddNodePool(pool)
 	if err != nil {
 		return nil, fmt.Errorf("node pool created in DOKS but DB insert failed: %w", err)
+	}
+
+	// Debit the first hour the pool was authorized for. The hourly sweep skips a
+	// pool created in the current clock hour (service.CreatedInHour), so this
+	// hour is billed exactly once. A failed debit never un-provisions the pool —
+	// it exists and is running — but it is loud, because it is lost revenue.
+	firstHour := hourly * int64(pool.Count)
+	if err := service.RecordCompute(ctx, owner, pool.ProjectID, firstHour, pool.Size, "launched",
+		"pool-"+pool.PoolID); err != nil {
+		logs.Warning("compute metering: debit node pool %s (org %s, %d cents): %v", pool.PoolID, owner, firstHour, err)
 	}
 
 	// Roll a launched event into the analytics datastore (best-effort; never
@@ -351,6 +386,12 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 }
 
 // ScaleNodePoolCloud updates the node count of an existing DOKS node pool.
+//
+// Money gate: scaling UP is a provision, so the owner is authorized for the
+// first hour of the ADDED nodes before the upstream is touched. Scaling down (or
+// to the same count) adds no cost and is never gated — refusing to shrink a pool
+// because a balance is low would keep the meter running on nodes the customer
+// asked to release.
 func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int) (*NodePool, error) {
 	provider, err := getProvider(owner, providerName)
 	if err != nil {
@@ -381,6 +422,17 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 		return nil, fmt.Errorf("failed to get current node pool: %w", err)
 	}
 
+	hourly, err := service.HourlyCents(currentPool.Size)
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	if added := count - currentPool.Count; added > 0 {
+		if err := service.AuthorizeCompute(ctx, owner, provider.Project, hourly*int64(added)); err != nil {
+			return nil, err
+		}
+	}
+
 	spec := &service.CreateNodePoolSpec{
 		Name:      currentPool.Name,
 		Size:      currentPool.Size,
@@ -404,6 +456,10 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 	}
 	if dbPool != nil {
 		dbPool.Count = updatedPool.Count
+		// Re-stamp the resolved rate: rows written before the pool path priced
+		// anything carry CostPerHour 0, and the hourly sweep would bill them at
+		// the catalog rate anyway. Persisting it here makes the row agree.
+		dbPool.CostPerHour = hourly
 		dbPool.UpdatedTime = time.Now().Format(time.RFC3339)
 		engine, err := EngineFor(owner)
 		if err != nil {
