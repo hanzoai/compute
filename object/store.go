@@ -154,8 +154,20 @@ func mustEngineFor(owner string) *relational.Engine {
 	return engine
 }
 
-// Shared returns the engine holding the cross-pod shared tables (the Plan
-// catalog and the MeterLease coordination lease). Postgres under both backends.
+// Shared returns the engine holding the shared tables (the Plan catalog and the
+// MeterLease coordination lease).
+//
+// It is cross-POD only under the Postgres backend, where it is the one durable
+// linearizable store and the insert-once lease PK therefore holds cluster-wide.
+// Under Base (the default) it is the pod-local `_global` SQLite coord, hydrated
+// from and shipped to the object store — durable across a restart, but NOT
+// shared between concurrent pods. There, exactly-once rests on the single-writer
+// election in coordinator.go, not on the PK.
+//
+// This comment used to read "Postgres under both backends", which is false for
+// Base and is precisely why the billing gate's importance was invisible: it made
+// the election look like belt-and-braces over a global constraint when it is in
+// fact the only thing standing between two pods and a double debit.
 func Shared() *relational.Engine {
 	return store.Shared()
 }

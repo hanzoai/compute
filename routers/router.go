@@ -36,15 +36,24 @@ func h(fn func(*controllers.ApiController)) zip.Handler {
 // filter order is the Beego BeforeRouter chain preserved exactly — static short-
 // circuits before the authz seam, so an asset is never gated; every /v1 route
 // registered after the chain is tenant-scoped, authorized and audited.
+// corsPolicy is what a browser is told it may send, and the header list is the
+// load-bearing part of it. Visor authenticates with a Bearer token, so leaving
+// Authorization out of the preflight answer does not merely reject the header —
+// the browser refuses to send the request at all and reports it as a CORS
+// failure, which reads like a network fault and hides that the API was reachable
+// the whole time. The list came from upstream without it, and that went
+// unnoticed for as long as every caller was another server.
+var corsPolicy = middleware.CORSConfig{
+	AllowOrigins:  []string{"*"},
+	AllowMethods:  []string{"GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"},
+	AllowHeaders:  []string{"Origin", "X-Requested-With", "Content-Type", "Accept", "Authorization"},
+	ExposeHeaders: []string{"Content-Length"},
+	AllowCreds:    true,
+}
+
 func Route(app *zip.App) {
 	app.Use(middleware.Recover())
-	app.Use(middleware.CORS(middleware.CORSConfig{
-		AllowOrigins:  []string{"*"},
-		AllowMethods:  []string{"GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"},
-		AllowHeaders:  []string{"Origin", "X-Requested-With", "Content-Type", "Accept"},
-		ExposeHeaders: []string{"Content-Length"},
-		AllowCreds:    true,
-	}))
+	app.Use(middleware.CORS(corsPolicy))
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
 	app.Use(zip.H(ApiFilter))

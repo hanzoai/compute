@@ -38,12 +38,17 @@ hanzoai/base per-org SQLite. The seam is one interface -- `engineProvider` in
   (xorm driver name `"sqlite"`).
 
 Selected at boot by `storageBackend` (app.conf / `STORAGE_BACKEND`, default
-`postgres`) + `dataRoot` (`DATA_ROOT`, default `/data`). Every model routes its
-query through one of three package entry points, so the same xorm query runs
-unchanged on either backend:
+**`base`** — `conf/app.conf` reads `${STORAGE_BACKEND||base}`, and no deployment
+sets the variable, so production runs Base) + `dataRoot` (`DATA_ROOT`, default
+`/data`). Every model routes its query through one of three package entry
+points, so the same xorm query runs unchanged on either backend:
 - `object.EngineFor(owner)` — per-tenant rows (per-org SQLite under Base).
-- `object.Shared()` — the cross-pod SHARED tables (Plan, MeterLease); Postgres
-  under BOTH backends.
+- `object.Shared()` — the shared tables (Plan, MeterLease). Cross-POD only under
+  Postgres, where the insert-once lease PK holds cluster-wide. Under Base it is
+  the pod-local `_global` SQLite coord (durable via object-store hydrate/ship,
+  but not shared between concurrent pods), so exactly-once there rests on the
+  single-writer election, not the PK. (This line previously claimed "Postgres
+  under BOTH backends" — false, and the reason the billing gate looked optional.)
 - `object.allEngines()` — the union set a cross-org sweep reads (one engine
   under Postgres; one per org DB under Base).
 
@@ -97,8 +102,60 @@ The 10 tables split into two classes, defined once each in `object/store.go`:
    snapshot before first use) plus a post-commit WAL shipper; the lease primitive
    already in `MeterLease`/`Shared()` provides the single-writer election. No code
    stub is shipped for this (no dead abstraction) — this note IS the staging.
-   NOTE: default `postgres` backend is unaffected and remains the production
-   default; the Postgres→Base data migration is a separate operator action.
+   NOTE: this staging note predates the backend default flipping to `base`. Base
+   IS the production backend today (nothing sets `STORAGE_BACKEND`), which is why
+   `replicas: 1` is load-bearing rather than a preference — see the membership
+   section below. Opting INTO Postgres remains a separate operator action.
+
+### No Kubernetes client — visor is the multi-cloud path
+Visor links **zero** `k8s.io/*` packages. Cluster access belongs to the controllers
+whose whole job is reconciling cluster objects (operator, ingress, arc, kms-operator,
+dns/operator); visor is deliberately the OTHER path — VMs across DO/Hetzner/Lightsail/
+Azure/GCP/Aliyun/Proxmox. Verify with
+`grep -rn --include='*.go' '"k8s.io/' . | grep -v vendor` (must be empty) — the absence
+is a property of the build, not of configuration.
+
+Two things used to violate this and are gone:
+
+- **`autoscaler/` (deleted).** A pod-watcher that listed Pending pods via
+  `rest.InClusterConfig` and scaled DOKS node pools. It was a cluster autoscaler living
+  in the VM manager, and it was gated on `autoscalerClusters`, which is set in no
+  deployment (not in `universe/charts/app/values/hanzo/visor.yaml`, not in the visor
+  Secret) — so it had never run. `service/doks.go` is untouched: it is pure `godo` and
+  still serves node-pool CRUD.
+- **`object/coordinator.go` k8s membership → `ha.Membership` seam.** The billing
+  single-writer election needs the live replica set; it used to get it by listing
+  `app=visor` pods. It now elects over `ha.Membership` (the interface hanzoai/ha already
+  defines — reused, not re-declared), installed by `object.RegisterMembership`.
+  `BuildMembership()` never returns nil; with nothing registered it returns a source
+  that reports an **error** (not an empty set — an empty set would assert "I have no
+  peers", the exact lie that double-debits), so `billingOwner()` is false and no lease
+  is claimed. It logs the reason once per process.
+
+  **RESOLVED — single writer by topology.** With no source registered visor does not
+  meter at all (fail-closed: a missed hour is reconciled, a double debit is not), so a
+  source had to be chosen. It is `ha.Static`, registered in `main.go`'s `serve()`, paired
+  with `replicas: 1` in `universe charts/app/values/hanzo/visor.yaml`. The sole process
+  is the sole writer, so exactly-once holds by construction rather than by election.
+
+  **These two are ONE change and must never drift.** Registering `ha.Static` while
+  running `replicas: 2` DOUBLE-BILLS every customer every hour — under the Base backend
+  `Shared()` is a pod-local SQLite coord, so the insert-once PK does not span pods and
+  nothing else holds the line. Both sides carry a comment pointing at the other. Raising
+  replicas REQUIRES registering a real membership source in the same change.
+
+  It is registered in `serve()`, NOT in `visor.Bootstrap()`, because Bootstrap is shared
+  verbatim with the embedded cloud mount, whose replica count is cloud's and not ours.
+  The embedded path registers nothing and therefore still fails closed — correct, since
+  the "I am alone" claim is only true of this Deployment.
+
+  The alternative was `STORAGE_BACKEND=postgres`, which makes `Shared()` one cluster-wide
+  engine so the lease PK spans pods and election becomes unnecessary entirely. It keeps
+  HA and matches the house rule (Postgres for production multi-instance), but it moves
+  ALL org data, not just the coord — `EngineFor` switches from per-org SQLite to the
+  single engine. That is a data migration, deferred deliberately.
+
+  `k8s/rbac.yaml` is now a bare ServiceAccount: visor holds no cluster permissions.
 
 ### Provider Adapters (all fully implemented)
 | Provider | Machine | Volume | File |

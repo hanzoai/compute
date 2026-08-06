@@ -26,9 +26,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/hanzoai/ha"
 	"github.com/spf13/cobra"
 
 	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/pkg/visor"
 )
 
@@ -81,6 +83,18 @@ func main() {
 // tickers — shared verbatim with the embedded cloud mount, so standalone and
 // fused never drift. Here main() owns the listener.
 func serve(ctx context.Context, zapAddr, httpAddr string) error {
+	// The standalone Deployment runs replicas: 1 (universe
+	// charts/app/values/hanzo/visor.yaml), so this process is the only writer and
+	// correctly elects itself. Declared HERE and not in visor.Bootstrap on
+	// purpose: Bootstrap is shared verbatim with the embedded cloud mount, whose
+	// replica count is cloud's, not ours. Registering it there would hand a
+	// multi-replica cloud the claim "I am alone" and double-debit every hour.
+	//
+	// This is the one topology assertion in the binary, and it is only true while
+	// that values file says 1. Raising replicas REQUIRES replacing this with a
+	// real membership source first — see object/coordinator.go.
+	object.RegisterMembership(ha.Static(object.SelfID()))
+
 	app := visor.Bootstrap()
 
 	// Translate ctx cancellation (SIGINT/SIGTERM) into a graceful shutdown.

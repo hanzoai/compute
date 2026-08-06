@@ -18,7 +18,6 @@ services:
       IAM_CLIENT_SECRET: "${IAM_CLIENT_SECRET:-}"
       COMMERCE_URL: "${COMMERCE_URL:-}"
       COMMERCE_TOKEN: "${COMMERCE_TOKEN:-}"
-      AUTOSCALER_CLUSTERS: "${AUTOSCALER_CLUSTERS:-}"
     volumes:
       - ./conf:/conf/
   db:

@@ -36,10 +36,17 @@ package object
 // Postgres, no Redis. It is applied to the single coordination key `_global`, so
 // every replica computes the same owner from the same live membership set.
 //
+// WHERE THE MEMBERSHIP COMES FROM. Election needs the live replica set, and this
+// binary does not link a Kubernetes client to get it: visor is the MULTI-CLOUD VM
+// path, and cluster access belongs to the cluster controllers. So membership is a
+// registration seam over ha.Membership — the interface hanzoai/ha already defines for
+// exactly this, reused rather than re-declared. An operator that can enumerate
+// replicas installs a source with RegisterMembership; nothing else changes.
+//
 // FAIL-CLOSED. For a paid product the safe failure is NOT to bill (a missed hour is
 // reconciled; a double debit is not). Any uncertainty about ownership — an empty or
-// unreadable membership set while running in a cluster — yields "not owner", so the
-// replica skips rather than risk a duplicate debit.
+// unreadable membership set, or no source registered at all — yields "not owner", so
+// the replica skips rather than risk a duplicate debit.
 
 import (
 	"context"
@@ -49,10 +56,7 @@ import (
 	"time"
 
 	"github.com/hanzoai/ha"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"github.com/hanzoai/visor/logs"
 )
 
 // coordKey is the single coordination resource every replica elects an owner for:
@@ -60,27 +64,42 @@ import (
 // exactly one billing owner cluster-wide.
 const coordKey = "_global"
 
-// membershipTimeout bounds the pod-list the ownership check makes. The sweep is
+// membershipTimeout bounds the peer lookup the ownership check makes. The sweep is
 // hourly, so a tight timeout costs nothing on the hot path and never wedges a tick.
 const membershipTimeout = 5 * time.Second
 
-// membershipSource resolves the live replica set and this replica's own stable ID —
-// the two inputs HRW election needs. It is an injectable seam: production wires the
-// in-cluster Kubernetes source (k8sMembership); tests substitute a fixed set to force
-// owner / non-owner without a cluster.
-//
-//	self    : this replica's stable ID (its pod name).
-//	members : the live writer-eligible replica set, or an error the caller fails
-//	          CLOSED on. A nil error with a non-empty set is the only "proceed" signal.
-type membershipSource interface {
-	self() string
-	members(ctx context.Context) ([]ha.Member, error)
+var (
+	membershipMu sync.RWMutex
+	// membership is the registered replica-set source, or nil for the unavailable
+	// default. Tests swap it directly to force owner / non-owner deterministically.
+	membership ha.Membership
+)
+
+// RegisterMembership installs the live replica-set source election runs over. It is
+// the ONE seam by which a deployment that can enumerate visor's replicas (a cluster
+// controller, an operator sidecar) teaches this process who its peers are. A
+// single-process deployment registers ha.Static(id): the sole process is the sole
+// writer, so it correctly elects itself.
+func RegisterMembership(m ha.Membership) {
+	membershipMu.Lock()
+	defer membershipMu.Unlock()
+	membership = m
 }
 
-// membership is the process-wide source, swappable in tests. Defaults to the
-// in-cluster Kubernetes source; outside a cluster that source reports single-process
-// ownership (there is exactly one writer, so self owns everything).
-var membership membershipSource = &k8sMembership{}
+// BuildMembership returns the registered source, or the unavailable default. It never
+// returns nil: a nil source would push a nil-check onto every call site, and the one
+// that got forgotten would panic inside a billing tick instead of skipping the hour.
+func BuildMembership() ha.Membership {
+	membershipMu.RLock()
+	m := membership
+	membershipMu.RUnlock()
+	if m == nil {
+		return unavailableMembership{reason: "no replica-set source registered " +
+			"(this build links no Kubernetes client); the billing owner cannot be " +
+			"elected, so lease claims and metering debits stay disabled"}
+	}
+	return m
+}
 
 // billingOwner reports whether THIS replica is the elected single writer for the
 // billing coord DB right now. It is the ONE predicate the ticker gate and every lease
@@ -90,13 +109,14 @@ var membership membershipSource = &k8sMembership{}
 // false and the caller skips (no claim, no debit). The only "true" is a confident
 // HRW win over a known, non-empty membership set.
 func billingOwner() bool {
+	m := BuildMembership()
 	ctx, cancel := context.WithTimeout(context.Background(), membershipTimeout)
 	defer cancel()
-	members, err := membership.members(ctx)
+	members, err := m.Members(ctx)
 	if err != nil || len(members) == 0 {
 		return false // unknown membership → fail closed (never risk a double debit).
 	}
-	return ha.IsOwner(coordKey, membership.self(), members)
+	return ha.IsOwner(coordKey, m.Self(), members)
 }
 
 // IsBillingOwner is the exported ownership gate the metering ticker checks before it
@@ -106,92 +126,40 @@ func billingOwner() bool {
 // gate can never admit a claim the lease path would refuse.
 func IsBillingOwner() bool { return billingOwner() }
 
-// k8sMembership resolves membership from the Kubernetes API, reusing the SAME
-// in-cluster access pattern the autoscaler already uses (rest.InClusterConfig →
-// kubernetes.NewForConfig → CoreV1().Pods().List). The visor ServiceAccount already
-// carries the pods:[list,watch] grant (k8s/rbac.yaml), so no new RBAC is required.
-//
-// selfID is the pod name (stable for the pod's life), taken from POD_NAME (Downward
-// API) or the container hostname, which in a Deployment pod IS the pod name.
-type k8sMembership struct {
-	once   sync.Once
-	client kubernetes.Interface // nil ⇒ not in a cluster (single-process / local dev)
-	ns     string
+// unavailableMembership is the no-source default. It reports an ERROR rather than an
+// empty set on purpose: an empty set would read as the positive claim "I have no
+// peers", which is exactly the lie that double-debits a two-replica Deployment.
+// "I do not know who my peers are" is a different answer, and only the error carries it.
+type unavailableMembership struct{ reason string }
+
+// unavailableOnce keeps the warning to one line per process. Refusing to bill must be
+// visible — a silent revenue outage is worse than a loud one — but the gate is
+// consulted every hour and by every claim, so it says so once.
+var unavailableOnce sync.Once
+
+func (u unavailableMembership) Self() string { return SelfID() }
+
+func (u unavailableMembership) Members(context.Context) ([]ha.Member, error) {
+	unavailableOnce.Do(func() { logs.Warning("visor billing: %s", u.reason) })
+	return nil, &membershipUnavailableError{reason: u.reason}
 }
 
-// k8sAppLabel selects the visor replica set — matches the Deployment pod label
-// (k8s/deployment.yaml: app: visor). Every writer-eligible replica carries it.
-const k8sAppLabel = "app=visor"
+// membershipUnavailableError marks "the replica set is unknown", never "the replica
+// set is empty". Callers fail closed on both, but only this one means a source is
+// missing, and an operator reading the log needs to be able to tell them apart.
+type membershipUnavailableError struct{ reason string }
 
-func (m *k8sMembership) init() {
-	m.once.Do(func() {
-		cfg, err := rest.InClusterConfig()
-		if err != nil {
-			// Not in a cluster: local dev / a single standalone process. There is
-			// exactly one writer, so leave client nil and report single-process
-			// ownership below. This is SAFE precisely because it is a single process.
-			return
-		}
-		client, err := kubernetes.NewForConfig(cfg)
-		if err != nil {
-			return
-		}
-		m.client = client
-		m.ns = podNamespace()
-	})
+func (e *membershipUnavailableError) Error() string {
+	return "visor: replica membership unavailable: " + e.reason
 }
 
-func (m *k8sMembership) self() string { return selfID() }
-
-// members returns the live, writer-eligible replica set. Outside a cluster (client
-// nil) it returns a single-member set of self — the sole process is the sole writer.
-// Inside a cluster it lists Running+Ready visor pods; a list error is surfaced so the
-// caller fails CLOSED (an in-cluster replica that cannot see its peers must NOT assume
-// it is the owner).
-func (m *k8sMembership) members(ctx context.Context) ([]ha.Member, error) {
-	m.init()
-	if m.client == nil {
-		// Single-process mode: one writer, itself. Never an error (no cluster to fail
-		// closed against).
-		return []ha.Member{{ID: selfID()}}, nil
-	}
-	list, err := m.client.CoreV1().Pods(m.ns).List(ctx, metav1.ListOptions{LabelSelector: k8sAppLabel})
-	if err != nil {
-		return nil, err // fail closed: peers unknown.
-	}
-	members := make([]ha.Member, 0, len(list.Items))
-	for i := range list.Items {
-		p := &list.Items[i]
-		if podWriterEligible(p) {
-			members = append(members, ha.Member{ID: p.Name, Addr: p.Status.PodIP})
-		}
-	}
-	return members, nil
-}
-
-// podWriterEligible reports whether a pod is a live writer candidate: Running and
-// Ready, not terminating. A Pending/terminating/unready pod is excluded so a rolling
-// pod that is coming up or going down never skews the election toward a replica that
-// cannot actually run the sweep.
-func podWriterEligible(p *corev1.Pod) bool {
-	if p.DeletionTimestamp != nil {
-		return false // terminating.
-	}
-	if p.Status.Phase != corev1.PodRunning {
-		return false
-	}
-	for _, c := range p.Status.Conditions {
-		if c.Type == corev1.PodReady {
-			return c.Status == corev1.ConditionTrue
-		}
-	}
-	return false // no Ready condition yet.
-}
-
-// selfID is this replica's stable identity for HRW weighting: POD_NAME (Downward API)
+// SelfID is this replica's stable identity for HRW weighting: POD_NAME (Downward API)
 // when set, else the container hostname (which is the pod name in a Deployment pod).
 // A stable, unique-per-replica string is all HRW needs.
-func selfID() string {
+//
+// Exported so the composition root can build ha.Static from the SAME identity the
+// election weighs. Two spellings of "who am I" is one spelling too many.
+func SelfID() string {
 	if n := strings.TrimSpace(os.Getenv("POD_NAME")); n != "" {
 		return n
 	}
@@ -201,19 +169,4 @@ func selfID() string {
 		// has to be stable within the process, and there is one member.
 	}
 	return h
-}
-
-// podNamespace resolves the pod's own namespace for the peer list: POD_NAMESPACE
-// (Downward API) when set, else the standard in-cluster service-account namespace
-// file, else the visor default namespace.
-func podNamespace() string {
-	if ns := strings.TrimSpace(os.Getenv("POD_NAMESPACE")); ns != "" {
-		return ns
-	}
-	if b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-		if ns := strings.TrimSpace(string(b)); ns != "" {
-			return ns
-		}
-	}
-	return "hanzo"
 }

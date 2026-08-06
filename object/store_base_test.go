@@ -18,6 +18,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/hanzoai/ha"
 )
 
 // installBaseStore installs a Base-backend engineProvider backed by a temp
@@ -152,7 +154,11 @@ func TestBaseBackendSharedTables(t *testing.T) {
 	}
 
 	// MeterLease is a single-winner lease on the shared engine: the first claim
-	// for an hour wins, a second claim for the same hour loses.
+	// for an hour wins, a second claim for the same hour loses. Claiming needs an
+	// elected owner, so this test states that precondition rather than inheriting
+	// one — the claim gate fails closed when the replica set is unknown.
+	withMembership(t, stubMembership{id: "visor-only", set: []ha.Member{{ID: "visor-only"}}})
+
 	now := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
 	if !ClaimMeterHour(now) {
 		t.Fatal("first ClaimMeterHour must win")

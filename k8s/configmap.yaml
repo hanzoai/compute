@@ -38,7 +38,6 @@ stringData:
     logConfig = {"adapter":"console"}
     commerceUrl = ${COMMERCE_URL}
     commerceToken = ${COMMERCE_TOKEN}
-    autoscalerClusters = ${AUTOSCALER_CLUSTERS}
 ---
 # Credentials should be provisioned via Hanzo KMS or external-secrets operator.
 # Example ExternalSecret (if using external-secrets):
@@ -71,6 +70,3 @@ stringData:
 #     - secretKey: COMMERCE_TOKEN
 #       remoteRef:
 #         key: visor/commerce-token
-#     - secretKey: AUTOSCALER_CLUSTERS
-#       remoteRef:
-#         key: visor/autoscaler-clusters

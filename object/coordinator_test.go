@@ -38,8 +38,8 @@ type stubMembership struct {
 	fail bool // simulate an unreadable membership set (fail-closed path).
 }
 
-func (s stubMembership) self() string { return s.id }
-func (s stubMembership) members(context.Context) ([]ha.Member, error) {
+func (s stubMembership) Self() string { return s.id }
+func (s stubMembership) Members(context.Context) ([]ha.Member, error) {
 	if s.fail {
 		return nil, os.ErrPermission
 	}
@@ -48,7 +48,7 @@ func (s stubMembership) members(context.Context) ([]ha.Member, error) {
 
 // withMembership swaps the process membership source for the duration of a test and
 // restores it on cleanup, so the tests compose with the rest of the package.
-func withMembership(t *testing.T, m membershipSource) {
+func withMembership(t *testing.T, m ha.Membership) {
 	t.Helper()
 	prev := membership
 	membership = m
@@ -172,6 +172,16 @@ func TestExactlyOneOwnerAcrossReplicas(t *testing.T) {
 		if owners != 1 {
 			t.Fatalf("replicas=%d: elected %d owners, want exactly 1", n, owners)
 		}
+	}
+}
+
+// TestNoMembershipSourceFailsClosed proves the DEFAULT — no source registered, which is
+// what a build linking no cluster client gets — refuses to bill rather than assuming it
+// is alone. Assuming "I am the only replica" is the one guess that double-debits.
+func TestNoMembershipSourceFailsClosed(t *testing.T) {
+	withMembership(t, nil)
+	if billingOwner() {
+		t.Fatal("with no membership source registered, a replica must NOT elect itself billing owner")
 	}
 }
 
