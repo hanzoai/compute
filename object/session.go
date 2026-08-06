@@ -76,7 +76,11 @@ func GetSessions(owner string) ([]*Session, error) {
 	if err != nil {
 		return sessions, err
 	}
-	err = engine.Desc("connected_time").Find(&sessions, &Session{Owner: owner})
+	// Newest first, by the column the session actually has. `connected_time` was
+	// renamed to StartTime in the model and left behind here, so this query has
+	// been answering "no such column" — the whole unpaginated list, for every org.
+	// Only the paginated branch was exercised, which sorts through GetSession.
+	err = engine.Desc("start_time").Find(&sessions, &Session{Owner: owner})
 	if err != nil {
 		return sessions, err
 	}
