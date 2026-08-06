@@ -43,6 +43,7 @@ var (
 	deleteCounter   metric.Int64Counter
 	listCounter     metric.Int64Counter
 	meteredCounter  metric.Int64Counter // cents metered to commerce, by tier
+	skipCounter     metric.Int64Counter // billing sweeps that could not debit, by sweep
 )
 
 // ensureInstruments builds the tracer + counters once from the current global
@@ -70,6 +71,10 @@ func ensureInstruments() {
 			metric.WithDescription("cents metered to commerce, by org/project/tier"),
 			metric.WithUnit("{cent}")); err != nil {
 			logs.Warning("telemetry: metered counter: %v", err)
+		}
+		if skipCounter, err = m.Int64Counter("visor.billing.sweeps_skipped",
+			metric.WithDescription("billing sweeps that could not debit (metering unconfigured), by sweep")); err != nil {
+			logs.Warning("telemetry: skip counter: %v", err)
 		}
 	})
 }
@@ -135,4 +140,17 @@ func CountMetered(ctx context.Context, org, project, tier string, cents int64) {
 	}
 	meteredCounter.Add(ctx, cents, metric.WithAttributes(orgProjectAttrs(org, project,
 		attribute.String("tier", tier))...))
+}
+
+// CountBillingSkip records one billing sweep that could NOT debit because
+// metering is unconfigured. It carries no org — the whole point is that no org
+// was billed. This is the series "the sweep did not run this hour" alerts on:
+// the failure it names is silent everywhere else, because unbilled resources
+// keep running perfectly.
+func CountBillingSkip(ctx context.Context, sweep string) {
+	ensureInstruments()
+	if skipCounter == nil {
+		return
+	}
+	skipCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("sweep", sweep)))
 }

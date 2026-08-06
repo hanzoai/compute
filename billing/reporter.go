@@ -24,6 +24,8 @@ import (
 
 	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/visor/telemetry"
 )
 
 type MeterEvent struct {
@@ -58,18 +60,28 @@ func NewBillingReporter(commerceURL, serviceToken string) *BillingReporter {
 }
 
 // ReportNodePoolUsage sends a meter event for a single node pool's hourly usage.
+//
+// The rate is the pool's own persisted CostPerHour, falling back to the ONE
+// resale catalog (service.HourlyCents) for rows written before the pool path
+// priced anything. An unresolvable rate is an ERROR, not a zero: this used to
+// consult a hardcoded 32-entry droplet table with no GPU rows in it, so every
+// GPU pool reported a value of 0 for every hour it ran.
 func (r *BillingReporter) ReportNodePoolUsage(pool *object.NodePool) error {
 	if r.CommerceURL == "" || r.ServiceToken == "" {
 		return nil // billing not configured, skip silently
 	}
 
 	costPerHour := pool.CostPerHour
-	if costPerHour == 0 {
-		costPerHour = GetHourlyCostCents(pool.Size)
+	if costPerHour <= 0 {
+		resolved, err := service.HourlyCents(pool.Size)
+		if err != nil {
+			return fmt.Errorf("pool %s (%s): %w", pool.PoolID, pool.Size, err)
+		}
+		costPerHour = resolved
 	}
 
 	now := time.Now().UTC()
-	hourTimestamp := now.Format("2006010215") // e.g. "2026022012"
+	hourTimestamp := service.HourStamp(now)
 
 	value := costPerHour * int64(pool.Count)
 
@@ -127,8 +139,14 @@ func (r *BillingReporter) sendMeterEvents(events []MeterEvent) error {
 }
 
 // ReportAllNodePools fetches all node pools and reports usage for each.
-func (r *BillingReporter) ReportAllNodePools() {
+//
+// A pool created in the CURRENT clock hour is skipped: the create path already
+// debited that hour (service.CreatedInHour is the one launch-hour rule, shared
+// with the machine sweep), so reporting it again bills the same hour twice.
+func (r *BillingReporter) ReportAllNodePools(ctx context.Context) {
 	if r.CommerceURL == "" || r.ServiceToken == "" {
+		logs.Warning("billing: pool.hourly sweep SKIPPED — commerceUrl/commerceToken unset, so running node pools are NOT being billed")
+		telemetry.CountBillingSkip(ctx, "pool.hourly")
 		return
 	}
 
@@ -140,8 +158,12 @@ func (r *BillingReporter) ReportAllNodePools() {
 		return
 	}
 
+	stamp := service.HourStamp(time.Now())
 	for _, pool := range pools {
 		if pool.State != "Active" || pool.Count == 0 {
+			continue
+		}
+		if service.CreatedInHour(pool.CreatedTime, stamp) {
 			continue
 		}
 		err := r.ReportNodePoolUsage(pool)

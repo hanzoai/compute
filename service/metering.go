@@ -56,8 +56,17 @@ func PriceToCents(price float64) int64 {
 // operator wires the token from KMS as COMMERCE_SERVICE_TOKEN). When the token is
 // absent the client fails closed on Authorize, so real launches are denied while
 // quotes still work, and the recurring meter is a no-op (Record short-circuits on
-// !Enabled()). This is the SAME client construction the launch path uses, so both
-// key the same per-org ledger.
+// !Enabled()). This is the SAME client construction every visor debit uses, so
+// they all key the same per-org ledger.
+//
+// TierAware is OFF: the compute gate reads the org's PREPAID balance, not the
+// tier-aware effective balance that folds in the included plan allotment. Compute
+// is the one surface where a request provisions a resource that keeps drawing
+// upstream cost for as long as it runs, so a promotional grant must not be
+// convertible into GPU-hours — a free-tier credit is meant to buy inference, not
+// an H100. TierAware only affects Authorize's balance read (metering.fetchAvailable
+// picks /v1/billing/tier over /v1/billing/balance); Record is unaffected, so the
+// fleet-billing lines this client also carries are unchanged.
 func NewMeteringClient(org string) *metering.Client {
 	base := strings.TrimSpace(os.Getenv("COMMERCE_URL"))
 	if base == "" {
@@ -67,7 +76,7 @@ func NewMeteringClient(org string) *metering.Client {
 		BaseURL:   base,
 		Token:     strings.TrimSpace(os.Getenv("COMMERCE_SERVICE_TOKEN")),
 		Org:       org,
-		TierAware: true,
+		TierAware: false,
 		Timeout:   5 * time.Second,
 	})
 	return client
@@ -84,18 +93,22 @@ func MeteringConfigured() bool {
 	return strings.TrimSpace(os.Getenv("COMMERCE_SERVICE_TOKEN")) != "" && NewMeteringClient("hanzo").Enabled()
 }
 
-// hourStamp is the per-hour bucket for the RequestID: the same running machine
+// HourStamp is the per-hour bucket for the RequestID: the same running resource
 // metered twice within one wall-clock hour carries the SAME RequestID (the client
 // dedup hint). The authoritative once-per-hour guarantee is the single-flight
 // lease in the ticker (object.ClaimMeterHour), because commerce does not dedup the
 // withdraw on requestId.
-func hourStamp(now time.Time) string { return now.UTC().Format("2006010215") }
+func HourStamp(now time.Time) string { return now.UTC().Format("2006010215") }
 
-// createdInHour reports whether an RFC3339 create time falls in the same UTC
+// CreatedInHour reports whether an RFC3339 create time falls in the same UTC
 // hour bucket as stamp ("YYYYMMDDHH"). An empty or unparseable time is NOT in the
-// hour (metered normally) — we only ever SKIP a machine we can prove the launch
-// path already billed this hour.
-func createdInHour(createdTime, stamp string) bool {
+// hour (metered normally) — we only ever SKIP a resource we can prove the
+// provision path already billed this hour.
+//
+// Exported because it is the ONE launch-hour rule, and every provision path that
+// debits its first hour up front (machines, node pools) needs its recurring sweep
+// to honour the same rule or that hour is billed twice.
+func CreatedInHour(createdTime, stamp string) bool {
 	if createdTime == "" {
 		return false
 	}
@@ -128,7 +141,7 @@ func createdInHour(createdTime, stamp string) bool {
 // No-op when metering is unconfigured or when compute is unconfigured (no house
 // token) — nothing to enumerate, nothing to debit.
 func MeterRunningMachines(ctx context.Context) {
-	if !ComputeConfigured() || !MeteringConfigured() {
+	if !ComputeConfigured() || !Billable(ctx, "compute.hourly") {
 		return
 	}
 	ctx, span := telemetry.Span(ctx, "billing.meter.hourly", "", "")
@@ -151,7 +164,7 @@ func MeterRunningMachines(ctx context.Context) {
 // sweep. Isolated from the DO enumeration so the billing contract is testable
 // against a fake commerce.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
-	stamp := hourStamp(now)
+	stamp := HourStamp(now)
 	for _, m := range machines {
 		org := orgFromTag(m.Tag)
 		if org == "" {
@@ -171,39 +184,25 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		// machine with no parseable create time (older rows / test doubles) is
 		// metered normally — a launch is never billed unless the launch path ran,
 		// so failing to skip only risks the historical status quo, never a miss.
-		if createdInHour(m.CreatedTime, stamp) {
+		if CreatedInHour(m.CreatedTime, stamp) {
 			continue
 		}
-		si, err := SizeBySlug(m.Size)
-		if err != nil || si == nil {
+		// ONE price resolver, shared with the provision gate. An unresolvable
+		// price is a LOUD skip, never a silent $0 debit — a running machine we
+		// cannot price is lost revenue, and the log line is how anyone learns.
+		cents, err := HourlyCents(m.Size)
+		if err != nil {
 			skipped++
-			logs.Warning("compute metering: size %q for machine %s not in catalog; skipping: %v", m.Size, m.Id, err)
+			logs.Warning("compute metering: machine %s not billed: %v", m.Id, err)
 			continue
 		}
-		cents := PriceToCents(si.PriceHourly)
-		if cents <= 0 {
-			continue // a $0 size is free — no debit (mirrors the launch path)
-		}
-		client := NewMeteringClient(org)
-		if _, err := client.Record(ctx, metering.Usage{
-			User:        org,
-			Actor:       MeterActor(org, project),
-			Org:         org,
-			Currency:    "usd",
-			AmountCents: cents,
-			Provider:    meteringProvider,
-			Model:       m.Size,
-			Status:      "running",
-			RequestID:   fmt.Sprintf("compute-%s-%s", m.Id, stamp),
-		}); err != nil {
+		if err := RecordCompute(ctx, org, project, cents, m.Size, "running",
+			fmt.Sprintf("compute-%s-%s", m.Id, stamp)); err != nil {
 			skipped++
 			logs.Warning("compute metering: debit machine %s (org %s): %v", m.Id, org, err)
 			continue
 		}
 		metered++
-		// Mirror the debit as an OTel metric (per org/project, tier "compute") so
-		// o11y shows real per-project spend as it is billed.
-		telemetry.CountMetered(ctx, org, project, "compute", cents)
 		// Roll a running event into the analytics datastore alongside this
 		// hour's debit (best-effort; never blocks or affects the sweep).
 		EmitCompute(org, ComputeRunning, m, cents)

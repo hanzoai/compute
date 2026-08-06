@@ -39,7 +39,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/commerce/metering"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
@@ -496,23 +496,29 @@ func batchMemberName(name string, i int) string {
 }
 
 // launchMetered is the ONE metered launch shared by the single and batch launch
-// paths: authorize the org for the first hour of si, provision + bootstrap via
-// LaunchOrgMachine, then debit that launch hour. Fail-closed — an unknown or
+// paths: authorize the org for the first hour of the size, provision + bootstrap
+// via LaunchOrgMachine, then debit that launch hour. Fail-closed — an unknown or
 // insufficient balance launches nothing and spends nothing. The caller sets the
 // spec's kind (service.SetKind) before calling; launchMetered is kind-agnostic.
 // Every SUBSEQUENT running hour is debited by service.MeterRunningMachines (the
 // hourly ticker) on this SAME commerce path; the launch owns the launch hour and
 // the sweep skips a machine created in the current clock hour, so the hour is
-// never double-billed. A metering write failure never fails the launch — the
-// machine exists and the ticker/reconciler reconciles.
+// never double-billed.
+//
+// It composes the same three primitives every other provision path uses
+// (service.HourlyCents → AuthorizeCompute → RecordCompute), so a machine, a node
+// pool and a cluster are priced by one rule and gated by one rule.
+//
+// A metering WRITE failure does not fail the launch — the machine exists, and
+// refusing to return it would leave the customer paying for something they were
+// told they did not get. It is logged loudly instead: nothing reconciles it.
 func launchMetered(ctx context.Context, org, project string, spec *service.CreateMachineSpec, si *service.SizeInfo) (*service.Machine, error) {
-	meter := service.NewMeteringClient(org)
-	firstHourCents := service.PriceToCents(si.PriceHourly)
-	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd", AmountCents: firstHourCents}); err != nil {
-		if err == metering.ErrInsufficientBalance {
-			return nil, fmt.Errorf("insufficient balance to launch machine")
-		}
-		return nil, fmt.Errorf("billing authorization failed: %v", err)
+	firstHourCents, err := service.HourlyCents(si.Slug)
+	if err != nil {
+		return nil, err
+	}
+	if err := service.AuthorizeCompute(ctx, org, project, firstHourCents); err != nil {
+		return nil, err
 	}
 	machine, err := service.LaunchOrgMachine(org, project, spec)
 	if err != nil {
@@ -521,17 +527,9 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 	// Roll a launched event into the analytics datastore (best-effort; never
 	// blocks or fails the launch) — the analytical mirror of the commerce debit.
 	service.EmitCompute(org, service.ComputeLaunched, machine, firstHourCents)
-	_, _ = meter.Record(ctx, metering.Usage{
-		User:        org,
-		Actor:       org,
-		Org:         org,
-		Currency:    "usd",
-		AmountCents: firstHourCents,
-		Provider:    "compute",
-		Model:       spec.InstanceType,
-		Status:      "launched",
-		RequestID:   machine.Id,
-	})
+	if err := service.RecordCompute(ctx, org, project, firstHourCents, spec.InstanceType, "launched", machine.Id); err != nil {
+		logs.Warning("compute metering: debit launch %s (org %s, %d cents): %v", machine.Id, org, firstHourCents, err)
+	}
 	return machine, nil
 }
 

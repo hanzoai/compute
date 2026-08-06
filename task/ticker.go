@@ -40,19 +40,24 @@ func (t *Ticker) SetupTicker() {
 		}
 	}()
 
-	// billing: report node pool usage every hour
-	commerceURL := conf.GetConfigString("commerceUrl")
-	commerceToken := conf.GetConfigString("commerceToken")
-	if commerceURL != "" && commerceToken != "" {
-		reporter := billing.NewBillingReporter(commerceURL, commerceToken)
-		billingTicker := time.NewTicker(time.Hour)
-		go func() {
-			for range billingTicker.C {
-				reporter.ReportAllNodePools()
-			}
-		}()
-		logs.Info("billing: hourly node pool usage reporting enabled")
-	}
+	// billing: report node pool usage every hour.
+	//
+	// Wired UNCONDITIONALLY, and the reporter is built per tick. Both halves
+	// matter: a startup-time config check silently disables billing FOREVER for
+	// a pod that booted before its KMS-synced credential landed, and a reporter
+	// built once captures whatever the config said at boot. Deciding per tick
+	// means a late credential starts billing on the next hour, and a missing one
+	// is reported every hour instead of never (ReportAllNodePools is loud).
+	billingTicker := time.NewTicker(time.Hour)
+	go func() {
+		for range billingTicker.C {
+			billing.NewBillingReporter(
+				conf.GetConfigString("commerceUrl"),
+				conf.GetConfigString("commerceToken"),
+			).ReportAllNodePools(context.Background())
+		}
+	}()
+	logs.Info("billing: hourly node pool usage reporting enabled")
 
 	// compute metering: debit every RUNNING /v1 resell machine one hour of its
 	// resale price to its owning org, every hour, on the canonical commerce/
@@ -75,17 +80,22 @@ func (t *Ticker) SetupTicker() {
 	// needed), so it bills normally; at replicas: N only the elected owner bills.
 	// ClaimMeterHour re-checks ownership, so the gate here is a clean-skip optimization,
 	// never the sole guarantee.
-	if service.MeteringConfigured() {
-		computeTicker := time.NewTicker(time.Hour)
-		go func() {
-			for range computeTicker.C {
-				if object.IsBillingOwner() && object.ClaimMeterHour(time.Now()) {
-					service.MeterRunningMachines(context.Background())
-				}
+	//
+	// Wired UNCONDITIONALLY — enablement is decided INSIDE MeterRunningMachines
+	// every hour, which is what the paragraph above already promised. The
+	// startup-time MeteringConfigured() check that used to stand here broke that
+	// promise in the worst direction: a pod that booted before its KMS-synced
+	// COMMERCE_SERVICE_TOKEN landed never created the ticker at all, so it never
+	// billed a single machine-hour for the life of the pod, silently.
+	computeTicker := time.NewTicker(time.Hour)
+	go func() {
+		for range computeTicker.C {
+			if object.IsBillingOwner() && object.ClaimMeterHour(time.Now()) {
+				service.MeterRunningMachines(context.Background())
 			}
-		}()
-		logs.Info("compute metering: hourly running-machine drawdown enabled (single-flight per hour, elected owner)")
-	}
+		}
+	}()
+	logs.Info("compute metering: hourly running-machine drawdown enabled (single-flight per hour, elected owner)")
 }
 
 func (t *Ticker) deleteUnUsedSession() {
