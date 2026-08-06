@@ -39,7 +39,6 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
@@ -517,18 +516,20 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 	if err != nil {
 		return nil, err
 	}
-	if err := service.AuthorizeCompute(ctx, org, project, firstHourCents); err != nil {
-		return nil, err
-	}
-	machine, err := service.LaunchOrgMachine(org, project, spec)
+	var machine *service.Machine
+	err = service.Provision(ctx, org, project, firstHourCents, spec.InstanceType, func() (string, error) {
+		m, err := service.LaunchOrgMachine(org, project, spec)
+		if err != nil {
+			return "", err
+		}
+		machine = m
+		// Roll a launched event into the analytics datastore (best-effort; never
+		// blocks or fails the launch) — the analytical mirror of the commerce debit.
+		service.EmitCompute(org, service.ComputeLaunched, m, firstHourCents)
+		return m.Id, nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	// Roll a launched event into the analytics datastore (best-effort; never
-	// blocks or fails the launch) — the analytical mirror of the commerce debit.
-	service.EmitCompute(org, service.ComputeLaunched, machine, firstHourCents)
-	if err := service.RecordCompute(ctx, org, project, firstHourCents, spec.InstanceType, "launched", machine.Id); err != nil {
-		logs.Warning("compute metering: debit launch %s (org %s, %d cents): %v", machine.Id, org, firstHourCents, err)
 	}
 	return machine, nil
 }

@@ -31,6 +31,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/hanzoai/commerce/metering"
 	"github.com/hanzoai/visor/logs"
@@ -131,6 +132,95 @@ func RecordCompute(ctx context.Context, org, project string, cents int64, model,
 		return err
 	}
 	telemetry.CountMetered(ctx, org, project, meteringProvider, cents)
+	return nil
+}
+
+// ---- the provisioning lease ----
+//
+// AuthorizeCompute is a READ. Sixteen requests can read the same balance in the
+// window before any of them writes a debit, and every one of them is told yes —
+// measured: an org funded for one cluster-hour provisioned sixteen, and finished
+// the second at minus $476. A gate that every concurrent caller passes is a
+// speed bump.
+//
+// The hold closes the window by making the sequence atomic per org: a balance one
+// request clears is a balance the next request no longer sees, because the debit
+// lands before the next read. It is per ORG, so one tenant's provision never
+// waits on another's.
+//
+// It is a PROCESS lease, and that is exactly as wide as visor's money safety
+// already is: the hourly meter's exactly-once rests on this Deployment running
+// `replicas: 1` (object/coordinator.go's ha.Static, paired with the replica count
+// in universe charts/app/values/hanzo/visor.yaml), because under the Base backend
+// the shared coord is pod-local and no insert-once PK spans pods. Raising
+// replicas requires a real membership source AND a cross-pod hold, in the same
+// change — the same coupling, stated in the same terms, for the same reason.
+
+type orgHold struct {
+	mu      sync.Mutex
+	waiting int
+}
+
+var (
+	holdsMu sync.Mutex
+	holds   = map[string]*orgHold{}
+)
+
+// holdOrg takes org's provisioning lease and returns its release. The map is
+// pruned when the last waiter leaves, so a tenant list does not become a leak.
+func holdOrg(org string) func() {
+	holdsMu.Lock()
+	h := holds[org]
+	if h == nil {
+		h = &orgHold{}
+		holds[org] = h
+	}
+	h.waiting++
+	holdsMu.Unlock()
+
+	h.mu.Lock()
+	return func() {
+		h.mu.Unlock()
+		holdsMu.Lock()
+		h.waiting--
+		if h.waiting == 0 {
+			delete(holds, org)
+		}
+		holdsMu.Unlock()
+	}
+}
+
+// Provision is the ONE metered provision, and every compute resource visor
+// creates rides it: a droplet launch, a DOKS cluster, a node pool, a scale-up.
+// Under the org's hold it authorizes, provisions, and debits — in that order, so
+// the money moves before the next request reads the balance.
+//
+// cents is the resource's FIRST HOUR at its full quantity (hourly × nodes) and
+// model is the size slug. provision does the work and returns the idempotency key
+// naming what it provisioned — or "" when the provision carries no charge of its
+// OWN, which is the scale path: the added nodes are billed by the recurring sweep
+// from its next hour, and a debit here would overlap that same hour's sweep.
+//
+// A failed provision debits nothing. A failed DEBIT does not un-provision — the
+// resource exists and is drawing upstream cost, and refusing to hand it over
+// would leave the customer paying for something they were told they did not get —
+// but it is loud, because nothing reconciles it.
+func Provision(ctx context.Context, org, project string, cents int64, model string, provision func() (string, error)) error {
+	defer holdOrg(org)()
+
+	if err := AuthorizeCompute(ctx, org, project, cents); err != nil {
+		return err
+	}
+	requestID, err := provision()
+	if err != nil {
+		return err
+	}
+	if requestID == "" {
+		return nil
+	}
+	if err := RecordCompute(ctx, org, project, cents, model, "launched", requestID); err != nil {
+		logs.Warning("compute metering: debit %s (org %s, %d cents): %v", requestID, org, cents, err)
+	}
 	return nil
 }
 

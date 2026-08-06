@@ -462,27 +462,27 @@ func createClusterMetered(ctx context.Context, client clusterCreator, record rec
 	if err != nil {
 		return nil, err
 	}
-	firstHour := hourly * int64(count)
-	if err := AuthorizeCompute(ctx, org, project, firstHour); err != nil {
-		return nil, err
-	}
-	tags := []string{"managed-by:hanzo-visor", orgTag(org)}
-	cluster, err := client.CreateCluster(ctx, spec, tags)
+	var cluster *KubernetesCluster
+	err = Provision(ctx, org, project, hourly*int64(count), spec.NodePool.Size, func() (string, error) {
+		c, err := client.CreateCluster(ctx, spec, []string{"managed-by:hanzo-visor", orgTag(org)})
+		if err != nil {
+			return "", err
+		}
+		cluster = c
+		if err := record(SeedPool{
+			Org: org, Project: project, ClusterID: c.ID, Name: seedPoolName(spec),
+			Size: spec.NodePool.Size, Count: count, CentsHour: hourly,
+		}); err != nil {
+			// The cluster is up and drawing upstream cost; refusing to return it
+			// would leave the customer paying for something they were told they did
+			// not get. But an unrecorded pool is an UNBILLED pool for every hour it
+			// runs, so this is the loudest line in the file. Nothing reconciles it.
+			logs.Warning("compute metering: cluster %s (org %s) provisioned but its seed pool was NOT recorded — it will be billed for its first hour only: %v", c.ID, org, err)
+		}
+		return "cluster-" + c.ID, nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	if err := record(SeedPool{
-		Org: org, Project: project, ClusterID: cluster.ID, Name: seedPoolName(spec),
-		Size: spec.NodePool.Size, Count: count, CentsHour: hourly,
-	}); err != nil {
-		// The cluster is up and drawing upstream cost; refusing to return it would
-		// leave the customer paying for something they were told they did not get.
-		// But an unrecorded pool is an UNBILLED pool for every hour it runs, so
-		// this is the loudest line in the file. Nothing reconciles it.
-		logs.Warning("compute metering: cluster %s (org %s) provisioned but its seed pool was NOT recorded — it will be billed for its first hour only: %v", cluster.ID, org, err)
-	}
-	if err := RecordCompute(ctx, org, project, firstHour, spec.NodePool.Size, "launched", "cluster-"+cluster.ID); err != nil {
-		logs.Warning("compute metering: debit cluster %s (org %s, %d cents): %v", cluster.ID, org, firstHour, err)
 	}
 	return cluster, nil
 }
