@@ -512,7 +512,7 @@ func batchMemberName(name string, i int) string {
 // refusing to return it would leave the customer paying for something they were
 // told they did not get. It is logged loudly instead: nothing reconciles it.
 func launchMetered(ctx context.Context, org, project string, spec *service.CreateMachineSpec, si *service.SizeInfo) (*service.Machine, error) {
-	firstHourCents, err := service.HourlyCents(si.Slug)
+	firstHourCents, err := service.RateOf(si)
 	if err != nil {
 		return nil, err
 	}

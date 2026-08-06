@@ -403,7 +403,9 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 		return nil, fmt.Errorf("no cluster ID specified and provider %q has no default cluster", providerName)
 	}
 
-	hourly, err := service.HourlyCents(spec.Size)
+	// Price FIRST, from the ONE resale catalog: a size that cannot be priced
+	// provisions nothing, so nothing is even built.
+	rate, err := service.HourlyCents(spec.Size)
 	if err != nil {
 		return nil, err
 	}
@@ -411,15 +413,31 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DOKS client: %w", err)
 	}
+	return createNodePoolMetered(client, rate, owner, provider.Project, providerName, cid, spec)
+}
 
+// cloudNodePoolCreator is the minimal cloud surface a metered node-pool provision
+// needs — the twin of cloudNodePoolDeleter, satisfied by *service.DOKSClient and
+// by a test fake. It is what makes "a refused pool reaches no upstream" a
+// property a test can observe rather than a claim about a code path.
+type cloudNodePoolCreator interface {
+	CreateNodePool(spec *service.CreateNodePoolSpec) (*service.NodePool, error)
+}
+
+// createNodePoolMetered is the ONE metered node-pool provision: authorize the org
+// for the pool's first hour at the quantity the pool is ALLOWED to reach,
+// provision, persist the billable row, then debit that hour — the whole sequence
+// under the org's provisioning hold (service.Provision). rate is the per-node
+// hourly price its caller resolved from the resale catalog.
+func createNodePoolMetered(client cloudNodePoolCreator, rate int64, owner, project, providerName, clusterID string, spec *service.CreateNodePoolSpec) (*NodePool, error) {
 	// The count asked of the upstream is the count the org is authorized for. A
 	// non-positive count used to reach DigitalOcean as-is while the gate priced a
 	// floor of one, so "authorized" and "provisioned" were two different numbers.
 	spec.Count = poolNodes(spec)
 
 	var pool *NodePool
-	err = service.Provision(context.Background(), owner, provider.Project,
-		hourly*int64(authorizedNodes(spec)), spec.Size, func() (string, error) {
+	err := service.Provision(context.Background(), owner, project,
+		rate*int64(authorizedNodes(spec)), spec.Size, func() (string, error) {
 			servicePool, err := client.CreateNodePool(spec)
 			if err != nil {
 				return "", fmt.Errorf("failed to create node pool in DOKS: %w", err)
@@ -429,7 +447,7 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 			pool = &NodePool{
 				Owner:       owner,
 				Name:        servicePool.Name,
-				ClusterID:   cid,
+				ClusterID:   clusterID,
 				PoolID:      servicePool.ID,
 				Provider:    providerName,
 				Size:        servicePool.Size,
@@ -438,9 +456,9 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 				MaxNodes:    servicePool.MaxNodes,
 				AutoScale:   servicePool.AutoScale,
 				State:       "Active",
-				CostPerHour: hourly,
+				CostPerHour: rate,
 				OrgID:       owner,
-				ProjectID:   provider.Project,
+				ProjectID:   project,
 				CreatedTime: now,
 				UpdatedTime: now,
 			}
@@ -520,30 +538,45 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DOKS client: %w", err)
 	}
-
-	// Fetch current pool to preserve settings
-	currentPool, err := client.GetNodePool(poolID)
+	current, err := client.GetNodePool(poolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current node pool: %w", err)
 	}
+	// The pool's rate is resolved once, from the ONE resale catalog, and used for
+	// two things: the authorization when the pool GROWS, and the re-stamp on the
+	// row. An unresolvable rate is 0 here — HourlyCents never returns a zero price
+	// with a nil error, so zero unambiguously means UNPRICED, and only the growing
+	// path treats that as fatal.
+	rate, _ := service.HourlyCents(current.Size)
+	return scaleNodePoolMetered(client, current, rate, owner, provider.Project, poolID, count)
+}
 
+// cloudNodePoolScaler is the minimal cloud surface a metered scale WRITES to.
+// Same seam pattern as cloudNodePoolCreator and cloudNodePoolDeleter, for the
+// same reason — a gate is only proven by an upstream that stays untouched when it
+// refuses.
+type cloudNodePoolScaler interface {
+	UpdateNodePool(poolID string, spec *service.CreateNodePoolSpec) (*service.NodePool, error)
+}
+
+// scaleNodePoolMetered is the ONE metered scale: a scale UP is a provision and
+// goes through the gate under the org's hold, for the first hour of the ADDED
+// nodes; a scale DOWN or a no-op adds no cost and is never gated. Refusing to
+// shrink a pool because a balance is low — or because its slug has left the
+// catalog — would keep the meter running on nodes the customer asked to release.
+//
+// rate is the per-node hourly price, or 0 when the slug has no price.
+func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool, rate int64, owner, project, poolID string, count int) (*NodePool, error) {
 	spec := &service.CreateNodePoolSpec{
-		Name:      currentPool.Name,
-		Size:      currentPool.Size,
+		Name:      current.Name,
+		Size:      current.Size,
 		Count:     count,
-		MinNodes:  currentPool.MinNodes,
-		MaxNodes:  currentPool.MaxNodes,
-		AutoScale: currentPool.AutoScale,
-		Tags:      currentPool.Tags,
-		Labels:    currentPool.Labels,
+		MinNodes:  current.MinNodes,
+		MaxNodes:  current.MaxNodes,
+		AutoScale: current.AutoScale,
+		Tags:      current.Tags,
+		Labels:    current.Labels,
 	}
-
-	// The pool's rate is resolved once and used for two different things: the
-	// authorization when the pool GROWS, and the re-stamp on the row (rows written
-	// before the pool path priced anything carry 0). Resolving it is only FATAL on
-	// the way up — refusing to shrink a pool because its slug has left the catalog
-	// would keep the meter running on nodes the customer asked to release.
-	hourly, priceErr := service.HourlyCents(currentPool.Size)
 
 	var updatedPool *service.NodePool
 	scale := func() (string, error) {
@@ -557,12 +590,14 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 		return "", nil
 	}
 
-	if added := count - currentPool.Count; added > 0 {
-		if priceErr != nil {
-			return nil, priceErr // a scale UP is a provision: no price, no provision
+	var err error
+	if added := count - current.Count; added > 0 {
+		if rate <= 0 {
+			// A scale UP is a provision: no price, no provision.
+			return nil, fmt.Errorf("%w: size %q has no resale price", service.ErrPriceUnavailable, current.Size)
 		}
-		err = service.Provision(context.Background(), owner, provider.Project,
-			hourly*int64(added), currentPool.Size, scale)
+		err = service.Provision(context.Background(), owner, project,
+			rate*int64(added), current.Size, scale)
 	} else {
 		_, err = scale()
 	}
@@ -577,8 +612,8 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 	}
 	if dbPool != nil {
 		dbPool.Count = updatedPool.Count
-		if priceErr == nil {
-			dbPool.CostPerHour = hourly
+		if rate > 0 {
+			dbPool.CostPerHour = rate
 		}
 		dbPool.UpdatedTime = time.Now().Format(time.RFC3339)
 		engine, err := EngineFor(owner)

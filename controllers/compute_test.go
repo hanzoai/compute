@@ -15,7 +15,12 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zap-proto/zip"
@@ -221,5 +226,93 @@ func TestNodesIsAlwaysAnArray(t *testing.T) {
 	}
 	if got, want := string(b), `{"nodes":[]}`; got != want {
 		t.Fatalf("empty Nodes = %s, want %s", got, want)
+	}
+}
+
+// ---- the launch gate ----
+
+// launchCommerce stands up a fake commerce and reports what the launch path
+// asked it. Counting balance READS is what tells "the gate looked and refused"
+// apart from "the gate is not there" — with no house DigitalOcean token both
+// end in an error, and only the reads distinguish them.
+type launchCommerce struct {
+	mu     sync.Mutex
+	reads  int
+	debits int
+}
+
+func launchCommerceOf(t *testing.T, availableCents int64) *launchCommerce {
+	t.Helper()
+	c := &launchCommerce{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/balance"):
+			c.reads++
+			_ = json.NewEncoder(w).Encode(map[string]any{"available": availableCents, "currency": "usd"})
+		case strings.HasSuffix(r.URL.Path, "/usage"):
+			c.debits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"transactionId":"tx","type":"usage"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("COMMERCE_URL", srv.URL)
+	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	// No house token: LaunchOrgMachine cannot reach DigitalOcean, so if the
+	// launch ever gets that far it fails for a DIFFERENT reason — which is
+	// exactly what the read count is here to detect.
+	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
+	return c
+}
+
+func (c *launchCommerce) state() (reads, debits int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reads, c.debits
+}
+
+// A machine is not launched for an org that cannot pay for its first hour, and
+// the refusal costs nothing. Remove the gate and no balance is ever read — the
+// launch goes straight at DigitalOcean.
+func TestLaunchMeteredRefusesBeforeItProvisions(t *testing.T) {
+	c := launchCommerceOf(t, 0) // broke
+
+	machine, err := launchMetered(context.Background(), "acme", "",
+		&service.CreateMachineSpec{Name: "box", InstanceType: "gpu-h100x8-640gb"},
+		&service.SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+
+	if err == nil || machine != nil {
+		t.Fatalf("an unfunded org must be refused, got machine=%+v err=%v", machine, err)
+	}
+	reads, debits := c.state()
+	if reads == 0 {
+		t.Fatal("the launch must consult the balance BEFORE it provisions")
+	}
+	if debits != 0 {
+		t.Fatalf("a refused launch must bill nothing, got %d debits", debits)
+	}
+	if !strings.Contains(err.Error(), "balance") {
+		t.Fatalf("a refused launch must fail on the money, not on the cloud: %v", err)
+	}
+}
+
+// A size with no resale price never reaches the balance, let alone the cloud:
+// an unpriceable launch is refused before anything is asked of anyone.
+func TestLaunchMeteredRefusesAnUnpriceableSize(t *testing.T) {
+	c := launchCommerceOf(t, 100000000)
+
+	_, err := launchMetered(context.Background(), "acme", "",
+		&service.CreateMachineSpec{Name: "box", InstanceType: "gpu-h200x8-1128gb"},
+		&service.SizeInfo{Slug: "gpu-h200x8-1128gb"})
+
+	if err == nil {
+		t.Fatal("a size with no price must be refused")
+	}
+	if reads, debits := c.state(); reads != 0 || debits != 0 {
+		t.Fatalf("an unpriceable launch must ask commerce nothing, got %d reads and %d debits", reads, debits)
 	}
 }

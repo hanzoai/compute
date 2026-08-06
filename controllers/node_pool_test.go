@@ -59,6 +59,8 @@ func poolWire(t *testing.T) *zip.App {
 	handler := func(fn func(*ApiController)) zip.Handler {
 		return func(c *zip.Ctx) error { fn(New(c)); return nil }
 	}
+	app.Get("/v1/get-node-pools", handler((*ApiController).GetNodePools))
+	app.Get("/v1/get-node-pool", handler((*ApiController).GetNodePool))
 	app.Post("/v1/update-node-pool", handler((*ApiController).UpdateNodePool))
 	app.Post("/v1/delete-node-pool", handler((*ApiController).DeleteNodePool))
 	app.Post("/v1/create-node-pool", handler((*ApiController).CreateNodePool))
@@ -82,6 +84,25 @@ func post(t *testing.T, app *zip.App, path, bearer, body string) string {
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatalf("POST %s: read body: %v", path, err)
+	}
+	return string(b)
+}
+
+// get drives one real GET, with an optional bearer, and returns the body.
+func get(t *testing.T, app *zip.App, path, bearer string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if bearer != "" {
+		req.Header.Set("Authorization", bearer)
+	}
+	res, err := app.Fiber().Test(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("GET %s: read body: %v", path, err)
 	}
 	return string(b)
 }
@@ -111,7 +132,7 @@ func TestUpdateNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	victim := storedPool(t, "victimorg", "gpu")
 	storedPool(t, "attackerorg", "gpu")
 
-	post(t, app, "/v1/update-node-pool?id=victimorg/gpu", mint("attackerorg"),
+	post(t, app, "/v1/update-node-pool?owner=victimorg&id=victimorg/gpu", mint("attackerorg"),
 		`{"owner":"victimorg","name":"gpu","maxNodes":99}`)
 
 	after, err := object.GetNodePool("victimorg/gpu")
@@ -188,6 +209,45 @@ func TestProvisionUsesTheSignedOrgNotTheQuery(t *testing.T) {
 			}
 			if strings.Contains(body, "hanzo") {
 				t.Fatalf("the query's org reached the provision: %s", body)
+			}
+		})
+	}
+}
+
+// The READS take their tenant from the caller too. Authorization keys a GET on
+// the very ?owner= the handler used to read, so the two agreed and the caller
+// chose both — a customer listing another org's pools was one query parameter
+// away, and the agreement is exactly what hid it.
+func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
+	mint := signer(t, "https://test.id")
+	app := poolWire(t)
+	storedPool(t, "victimread", "secret-gpu")
+	storedPool(t, "attackerread", "own-gpu")
+
+	list := get(t, app, "/v1/get-node-pools?owner=victimread", mint("attackerread"))
+	if strings.Contains(list, "secret-gpu") || strings.Contains(list, "victimread") {
+		t.Fatalf("another org's pools were listed: %s", list)
+	}
+	if !strings.Contains(list, "own-gpu") {
+		t.Fatalf("the caller must still see its OWN pools: %s", list)
+	}
+
+	one := get(t, app, "/v1/get-node-pool?owner=victimread&id=victimread/secret-gpu", mint("attackerread"))
+	if strings.Contains(one, "secret-gpu") || strings.Contains(one, "victimread") {
+		t.Fatalf("another org's pool was readable by id: %s", one)
+	}
+}
+
+// A read with no org context is refused rather than served somebody's rows.
+func TestNodePoolReadsFailClosedWithoutAnOrg(t *testing.T) {
+	app := poolWire(t)
+	for name, path := range map[string]string{
+		"list": "/v1/get-node-pools",
+		"get":  "/v1/get-node-pool?id=gpu",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if body := get(t, app, path, ""); !strings.Contains(body, "no org context") {
+				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
 			}
 		})
 	}

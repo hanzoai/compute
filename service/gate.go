@@ -62,9 +62,20 @@ func HourlyCents(slug string) (int64, error) {
 	if si == nil {
 		return 0, fmt.Errorf("%w: size %q is not in the catalog", ErrPriceUnavailable, slug)
 	}
+	return RateOf(si)
+}
+
+// RateOf is the price half of HourlyCents, for a size the caller has ALREADY
+// resolved from the catalog — which the launch path has, since it resolved the
+// size to quote it. There is one refuse-rather-than-zero rule and this is it;
+// HourlyCents is the slug half in front of it, not a second copy.
+func RateOf(si *SizeInfo) (int64, error) {
+	if si == nil {
+		return 0, fmt.Errorf("%w: size is not in the catalog", ErrPriceUnavailable)
+	}
 	cents := PriceToCents(si.PriceHourly)
 	if cents <= 0 {
-		return 0, fmt.Errorf("%w: size %q resolved to a zero price", ErrPriceUnavailable, slug)
+		return 0, fmt.Errorf("%w: size %q resolved to a zero price", ErrPriceUnavailable, si.Slug)
 	}
 	return cents, nil
 }
