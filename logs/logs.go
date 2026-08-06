@@ -14,17 +14,16 @@
 
 // Package logs writes visor's leveled log lines.
 //
-// It exists because the beego rip rewrote every beego logs import to point
-// here without anything being put here. Twenty-two call sites across
-// autoscaler, billing, telemetry, task and controllers compiled against a
-// package that was never written, so visor did not build at all — at any pin,
-// for as long as the rewrite has been in the tree.
+// It is log/slog underneath, and the whole package is the signature: a format
+// string and its arguments, always in that order.
 //
-// One shape: a format string and its arguments. beego's logs took an
+// That signature is the point. The framework logger this replaced took an
 // interface{} first argument and reached for Sprintf only when arguments
 // followed, so logs.Info("failed: ", err) produced a line ending in
-// %!(EXTRA *errors.errorString=…) rather than the error. Requiring a format
-// makes that shape a compile-time fact instead of a runtime surprise.
+// %!(EXTRA *errors.errorString=…) rather than the error — a message that lost
+// the one fact it was written to carry, and lost it at runtime, in the log,
+// where nobody was going to be looking. Requiring a format makes that shape a
+// compile-time fact instead.
 package logs
 
 import (

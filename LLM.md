@@ -18,11 +18,112 @@ Visor is Hanzo's multi-provider cloud VM management platform. It provisions, mon
 ## Architecture
 
 ### Core Layers
-- **Controllers** (`/controllers/`): HTTP handlers (Beego framework), JWT auth
+- **Controllers** (`/controllers/`): HTTP handlers, JWT auth
 - **Service** (`/service/`): Provider adapters implementing `MachineClientInterface`
-- **Object** (`/object/`): Data models, DB operations (XORM), plan seeds
+- **Object** (`/object/`): Data models, DB operations (`hanzoai/orm`), plan seeds
 - **Billing** (`/billing/`): Pricing engine
 - **AuthZ** (`/authz/`): hanzoai/authz-based authorization
+
+### One framework: zip
+Visor serves on `github.com/zap-proto/zip` and nothing else. Beego is gone —
+no import, no `go.mod` require, no prose describing the current design. What
+keeps it gone is `deps_test.go`, whose `banned` map fails the build on any
+`go.mod` naming beego (either import path), gin, echo, chi, mux, iris, buffalo,
+revel, martini or negroni. It matches on a path boundary, so `…/beego/v2` and
+`…/echo/v4` are caught — the only shape that actually occurs.
+
+`zap-proto/fiber` + `valyala/fasthttp` are NOT banned: they are zip's own
+engine, not a second framework. What matters is that visor does not reach PAST
+zip to them. Two places still do, both named:
+- `controllers/tunnel.go` builds a `websocket.FastHTTPUpgrader` by hand. It
+  cannot use `wsx.Upgrade`, whose handler is `func(*wsx.Conn) error` and so has
+  no `Ctx` — and the guacamole tunnel MUST read its query params BEFORE the
+  hijack, because the fiber ctx is pooled and recycled after the handler
+  returns. Lifting this needs a wsx that hands the handler its Ctx.
+- `pkg/visor/embed.go` adapts the fiber app to an `http.Handler` so cloud can
+  mount visor in-process. The ZAP plane is the replacement; it goes when cloud
+  switches to calling by name.
+
+Everything else that touched `fasthttp/websocket` now imports
+`github.com/zap-proto/zip/wsx`, whose `Conn` is a type ALIAS for the same type,
+so it was an import swap and no type churn.
+
+### The ZAP plane, and the typed op
+`main.go --zap` defaults to `zip.SocketPath(visor.Name)`, so visor binds its
+canonical socket alongside the HTTP edge and `zip.Serving("visor")` resolves.
+This is what a sibling reaching visor BY NAME needs: a peer that binds no socket
+does not exist to a caller, and the error is `ErrNoPeer`. `--zap=""` opts out.
+
+Binding is ASYNCHRONOUS — `zip.Serve` returns once listeners are started, not
+bound — so a caller dialling in the instant after start can legitimately get
+`ErrNoPeer`. It means "not yet, or not here", never "not deployed".
+
+`/v1/health` is visor's first TYPED op (`zip.Get[Ping, Health]`, `routers/health.go`),
+which is what puts visor in the op registry every projection reads: OpenAPI,
+MCP, CLI, SDK, and the by-name call plane. `zip.Here` reaches it in-process with
+no wire. The remaining 72 routes are still untyped controller methods, so they
+project nowhere — see "Typed ops: what is left".
+
+Two defects it fixed, both silent:
+1. The k8s probes requested `/api/health`, which is not a route. Being outside
+   `/v1/`, it fell to `TransparentStatic`, which serves `index.html` as a **200**
+   — so liveness and readiness measured the static file server and could not
+   fail while the process could open a file. They now request `/v1/health`,
+   which answers **503** when the store is unreachable.
+2. `TransparentStatic` also shadowed zip's own control plane
+   (`/.well-known/openapi.json`, `/docs`, `/mcp`) for the same reason: its rule
+   was "not `/v1/` ⇒ it is a file". With a web build present those answered 200
+   with HTML to clients parsing JSON. Static now yields to them (`control` in
+   `routers/filter.go`); `MCPPath` is stated once there and handed to
+   `zip.Config` so the path let through and the path mounted cannot drift.
+
+Health is registered AHEAD of the filter chain, deliberately. A probe carries no
+credentials, so `ApiFilter` would put it to the policy engine as "anonymous" —
+and `authz.IsAllowed` panics on a nil Enforcer, which is a 500. An authz problem
+would then read to kubelet as every pod being sick. `RecordMessage` is the other
+half: it writes an audit row per request, and two probes every ten seconds is
+~17k rows/day describing nothing.
+
+### There is ONE ORM
+`hanzoai/orm` is the ORM. `github.com/hanzoai/xorm` appears in `go.mod` only as
+an INDIRECT dependency reached through it (`go mod why`:
+`visor/object → hanzoai/orm/relational → hanzoai/xorm`) — visor imports it
+nowhere, and `relational.Engine` is a type ALIAS for `xorm.Engine`.
+
+The `xorm:"varchar(100)"` struct tags on the models are NOT a second ORM and
+must not be renamed: `hanzoai/orm` reads that exact tag
+(`orm@v0.6.20/engine/schema.go:106` — `field.Tag.Get("xorm")`). Renaming them
+breaks the schema mapping. The migration is done; the tag name is just the
+tag name.
+
+### Typed ops: what is left (NOT done)
+72 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
+registered through `h()`. They serve fine and project NOWHERE — no OpenAPI
+schema, no MCP tool, no CLI verb, no `zip.Here`.
+
+Converting them is not a mechanical rewrite, and the reason is the wire, not the
+handlers. Visor answers the casibase envelope — HTTP 200 with
+`{status:"ok"|"error", msg, data}`, where a logical failure is a 200 — and
+`hanzoai/cloud`'s `apps/visor/client.go` unwraps exactly that on ~18 endpoints
+(`bots.go`, `k8s.go`, `visor.go`). A typed op returns its `Out` directly and
+signals failure with a status code, so every converted route is a WIRE BREAK
+that must land in the same change as its cloud caller. Fixing it forward is the
+right call — there are no external clients — but it is a two-repo change, and a
+half-converted visor has two handler styles and two error shapes, which is worse
+than either.
+
+Order to do it in, when it is done:
+1. Convert cloud's `client.go` off HTTP onto the plane (`zip.Ask`/`zip.Call` by
+   name) — the socket it needs now exists. No visor change required.
+2. Then convert visor's routes to typed ops noun by noun (machines, k8s,
+   node-pools, volumes, plans), each with its cloud caller, dropping the
+   envelope as each lands.
+3. `pkg/visor/embed.go`'s fiber→`http.Handler` adaptor goes when step 1 lands.
+
+Route/contract bookkeeping: `routers/router_contract_test.go` pins the surface
+at 73 (GET 32, POST 38, DELETE 3) and reads the LIVE fiber router, so a typed op
+swapped in for an untyped route keeps the same contract line and the test keeps
+holding. Health is the one row whose handler is not an `ApiController` method.
 
 ### Storage backends (Postgres -> Base, additive)
 Visor persists 10 XORM tables (Asset, Provider, Machine, Record, Session,
@@ -212,8 +313,8 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
   `COMMERCE_SERVICE_TOKEN`. Never hardcoded; absent ⇒ fail closed.
 
 ### Key Dependencies
-- Go 1.26, `zap-proto/zip` (no Beego), XORM;
-  `github.com/hanzoai/commerce/metering` v0.1.4
+- Go 1.26, `zap-proto/zip` v1.27.0 (the ONE framework), `hanzoai/orm` (the ONE
+  ORM); `github.com/hanzoai/commerce/metering` v0.1.4
 - `hcloud-go/v2` v2.37, `godo` v1.197, `aws-sdk-go-v2/lightsail`
 - **IAM client: `github.com/hanzoai/iamsdk/v2` — the ONE Go client for Hanzo
   IAM.** `InitConfig` is called once at startup (`controllers.InitAuthConfig`)

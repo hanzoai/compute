@@ -17,9 +17,9 @@
 // contract zen-gateway uses to emit GenAI telemetry), and ONE small API the rest
 // of visor calls to attribute spans/metrics per org+project.
 //
-// It is a leaf package — it imports only the OpenTelemetry SDK and beego's logger,
-// so service/ and controllers/ can instrument the provision/list/delete/meter
-// paths without an import cycle. When O11Y_ENDPOINT is unset the
+// It is a leaf package — it imports only the OpenTelemetry SDK and visor's own
+// logs (which is log/slog), so service/ and controllers/ can instrument the
+// provision/list/delete/meter paths without an import cycle. When O11Y_ENDPOINT is unset the
 // pipeline is a no-op (disabled): the global no-op providers back every span and
 // counter, so instrumentation stays branch-free and a local/dev run never spams a
 // nonexistent collector. Setup is best-effort — a failure logs and disables
@@ -34,9 +34,9 @@ import (
 	"strings"
 
 	"github.com/hanzoai/visor/logs"
+	luxtrace "github.com/luxfi/trace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	luxtrace "github.com/luxfi/trace"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
