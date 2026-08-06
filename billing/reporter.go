@@ -289,9 +289,11 @@ func billableUnits(live []service.HousePool, rows []*object.NodePool) []unit {
 // its upstream (cluster, pool) id pair, and — for a cluster's SEED pool, whose row
 // is written before the upstream pool id is known — its (cluster, name).
 //
-// It is a lookup for RATE and PROJECT only. A wrong hit cannot redirect a bill:
-// the org comes from the provider's own cluster tag and the row is consulted for
-// it only when the cluster carries none.
+// It is a lookup for RATE and PROJECT only, and both keys are cluster-scoped
+// across EVERY org's rows: the index has no tenant in it. That is safe only
+// while writing a row against a house cluster requires the house token, and
+// nothing in this package asserts that — so find asserts the consequence
+// instead, and a row belonging to another org is not a hit.
 type poolCache struct {
 	byPool map[string]*object.NodePool
 	byName map[string]*object.NodePool
@@ -313,11 +315,26 @@ func indexRows(rows []*object.NodePool) poolCache {
 	return c
 }
 
+// find is the live pool's own row, or nil.
+//
+// A row from ANOTHER org is not this pool's row. The cluster tag is what says
+// whose pool this is, so a row disagreeing with it describes something else and
+// is dropped: the rate falls back to the live catalog and the project to none,
+// which is the honest answer for a pool whose row cannot be found. Taking the
+// hit anyway would let one org's stamped price — and its project attribution —
+// decide what another org is charged, from a row it wrote itself.
+//
+// An untagged cluster (p.Org == "") has nothing to disagree with, and that is
+// the case the row is consulted for the org in the first place.
 func (c poolCache) find(p service.HousePool) *object.NodePool {
-	if r := c.byPool[p.ClusterID+"/"+p.PoolID]; r != nil {
-		return r
+	row := c.byPool[p.ClusterID+"/"+p.PoolID]
+	if row == nil {
+		row = c.byName[p.ClusterID+"/"+p.Name]
 	}
-	return c.byName[p.ClusterID+"/"+p.Name]
+	if row == nil || (p.Org != "" && rowOrg(row) != p.Org) {
+		return nil
+	}
+	return row
 }
 
 // unitID prefers the upstream pool id and falls back to a local identity for a

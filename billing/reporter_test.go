@@ -744,3 +744,73 @@ func TestTheHousePoolBillsWhenTheProviderAnswers(t *testing.T) {
 		t.Fatal("a live house pool must be billed when the provider answers")
 	}
 }
+
+// TestARowFromAnotherOrgIsNotThisPoolsRow pins the invariant the pool cache rests
+// on, rather than trusting it.
+//
+// The cache is keyed on (cluster, pool) and (cluster, name) across EVERY org's
+// rows — there is no tenant in the index — so the only thing standing between one
+// org's row and another org's bill is that writing a row against a house cluster
+// requires the house token. Nothing in this package asserts that, and an
+// invariant asserted nowhere is one a future write path can break quietly: the
+// row contributes the STAMPED RATE and the PROJECT, so a foreign hit prices one
+// tenant's pool from another tenant's row.
+//
+// The pool still bills — from the live catalog, which is the honest answer for a
+// pool whose row cannot be found — and it bills its own org.
+func TestARowFromAnotherOrgIsNotThisPoolsRow(t *testing.T) {
+	live := housePool("rightful", "cl-shared", "pool-shared", "gpu", 4)
+	foreign := &object.NodePool{
+		Owner: "interloper", Name: "gpu", OrgID: "interloper", ProjectID: "theirs",
+		ClusterID: "cl-shared", PoolID: "pool-shared",
+		Size: "gpu-h100x8-640gb", Count: 1, State: "Active", CostPerHour: 1,
+	}
+
+	u, ok := unitsOf([]service.HousePool{live}, []*object.NodePool{foreign})["pool-shared"]
+	if !ok {
+		t.Fatal("the live pool must still be billable without a row of its own")
+	}
+	if u.org != "rightful" {
+		t.Fatalf("org = %q, want the cluster tag's — a row cannot redirect a bill", u.org)
+	}
+	if u.centsHour != 0 {
+		t.Fatalf("centsHour = %d, want 0 (the catalog answers) — another org's stamped rate priced this pool", u.centsHour)
+	}
+	if u.project != "" {
+		t.Fatalf("project = %q, want none — another org's attribution reached this pool", u.project)
+	}
+}
+
+// The control: the pool's OWN row is still found, and it still contributes the
+// rate and the project. Without this, the check above passes just as well against
+// a cache that finds nothing at all.
+func TestAPoolsOwnRowIsStillFound(t *testing.T) {
+	live := housePool("rightful", "cl-own", "pool-own", "gpu", 4)
+	own := &object.NodePool{
+		Owner: "rightful", Name: "gpu", OrgID: "rightful", ProjectID: "research",
+		ClusterID: "cl-own", PoolID: "pool-own",
+		Size: "gpu-h100x8-640gb", Count: 4, State: "Active", CostPerHour: 3178,
+	}
+
+	u := unitsOf([]service.HousePool{live}, []*object.NodePool{own})["pool-own"]
+	if u.centsHour != 3178 || u.project != "research" {
+		t.Fatalf("a pool's own row must still contribute its rate and project: %+v", u)
+	}
+}
+
+// An UNTAGGED cluster has no org of its own to disagree with, and that is exactly
+// the case the row is consulted for the org in the first place. Dropping the row
+// there would turn an attributable pool into an unbillable one.
+func TestAnUntaggedClusterStillReadsItsRow(t *testing.T) {
+	live := housePool("", "cl-untagged", "pool-untagged", "gpu", 4)
+	row := &object.NodePool{
+		Owner: "acme", Name: "gpu", OrgID: "acme", ProjectID: "research",
+		ClusterID: "cl-untagged", PoolID: "pool-untagged",
+		Size: "gpu-h100x8-640gb", Count: 4, State: "Active", CostPerHour: 3178,
+	}
+
+	u := unitsOf([]service.HousePool{live}, []*object.NodePool{row})["pool-untagged"]
+	if u.org != "acme" || u.centsHour != 3178 {
+		t.Fatalf("an untagged cluster is attributed and priced by its row: %+v", u)
+	}
+}
