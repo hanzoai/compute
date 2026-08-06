@@ -36,6 +36,12 @@ import (
 	"github.com/hanzoai/visor/util"
 )
 
+// Name is what visor is called on the fleet, stated once. It is the app name zip
+// serves under AND the name its canonical socket is derived from
+// (zip.SocketPath(Name)), because those are the same fact: a caller reaches a
+// peer BY NAME, so a second spelling of the name is a peer that cannot be found.
+const Name = "visor"
+
 // initState runs visor's stateful process initialization — DB adapter, authz,
 // IP/UA parsers and background tickers — the half of boot that is independent of
 // the HTTP framework. Shared by the standalone server and the embedded mount so
@@ -55,13 +61,9 @@ func initState() {
 func Bootstrap() *zip.App {
 	initState()
 
-	// MCP is auto-derived from TYPED zip ops; visor has none (its handlers are
-	// classic controllers), so disable the surface outright — one fewer thing to
-	// defend.
 	app := zip.New(zip.Config{
-		AppName:               "visor",
+		AppName:               Name,
 		DisableStartupMessage: true,
-		MCP:                   zip.MCPConfig{Disabled: true},
 	})
 	routers.Route(app)
 	return app

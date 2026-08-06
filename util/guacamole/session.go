@@ -17,14 +17,14 @@ package guacamole
 import (
 	"sync"
 
-	"github.com/fasthttp/websocket"
+	"github.com/zap-proto/zip/wsx"
 )
 
 type Session struct {
 	Id          string
 	Protocol    string
 	Mode        string
-	WebSocket   *websocket.Conn
+	WebSocket   *wsx.Conn
 	GuacdTunnel *Tunnel
 	Observer    *Manager
 	mutex       sync.Mutex
@@ -40,7 +40,7 @@ func (s *Session) WriteString(str string) error {
 	defer s.mutex.Unlock()
 	s.mutex.Lock()
 	message := []byte(str)
-	return s.WebSocket.WriteMessage(websocket.TextMessage, message)
+	return s.WebSocket.WriteMessage(wsx.TextMessage, message)
 }
 
 func (s *Session) Close() {

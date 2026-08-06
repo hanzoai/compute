@@ -17,18 +17,19 @@ package controllers
 import (
 	"context"
 
-	"github.com/fasthttp/websocket"
+	"github.com/zap-proto/zip/wsx"
+
 	"github.com/hanzoai/visor/util/guacamole"
 )
 
 type GuacamoleHandler struct {
-	ws     *websocket.Conn
+	ws     *wsx.Conn
 	tunnel *guacamole.Tunnel
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewGuacamoleHandler(ws *websocket.Conn, tunnel *guacamole.Tunnel) *GuacamoleHandler {
+func NewGuacamoleHandler(ws *wsx.Conn, tunnel *guacamole.Tunnel) *GuacamoleHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &GuacamoleHandler{
 		ws:     ws,
@@ -53,7 +54,7 @@ func (r GuacamoleHandler) Start() {
 				if len(instruction) == 0 {
 					continue
 				}
-				err = r.ws.WriteMessage(websocket.TextMessage, instruction)
+				err = r.ws.WriteMessage(wsx.TextMessage, instruction)
 				if err != nil {
 					return
 				}

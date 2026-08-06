@@ -28,6 +28,7 @@ import (
 
 	"github.com/hanzoai/ha"
 	"github.com/spf13/cobra"
+	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/object"
@@ -58,7 +59,7 @@ func main() {
 		},
 	}
 	f := root.Flags()
-	f.StringVar(&zapAddr, "zap", "", "ZAP-native listen address (empty = HTTP edge only)")
+	f.StringVar(&zapAddr, "zap", zip.SocketPath(visor.Name), "ZAP listen address (empty = HTTP edge only)")
 	f.StringVar(&httpAddr, "http", defaultHTTPAddr(), "HTTP edge listen address")
 	// Accepted for container-command compatibility; the store creates its schema
 	// on open (object.InitAdapter) regardless, so this is informational.
@@ -82,6 +83,14 @@ func main() {
 // in-process boot path — DB, authz, parsers, filters, routes and background
 // tickers — shared verbatim with the embedded cloud mount, so standalone and
 // fused never drift. Here main() owns the listener.
+//
+// TWO addresses, and the ZAP one is not optional in practice. The HTTP edge is
+// what a browser and the ingress reach; the socket is how the rest of the fleet
+// reaches visor BY NAME, and a peer that binds no socket does not exist to a
+// caller — zip resolves a peer through zip.SocketPath, so the failure is
+// ErrNoPeer rather than a connection refused anyone would recognise. Defaulting
+// the socket ON is what makes `visor` a name a sibling service can dial; an
+// operator who genuinely wants an edge-only process passes --zap="".
 func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	// The standalone Deployment runs replicas: 1 (universe
 	// charts/app/values/hanzo/visor.yaml), so this process is the only writer and

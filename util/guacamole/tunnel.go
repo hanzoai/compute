@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/fasthttp/websocket"
+	"github.com/zap-proto/zip/wsx"
 )
 
 type Tunnel struct {
@@ -202,11 +202,11 @@ func (t *Tunnel) Close() error {
 	return t.conn.Close()
 }
 
-func Disconnect(ws *websocket.Conn, code int, msg string) {
+func Disconnect(ws *wsx.Conn, code int, msg string) {
 	// guacd cannot handle Chinese characters, so base64 encoding is done
 	encodeReason := base64.StdEncoding.EncodeToString([]byte(msg))
 	err := NewInstruction("error", encodeReason, strconv.Itoa(code))
-	_ = ws.WriteMessage(websocket.TextMessage, []byte(err.String()))
+	_ = ws.WriteMessage(wsx.TextMessage, []byte(err.String()))
 	disconnect := NewInstruction("disconnect")
-	_ = ws.WriteMessage(websocket.TextMessage, []byte(disconnect.String()))
+	_ = ws.WriteMessage(wsx.TextMessage, []byte(disconnect.String()))
 }
