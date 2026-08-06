@@ -552,19 +552,87 @@ func stopClusterMeter(forget forgetCluster, org, id string) {
 	}
 }
 
-// ListRunningHouseMachines returns every RUNNING droplet in Hanzo's house
-// account that carries a hanzo-org tag — the set the recurring hourly meter
-// debits. It lists across ALL orgs (no per-org tag filter): the org is recovered
-// per machine from its own tag, so ONE sweep meters every tenant's running
-// machines. Untagged/non-resell droplets (no hanzo-org tag) are excluded, so a
-// non-resell house droplet is never billed to a tenant. Only "Running" machines
-// are returned — a stopped droplet consumes no compute-hour.
+// kubernetesAutoTags are the BARE tags DigitalOcean puts on the droplets it
+// creates as managed-Kubernetes node-pool workers. They are DO's, not ours: every
+// node pool (and the workers it creates) is automatically tagged `k8s`,
+// `k8s-worker` and `k8s:<cluster-id>`.
+//
+// Only the bare ones are listed, and that is what makes the guard safe rather
+// than merely convenient: a client's launch tags always reach DigitalOcean as
+// "key:value" (buildDropletTags formats every one of them with a colon), so a
+// customer can produce `k8s:anything` but can NEVER produce the bare `k8s`. A
+// prefix match here would hand every tenant a way to opt their own droplets out
+// of the meter.
+var kubernetesAutoTags = map[string]bool{"k8s": true, "k8s-worker": true}
+
+// isKubernetesWorker reports whether a droplet is a managed-Kubernetes node-pool
+// worker rather than a standalone resell machine.
+func isKubernetesWorker(d godo.Droplet) bool {
+	for _, t := range d.Tags {
+		if kubernetesAutoTags[t] {
+			return true
+		}
+	}
+	return false
+}
+
+// dropletHasAnyOrgTag reports whether a droplet is attributed to SOME Hanzo org —
+// the "is this a resell machine at all" question, as opposed to dropletHasOrgTag's
+// "is it THIS org's".
+func dropletHasAnyOrgTag(d godo.Droplet) bool {
+	for _, t := range d.Tags {
+		if strings.HasPrefix(t, orgTagKey+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// billableHouseDroplet reports whether a droplet in Hanzo's house account is on
+// the hourly MACHINE meter. It is the ONE answer to that question, kept pure and
+// separate from the DigitalOcean enumeration so "exactly one meter per node" is a
+// property a test can check rather than a claim about a loop.
+//
+// Three conditions, each excluding a different way of not being a billable resell
+// machine:
+//
+//   - RUNNING. A stopped droplet consumes no compute-hour.
+//
+//   - NOT a managed-Kubernetes worker. This is the one that is easy to get wrong,
+//     and getting it wrong bills the customer twice. A cluster's worker nodes ARE
+//     droplets, and DigitalOcean propagates a cluster's tags to them — hanzo-org
+//     among them, because that is the tag the cluster create stamps. So the same
+//     node is reachable by two sweeps: this one, as a droplet, and the node-pool
+//     sweep, as one node of its pool. The node-pool sweep is the meter of record
+//     for a cluster's nodes — it is the one that knows the pool, its size and its
+//     live count — so a Kubernetes worker is not a machine here.
+//
+//     Skipping it is now a property of VISOR, not of how DigitalOcean happens to
+//     tag things: the guard holds whether or not the cluster tag propagates. It
+//     used to rest on the unverified belief that worker droplets carry no
+//     hanzo-org tag, which is a claim about somebody else's product.
+//
+//   - carries a hanzo-org tag. An untagged house droplet is not a resell machine
+//     and is never billed to a tenant.
+func billableHouseDroplet(d godo.Droplet) bool {
+	if d.Status != "active" { // godo "active" == running
+		return false
+	}
+	if isKubernetesWorker(d) {
+		return false // the pool sweep bills this node, as part of its pool
+	}
+	return dropletHasAnyOrgTag(d)
+}
+
+// ListRunningHouseMachines returns every droplet in Hanzo's house account that
+// billableHouseDroplet admits — the set the recurring hourly meter debits. It
+// lists across ALL orgs (no per-org tag filter): the org is recovered per machine
+// from its own tag, so ONE sweep meters every tenant's running machines.
 func ListRunningHouseMachines() ([]*Machine, error) {
 	client, err := newHouseDOClient()
 	if err != nil {
 		return nil, err
 	}
-	orgPrefix := orgTagKey + ":"
 	var machines []*Machine
 	opt := &godo.ListOptions{Page: 1, PerPage: 200}
 	for {
@@ -573,18 +641,8 @@ func ListRunningHouseMachines() ([]*Machine, error) {
 			return nil, fmt.Errorf("list house droplets: %w", err)
 		}
 		for _, d := range droplets {
-			if d.Status != "active" { // godo "active" == running
+			if !billableHouseDroplet(d) {
 				continue
-			}
-			hasOrg := false
-			for _, t := range d.Tags {
-				if strings.HasPrefix(t, orgPrefix) {
-					hasOrg = true
-					break
-				}
-			}
-			if !hasOrg {
-				continue // not a resell machine — never bill it to a tenant
 			}
 			machines = append(machines, getMachineFromDroplet(d))
 		}
