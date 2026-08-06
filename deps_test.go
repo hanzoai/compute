@@ -20,64 +20,110 @@ import (
 	"testing"
 )
 
-// retiredModules are module paths this service must never link again, each with
-// the reason. They are ARCHIVED on GitHub: a repo that cannot take a push cannot
-// take a security fix, so no deployed binary may depend on one — the dependency
-// is unpatchable by construction, whatever the code inside says.
+// banned are module paths this service must never link, each with the reason.
+// Two things land here, and the mechanism is the same for both.
 //
-// github.com/hanzoai/iam-v1 is the Casdoor lineage's old home. Its ROOT package
-// was a second copy of the Casdoor Go SDK, 67 of 73 files byte-identical to
+// UNPATCHABLE. github.com/hanzoai/iam-v1 is ARCHIVED on GitHub: a repo that
+// cannot take a push cannot take a security fix, so no deployed binary may
+// depend on one — the dependency is unpatchable by construction, whatever the
+// code inside says. It is the Casdoor lineage's old home; its ROOT package was
+// a second copy of the Casdoor Go SDK, 67 of 73 files byte-identical to
 // github.com/hanzoai/iamsdk/v2/iamsdk, which is live and tagged. visor required
 // it DIRECTLY while also linking the v2 lineage through cloud — one binary, both
 // implementations. The SDK is the one that stays.
-var retiredModules = map[string]string{
+//
+// SECOND WEB FRAMEWORK. visor serves on zip and only zip. Beego is named here
+// because visor WAS a Beego service and the rip is the reason this list grew:
+// the import is gone, and this is what keeps it gone. The rest never shipped in
+// visor and are listed so they cannot arrive — a framework does not have to be
+// used to be linked, and a second router reachable from the binary is a second
+// place a route can exist. One framework is not a preference about style; it is
+// what makes the served route table knowable from one file.
+//
+// zip's OWN engine (github.com/zap-proto/fiber, github.com/valyala/fasthttp) is
+// deliberately absent: zip requires it, so banning it in go.mod would ban zip.
+// What matters there is whether visor's own code reaches PAST zip to it — a
+// source property, not a manifest one, and TestFrameworkImports is where it is
+// stated.
+var banned = map[string]string{
 	"github.com/hanzoai/iam-v1": "archived Casdoor fork — use github.com/hanzoai/iamsdk/v2/iamsdk",
+
+	"github.com/beego/beego":              "visor's old framework — it serves on github.com/zap-proto/zip",
+	"github.com/astaxie/beego":            "Beego's pre-rename import path — same framework, older address",
+	"github.com/gin-gonic/gin":            "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/labstack/echo":            "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/gofiber/fiber":            "second web framework — zip's engine is github.com/zap-proto/fiber, reached through zip",
+	"github.com/gorilla/mux":              "second router — visor serves on github.com/zap-proto/zip",
+	"github.com/go-chi/chi":               "second router — visor serves on github.com/zap-proto/zip",
+	"github.com/julienschmidt/httprouter": "second router — visor serves on github.com/zap-proto/zip",
+	"github.com/kataras/iris":             "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/gobuffalo/buffalo":        "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/revel/revel":              "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/go-martini/martini":       "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/urfave/negroni":           "second middleware stack — visor's chain is zip's",
 }
 
-// retiredIn reports every retired module path named anywhere in a go.mod. It
+// covers reports whether module path f is banned path p, or a package/major
+// version beneath it. The boundary matters in both directions: "…/echo" must
+// catch "…/echo/v4" and "…/beego" must catch "…/beego/v2", while neither may
+// swallow an unrelated module that merely starts with the same letters.
+func covers(p, f string) bool {
+	return f == p || strings.HasPrefix(f, p+"/")
+}
+
+// bannedIn reports every banned module path named anywhere in a go.mod. It
 // reads go.mod rather than the import graph on purpose: an import scan only
-// catches a direct `import`, and the way an archived module comes back is
+// catches a direct `import`, and the way a banished module comes back is
 // transitively, through a dependency's own require. go.mod carries both.
-func retiredIn(goMod string) []string {
-	var found []string
+// found2 pairs what was seen with why it is banned. The two differ whenever a
+// module is versioned: `github.com/beego/beego/v2` is covered by the banned
+// prefix `github.com/beego/beego`, and looking the REPORTED path up in the map
+// finds nothing — so the failure named the module and gave no reason, which is
+// the half of the message a reader actually needs.
+type found2 struct{ path, why string }
+
+func bannedIn(goMod string) []found2 {
+	var found []found2
 	for _, line := range strings.Split(goMod, "\n") {
 		if i := strings.Index(line, "//"); i >= 0 && !strings.Contains(line, "// indirect") {
 			line = line[:i]
 		}
 		for _, f := range strings.Fields(line) {
-			if _, retired := retiredModules[f]; retired {
-				found = append(found, f)
+			for p := range banned {
+				if covers(p, f) {
+					found = append(found, found2{path: f, why: banned[p]})
+				}
 			}
 		}
 	}
 	return found
 }
 
-// TestRetiredInDetects proves the detector actually fires — a guard that cannot
+// TestBannedInDetects proves the detector actually fires — a guard that cannot
 // fail is not a guard. The fixture is the require line this repo carried until
 // the port off the archived fork.
-func TestRetiredInDetects(t *testing.T) {
+func TestBannedInDetects(t *testing.T) {
 	const fixture = "require (\n\tgithub.com/hanzoai/iam-v1 v1.31.36\n)\n"
-	got := retiredIn(fixture)
-	if len(got) != 1 || got[0] != "github.com/hanzoai/iam-v1" {
-		t.Fatalf("retiredIn(fixture) = %v, want [github.com/hanzoai/iam-v1]", got)
+	got := bannedIn(fixture)
+	if len(got) != 1 || got[0].path != "github.com/hanzoai/iam-v1" || got[0].why == "" {
+		t.Fatalf("bannedIn(fixture) = %v, want [github.com/hanzoai/iam-v1]", got)
 	}
 	// An indirect require is just as load-bearing at link time.
-	if got := retiredIn("\tgithub.com/hanzoai/iam-v1 v1.31.36 // indirect\n"); len(got) != 1 {
-		t.Errorf("retiredIn(indirect) = %v, want the path reported", got)
+	if got := bannedIn("\tgithub.com/hanzoai/iam-v1 v1.31.36 // indirect\n"); len(got) != 1 {
+		t.Errorf("bannedIn(indirect) = %v, want the path reported", got)
 	}
-	if got := retiredIn("\tgithub.com/hanzoai/iamsdk/v2 v2.2.1\n"); len(got) != 0 {
-		t.Errorf("retiredIn(replacement) = %v, want none", got)
+	if got := bannedIn("\tgithub.com/hanzoai/iamsdk/v2 v2.2.1\n"); len(got) != 0 {
+		t.Errorf("bannedIn(replacement) = %v, want none", got)
 	}
 }
 
-// TestNoRetiredModules is the standing gate on the real manifest.
-func TestNoRetiredModules(t *testing.T) {
+// TestNoBannedModules is the standing gate on the real manifest.
+func TestNoBannedModules(t *testing.T) {
 	b, err := os.ReadFile("go.mod")
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	for _, path := range retiredIn(string(b)) {
-		t.Errorf("go.mod requires %s — %s", path, retiredModules[path])
+	for _, f := range bannedIn(string(b)) {
+		t.Errorf("go.mod requires %s — %s", f.path, f.why)
 	}
 }

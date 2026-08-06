@@ -41,7 +41,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/valyala/fasthttp v1.72.0
 	github.com/zap-proto/fiber/v3 v3.2.1
-	github.com/zap-proto/zip v1.24.2
+	github.com/zap-proto/zip v1.27.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
@@ -67,6 +67,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gofiber/schema v1.7.1 // indirect
 	github.com/gofiber/utils/v2 v2.0.4 // indirect
+	github.com/gorilla/rpc v1.2.1 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/hanzoai/account v0.2.0 // indirect
 	github.com/hanzoai/builder v0.3.13 // indirect
@@ -80,8 +81,9 @@ require (
 	github.com/luxfi/crypto v1.20.2 // indirect
 	github.com/luxfi/log v1.6.0 // indirect
 	github.com/luxfi/mdns v0.1.1 // indirect
+	github.com/luxfi/metric v1.10.0 // indirect
 	github.com/luxfi/pq v1.1.0 // indirect
-	github.com/luxfi/zap v1.2.6 // indirect
+	github.com/luxfi/zap v1.2.7 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
@@ -96,6 +98,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/zap-proto/go v1.3.0 // indirect
 	github.com/zap-proto/http v0.3.1 // indirect
+	github.com/zap-proto/mcp v1.0.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/log v0.20.0 // indirect
 	go.opentelemetry.io/otel/sdk/log v0.20.0 // indirect
