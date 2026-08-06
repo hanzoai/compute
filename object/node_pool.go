@@ -605,7 +605,10 @@ func DeleteNodePoolCloud(pool *NodePool) (bool, error) {
 				if err != nil {
 					return false, err
 				}
-				if err := confirmCloudPoolDeleted(client, pool.PoolID); err != nil {
+				// Delete the pool the STORED row points at, not the one the body
+				// names: the body says which row to remove, and the row says which
+				// upstream pool that is.
+				if err := confirmCloudPoolDeleted(client, dbPool.PoolID); err != nil {
 					return false, err
 				}
 			}

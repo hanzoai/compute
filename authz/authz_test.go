@@ -14,7 +14,11 @@
 
 package authz
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
+)
 
 // isResellComputePath decides which routes an authenticated brand user may reach
 // (org-scoping is enforced downstream in the controller). These cases pin the
@@ -60,5 +64,36 @@ func TestIsResellComputePath(t *testing.T) {
 		if isResellComputePath(c.method, c.path) {
 			t.Errorf("expected DENY for %s %s", c.method, c.path)
 		}
+	}
+}
+
+// The object's owner is not a statement about the subject. IsAllowed used to
+// return true for ANY authenticated user whenever the OBJECT's owner was "admin"
+// — the reserved SuperAdmin org — so every customer of the brand was admitted to
+// every SuperAdmin-owned object on every route the static policy did not cover.
+//
+// A member of the admin org still passes, because subOwner == objOwner is what
+// membership means. That is the whole rule; there is no second clause.
+func TestAdminOwnedObjectIsNotEveryonesObject(t *testing.T) {
+	InitAuthz()
+
+	customer := &iamsdk.User{Owner: "acme", Name: "alice"}
+	superadmin := &iamsdk.User{Owner: "admin", Name: "z"}
+
+	// A route the static policy does not cover, so the decision is the subject
+	// rule alone.
+	const method, path = "POST", "/v1/create-node-pool"
+
+	if IsAllowed(customer, "acme", "alice", method, path, "admin", "thing") {
+		t.Fatal("a customer must not reach a SuperAdmin-owned object")
+	}
+	if !IsAllowed(superadmin, "admin", "z", method, path, "admin", "thing") {
+		t.Fatal("a member of the admin org must still reach its own org's objects")
+	}
+	if !IsAllowed(customer, "acme", "alice", method, path, "acme", "thing") {
+		t.Fatal("a customer must still reach its OWN org's objects")
+	}
+	if IsAllowed(customer, "acme", "alice", method, path, "victim", "thing") {
+		t.Fatal("a customer must not reach another customer's objects")
 	}
 }

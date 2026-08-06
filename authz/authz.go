@@ -114,7 +114,13 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 			return true
 		}
 
-		if subOwner == objOwner || (objOwner == "admin") {
+		// A subject may act on its OWN org's objects. There is no second clause:
+		// this used to also return true whenever the OBJECT's owner was "admin",
+		// which admitted every authenticated customer to every object of the
+		// reserved SuperAdmin org — the object's owner is not a statement about the
+		// subject. A member of the admin org still passes, through this same
+		// subOwner == objOwner comparison, because that is what membership means.
+		if subOwner == objOwner {
 			return true
 		}
 	}
