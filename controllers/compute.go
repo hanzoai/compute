@@ -517,7 +517,9 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 		return nil, err
 	}
 	var machine *service.Machine
-	err = service.Provision(ctx, org, project, firstHourCents, spec.InstanceType, func() (string, error) {
+	// A droplet has one fixed size and does not grow on its own, so the ceiling
+	// the org is authorized for and the hour it is charged are the same number.
+	err = service.Provision(ctx, org, project, firstHourCents, firstHourCents, spec.InstanceType, func() (string, error) {
 		m, err := service.LaunchOrgMachine(org, project, spec)
 		if err != nil {
 			return "", err

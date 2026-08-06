@@ -256,6 +256,41 @@ func TestCreateNodePoolMeteredAutoscaleIsGatedAtTheCeiling(t *testing.T) {
 	}
 }
 
+// The ceiling is what the org must be GOOD FOR; it is not what it is CHARGED. A
+// funded autoscaling pool that starts at one node is debited one node-hour — the
+// nodes it actually has — and the fifteen it is merely allowed to grow into are
+// billed if and when the upstream adds them, by the hourly sweep.
+//
+// Authorizing and debiting off the same number is why this needs its own test:
+// the refusal case above passes either way, so the ceiling could be (and was)
+// silently charged at hour one — a 16x over-bill on the very first invoice.
+func TestCreateNodePoolMeteredAutoscaleDebitsTheNodesItHas(t *testing.T) {
+	installBaseStore(t)
+	c := commerceOf(t, 100000000) // funded well past the ceiling
+
+	cloud := &fakeCloudPool{}
+	_, err := createNodePoolMetered(cloud, rateH100, "acme", "", "do", "cl-1",
+		&service.CreateNodePoolSpec{Name: "gpu", Size: "gpu-h100x8-640gb",
+			Count: 1, MinNodes: 1, MaxNodes: 16, AutoScale: true})
+	if err != nil {
+		t.Fatalf("a funded org must be able to open an autoscaling pool: %v", err)
+	}
+	if cloud.created == nil || cloud.created.Count != 1 {
+		t.Fatalf("upstream was asked for %+v, want the starting 1-node pool", cloud.created)
+	}
+	if _, debits, amount := c.state(); debits != 1 || amount != rateH100 {
+		t.Fatalf("hour one is ONE node-hour: got %d debits of %d cents, want 1 of %d (the ceiling would be %d)",
+			debits, amount, rateH100, rateH100*16)
+	}
+	stored, err := GetNodePool("acme/gpu")
+	if err != nil || stored == nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored.Count != 1 {
+		t.Fatalf("the billable row says %d nodes but 1 was provisioned", stored.Count)
+	}
+}
+
 // A scale UP is a provision and goes through the gate; a refused scale never
 // reaches the upstream, so the pool keeps running at the size it was.
 func TestScaleNodePoolMeteredRefusedReachesNoUpstream(t *testing.T) {

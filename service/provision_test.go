@@ -226,7 +226,7 @@ func TestProvisionReleasesTheHoldOnRefusal(t *testing.T) {
 	ledgerOf(t, map[string]int64{"acme": 0})
 
 	for i := 0; i < 3; i++ {
-		if err := Provision(context.Background(), "acme", "", 100, "s", func() (string, error) {
+		if err := Provision(context.Background(), "acme", "", 100, 100, "s", func() (string, error) {
 			t.Fatal("a refused provision must not run the provision")
 			return "", nil
 		}); err == nil {
@@ -243,7 +243,7 @@ func TestProvisionReleasesTheHoldOnRefusal(t *testing.T) {
 func TestProvisionWithoutARequestIdDebitsNothing(t *testing.T) {
 	l := ledgerOf(t, map[string]int64{"acme": 100000})
 
-	if err := Provision(context.Background(), "acme", "", 3178, "gpu-h100x8-640gb", func() (string, error) {
+	if err := Provision(context.Background(), "acme", "", 3178, 3178, "gpu-h100x8-640gb", func() (string, error) {
 		return "", nil
 	}); err != nil {
 		t.Fatalf("a funded provision must be allowed: %v", err)
@@ -251,4 +251,43 @@ func TestProvisionWithoutARequestIdDebitsNothing(t *testing.T) {
 	if _, debits := l.state("acme"); debits != 0 {
 		t.Fatalf("an unnamed provision must debit nothing, got %d", debits)
 	}
+}
+
+// The gate holds a balance against a CEILING and charges what was actually
+// taken. They are two numbers because they answer two questions, and the whole
+// autoscale story rests on the difference: authorize sixteen node-hours, charge
+// one, let the sweep charge the rest if and when the upstream adds them.
+func TestProvisionAuthorizesTheCeilingAndDebitsTheActual(t *testing.T) {
+	const ceiling, actual = 3178 * 16, 3178
+
+	t.Run("an org good only for the actual cost cannot open the ceiling", func(t *testing.T) {
+		l := ledgerOf(t, map[string]int64{"acme": actual})
+		reached := false
+		err := Provision(context.Background(), "acme", "", ceiling, actual, "gpu-h100x8-640gb",
+			func() (string, error) { reached = true; return "p-1", nil })
+		if err == nil {
+			t.Fatal("the balance must cover the ceiling, not the opening charge")
+		}
+		if reached {
+			t.Fatal("REFUSED BUT PROVISIONED")
+		}
+		if _, debits := l.state("acme"); debits != 0 {
+			t.Fatalf("a refusal debits nothing, got %d", debits)
+		}
+	})
+
+	t.Run("a funded org is charged the actual, never the ceiling", func(t *testing.T) {
+		l := ledgerOf(t, map[string]int64{"acme": 100000000})
+		if err := Provision(context.Background(), "acme", "", ceiling, actual, "gpu-h100x8-640gb",
+			func() (string, error) { return "p-1", nil }); err != nil {
+			t.Fatalf("a funded org must be allowed: %v", err)
+		}
+		available, debits := l.state("acme")
+		if debits != 1 {
+			t.Fatalf("want exactly one debit, got %d", debits)
+		}
+		if spent := 100000000 - available; spent != actual {
+			t.Fatalf("spent %d cents, want %d (the ceiling would be %d)", spent, actual, ceiling)
+		}
+	})
 }

@@ -463,7 +463,9 @@ func createClusterMetered(ctx context.Context, client clusterCreator, record rec
 		return nil, err
 	}
 	var cluster *KubernetesCluster
-	err = Provision(ctx, org, project, hourly*int64(count), spec.NodePool.Size, func() (string, error) {
+	// A cluster's seed pool does not autoscale — CreateClusterSpec carries no
+	// bounds — so the ceiling and the charge are the same count.
+	err = Provision(ctx, org, project, hourly*int64(count), hourly*int64(count), spec.NodePool.Size, func() (string, error) {
 		c, err := client.CreateCluster(ctx, spec, []string{"managed-by:hanzo-visor", orgTag(org)})
 		if err != nil {
 			return "", err

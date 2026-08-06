@@ -426,18 +426,24 @@ type cloudNodePoolCreator interface {
 
 // createNodePoolMetered is the ONE metered node-pool provision: authorize the org
 // for the pool's first hour at the quantity the pool is ALLOWED to reach,
-// provision, persist the billable row, then debit that hour — the whole sequence
-// under the org's provisioning hold (service.Provision). rate is the per-node
-// hourly price its caller resolved from the resale catalog.
+// provision, persist the billable row, then debit that hour at the quantity it
+// actually HAS — the whole sequence under the org's provisioning hold
+// (service.Provision). rate is the per-node hourly price its caller resolved from
+// the resale catalog.
+//
+// The two quantities are deliberately different for an autoscaling pool, and the
+// gate takes both: authorizedNodes is the ceiling the balance must cover,
+// poolNodes is the floored count the upstream is actually asked for and the only
+// one the customer owes at hour one.
 func createNodePoolMetered(client cloudNodePoolCreator, rate int64, owner, project, providerName, clusterID string, spec *service.CreateNodePoolSpec) (*NodePool, error) {
-	// The count asked of the upstream is the count the org is authorized for. A
+	// The count asked of the upstream is the count the org is DEBITED for. A
 	// non-positive count used to reach DigitalOcean as-is while the gate priced a
-	// floor of one, so "authorized" and "provisioned" were two different numbers.
+	// floor of one, so "debited" and "provisioned" were two different numbers.
 	spec.Count = poolNodes(spec)
 
 	var pool *NodePool
 	err := service.Provision(context.Background(), owner, project,
-		rate*int64(authorizedNodes(spec)), spec.Size, func() (string, error) {
+		rate*int64(authorizedNodes(spec)), rate*int64(spec.Count), spec.Size, func() (string, error) {
 			servicePool, err := client.CreateNodePool(spec)
 			if err != nil {
 				return "", fmt.Errorf("failed to create node pool in DOKS: %w", err)
@@ -597,7 +603,7 @@ func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool,
 			return nil, fmt.Errorf("%w: size %q has no resale price", service.ErrPriceUnavailable, current.Size)
 		}
 		err = service.Provision(context.Background(), owner, project,
-			rate*int64(added), current.Size, scale)
+			rate*int64(added), rate*int64(added), current.Size, scale)
 	} else {
 		_, err = scale()
 	}

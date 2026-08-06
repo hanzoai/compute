@@ -206,7 +206,20 @@ func holdOrg(org string) func() {
 // Under the org's hold it authorizes, provisions, and debits — in that order, so
 // the money moves before the next request reads the balance.
 //
-// cents is the resource's FIRST HOUR at its full quantity (hourly × nodes) and
+// TWO amounts, because they answer two different questions, and answering both
+// with one number is a bug in whichever direction the number leans:
+//
+//	authorize — the CEILING the org must be good for. For an autoscaling pool
+//	            that is the quantity it is ALLOWED to reach, because nothing
+//	            gates the growth: the upstream adds nodes on its own and no
+//	            request reaches visor, so the balance has to cover the ceiling
+//	            up front or it never gets asked again.
+//	debit     — what the org actually OWES right now, which is the resource it
+//	            actually got. Charging the ceiling here bills sixteen nodes for
+//	            a pool that has one, at hour one, forever after refunded by
+//	            nobody. The other fifteen become chargeable when the upstream
+//	            actually adds them, and the hourly sweep is what charges them.
+//
 // model is the size slug. provision does the work and returns the idempotency key
 // naming what it provisioned — or "" when the provision carries no charge of its
 // OWN, which is the scale path: the added nodes are billed by the recurring sweep
@@ -216,10 +229,10 @@ func holdOrg(org string) func() {
 // resource exists and is drawing upstream cost, and refusing to hand it over
 // would leave the customer paying for something they were told they did not get —
 // but it is loud, because nothing reconciles it.
-func Provision(ctx context.Context, org, project string, cents int64, model string, provision func() (string, error)) error {
+func Provision(ctx context.Context, org, project string, authorize, debit int64, model string, provision func() (string, error)) error {
 	defer holdOrg(org)()
 
-	if err := AuthorizeCompute(ctx, org, project, cents); err != nil {
+	if err := AuthorizeCompute(ctx, org, project, authorize); err != nil {
 		return err
 	}
 	requestID, err := provision()
@@ -229,8 +242,8 @@ func Provision(ctx context.Context, org, project string, cents int64, model stri
 	if requestID == "" {
 		return nil
 	}
-	if err := RecordCompute(ctx, org, project, cents, model, "launched", requestID); err != nil {
-		logs.Warning("compute metering: debit %s (org %s, %d cents): %v", requestID, org, cents, err)
+	if err := RecordCompute(ctx, org, project, debit, model, "launched", requestID); err != nil {
+		logs.Warning("compute metering: debit %s (org %s, %d cents): %v", requestID, org, debit, err)
 	}
 	return nil
 }
