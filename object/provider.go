@@ -117,6 +117,18 @@ func GetProvider(id string) (*Provider, error) {
 	return getProvider(owner, name)
 }
 
+// GetMaskedProvider is what a read of a provider may show: everything except the
+// credential.
+//
+// BOTH slots are the credential. A DigitalOcean account is one API token and
+// nothing else, so every place that drives one takes ClientSecret and falls back
+// to ClientId when it is empty — object.CreateNodePoolCloud, poolCloudClient,
+// service.newMachineDigitalOceanClient. The live production row is exactly that
+// shape: the token sits in ClientId with ClientSecret empty. Masking only
+// ClientSecret therefore masked the slot that row does not use and published the
+// one it does, in cleartext, to anyone who could reach the read.
+//
+// It is one credential in two slots, so it is masked in two slots.
 func GetMaskedProvider(provider *Provider, errs ...error) (*Provider, error) {
 	if len(errs) > 0 && errs[0] != nil {
 		return nil, errs[0]
@@ -127,10 +139,18 @@ func GetMaskedProvider(provider *Provider, errs ...error) (*Provider, error) {
 	}
 
 	if provider.ClientSecret != "" {
-		provider.ClientSecret = "***"
+		provider.ClientSecret = masked
+	}
+	if provider.ClientId != "" {
+		provider.ClientId = masked
 	}
 	return provider, nil
 }
+
+// masked is what a credential reads as once it has left the store, and the same
+// constant is what an edit sends back to mean "unchanged". Stated once so the
+// mask and the unmask below cannot drift into writing "***" over a live token.
+const masked = "***"
 
 func GetMaskedProviders(providers []*Provider, errs ...error) ([]*Provider, error) {
 	if len(errs) > 0 && errs[0] != nil {
@@ -157,8 +177,16 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 		return false, nil
 	}
 
-	if provider.ClientSecret == "***" {
+	// An edit is a round trip through a MASKED read, so the credential comes back
+	// as "***" whenever the editor did not retype it. Both slots are masked on the
+	// way out, so both are restored on the way in — otherwise saving a provider
+	// whose token lives in ClientId (the live production shape) writes the mask
+	// over the token and the account stops answering.
+	if provider.ClientSecret == masked {
 		provider.ClientSecret = p.ClientSecret
+	}
+	if provider.ClientId == masked {
+		provider.ClientId = p.ClientId
 	}
 
 	engine, err := EngineFor(owner)
