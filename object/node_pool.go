@@ -412,14 +412,14 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 		return nil, fmt.Errorf("failed to create DOKS client: %w", err)
 	}
 
-	count := spec.Count
-	if count < 1 {
-		count = 1
-	}
+	// The count asked of the upstream is the count the org is authorized for. A
+	// non-positive count used to reach DigitalOcean as-is while the gate priced a
+	// floor of one, so "authorized" and "provisioned" were two different numbers.
+	spec.Count = poolNodes(spec)
 
 	var pool *NodePool
 	err = service.Provision(context.Background(), owner, provider.Project,
-		hourly*int64(count), spec.Size, func() (string, error) {
+		hourly*int64(authorizedNodes(spec)), spec.Size, func() (string, error) {
 			servicePool, err := client.CreateNodePool(spec)
 			if err != nil {
 				return "", fmt.Errorf("failed to create node pool in DOKS: %w", err)
@@ -457,6 +457,37 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 		return nil, err
 	}
 	return pool, nil
+}
+
+// poolNodes is how many nodes a pool spec provisions: at least one. The ONE
+// count floor, read by the upstream request and by the gate alike.
+func poolNodes(spec *service.CreateNodePoolSpec) int {
+	if spec.Count < 1 {
+		return 1
+	}
+	return spec.Count
+}
+
+// authorizedNodes is how many nodes a pool spec must be AUTHORIZED for: what it
+// provisions, raised to the AUTOSCALE CEILING when the pool may grow on its own.
+//
+// The ceiling matters because nothing gates that growth. MinNodes/MaxNodes/
+// AutoScale are forwarded to the upstream, which then adds nodes whenever the
+// scheduler asks — no request reaches visor, so the money gate never runs. An org
+// authorized for one node could have a pool that walks to its ceiling of sixteen
+// on a balance that never covered them. Authorizing the ceiling up front is what
+// makes "authorized" mean "can afford what this pool is allowed to become".
+func authorizedNodes(spec *service.CreateNodePoolSpec) int {
+	n := poolNodes(spec)
+	if !spec.AutoScale {
+		return n
+	}
+	for _, bound := range []int{spec.MinNodes, spec.MaxNodes} {
+		if bound > n {
+			n = bound
+		}
+	}
+	return n
 }
 
 // ScaleNodePoolCloud updates the node count of an existing DOKS node pool.
