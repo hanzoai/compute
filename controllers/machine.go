@@ -163,16 +163,24 @@ func (c *ApiController) DeleteMachine() {
 // @Tag Machine API
 // @Description launch a new cloud machine instance via a provider
 // @Param   body    body   service.CreateMachineSpec  true  "The spec for the machine to launch"
-// @Param   owner   query  string  true  "The owner"
 // @Param   provider query string  true  "The provider name"
 // @Success 200 {object} object.Machine The Response object
 // @router /launch-machine [post]
 func (c *ApiController) LaunchMachine() {
-	owner := c.Ctx.Query("owner")
+	// The org comes from the token, never from the request. This is a PROVISION:
+	// it resolves the owner's provider credentials, spends against the owner's
+	// balance and lands on the owner's invoice. It used to read `?owner=` while
+	// the authorization filter judged the request BODY, so a body naming the
+	// caller cleared authorization and a query naming somebody else decided whose
+	// cloud account got charged.
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	provider := c.Ctx.Query("provider")
-
-	if owner == "" || provider == "" {
-		c.ResponseError("owner and provider query parameters are required")
+	if provider == "" {
+		c.ResponseError("provider query parameter is required")
 		return
 	}
 
