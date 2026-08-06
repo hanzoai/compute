@@ -172,6 +172,32 @@ func Shared() *relational.Engine {
 	return store.Shared()
 }
 
+// Ready reports whether visor can still reach the store every route depends on.
+// It is the question a readiness probe asks, answered in the ONE package that
+// can answer it: the backend is chosen here and `store` is unexported, so no
+// caller outside object could form the answer without a second copy of the
+// selection rule.
+//
+// It pings the SHARED engine and not every org's, because the shared engine is
+// the one both backends always have, and a fan-out over per-org SQLite would
+// turn a probe that runs every ten seconds into one file open per tenant — a
+// health check whose cost grows with the customer list is an outage waiting for
+// a big enough customer list.
+//
+// A nil store is unready rather than an error to shout about: it is what visor
+// looks like between process start and InitAdapter, which is exactly the window
+// a readiness probe exists to keep traffic out of.
+func Ready() error {
+	if store == nil {
+		return fmt.Errorf("visor: store not initialised")
+	}
+	e := store.Shared()
+	if e == nil {
+		return fmt.Errorf("visor: no shared engine")
+	}
+	return e.Ping()
+}
+
 // allEngines returns every engine a cross-org sweep (billing node-pool report,
 // stale-session GC) must union over. One engine under Postgres; one per org DB
 // under Base.

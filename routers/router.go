@@ -31,11 +31,6 @@ func h(fn func(*controllers.ApiController)) zip.Handler {
 	}
 }
 
-// Route mounts the whole visor HTTP surface on app: the ambient filter chain
-// (recover, CORS, static, tenant, authz, record) followed by the /v1 API. The
-// filter order is the Beego BeforeRouter chain preserved exactly — static short-
-// circuits before the authz seam, so an asset is never gated; every /v1 route
-// registered after the chain is tenant-scoped, authorized and audited.
 // corsPolicy is what a browser is told it may send, and the header list is the
 // load-bearing part of it. Visor authenticates with a Bearer token, so leaving
 // Authorization out of the preflight answer does not merely reject the header —
@@ -51,9 +46,28 @@ var corsPolicy = middleware.CORSConfig{
 	AllowCreds:    true,
 }
 
+// Route mounts the whole visor HTTP surface on app: the ambient filter chain
+// (recover, CORS, static, tenant, authz, record) followed by the /v1 API. The
+// filter order is load-bearing — static short-circuits before the authz seam, so
+// an asset is never gated; every /v1 route registered after the chain is
+// tenant-scoped, authorized and audited.
 func Route(app *zip.App) {
 	app.Use(middleware.Recover())
 	app.Use(middleware.CORS(corsPolicy))
+
+	// Health is registered AHEAD of the rest of the chain, and the position is
+	// the whole design. A probe carries no credentials, so ApiFilter would put it
+	// to the policy engine as "anonymous" — which means a mistake in an authz
+	// policy stops answering probes, kubelet reads that as every pod being sick,
+	// and an authorization bug becomes a total outage. RecordMessage is the other
+	// half: it writes an audit row per request, and two probes every ten seconds
+	// is seventeen thousand rows a day describing nothing.
+	//
+	// Static is passed too, which is what the old /api/health could not do: any
+	// path outside /v1/ falls to the SPA fallback and comes back 200, so the
+	// probe measured the file server rather than the service.
+	registerHealth(app)
+
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
 	app.Use(zip.H(ApiFilter))
@@ -62,8 +76,22 @@ func Route(app *zip.App) {
 	registerAPI(app)
 }
 
-// registerAPI registers the /v1 surface — the exact route table the Beego
-// namespace declared, one verb per line.
+// registerHealth declares the health op. It is a TYPED zip op — the In and Out
+// are named types, so it projects into the OpenAPI document, the MCP tool
+// surface, the CLI and the by-name call plane, and an in-process caller can
+// reach it through zip.Here without a wire. An untyped route would appear in
+// none of those.
+func registerHealth(app *zip.App) {
+	zip.Get[Ping, Health](app, "/v1/health", health,
+		zip.WithSummary("Report whether visor can reach its store"),
+		zip.WithOperationID("health"),
+		zip.WithTags("Health"),
+	)
+}
+
+// registerAPI registers the /v1 surface, one verb per line. The table is pinned
+// by router_contract_test.go: a route added here without a contract line fails,
+// and so does a contract line with no route.
 func registerAPI(app *zip.App) {
 	app.Post("/v1/signin", h((*controllers.ApiController).Signin))
 	app.Post("/v1/signout", h((*controllers.ApiController).Signout))

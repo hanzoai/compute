@@ -61,9 +61,13 @@ func initState() {
 func Bootstrap() *zip.App {
 	initState()
 
+	// MCP is derived from the TYPED ops, so it is worth having now that visor
+	// declares one. Its path is routers' to state, because routers is what has to
+	// let it past the static filter.
 	app := zip.New(zip.Config{
 		AppName:               Name,
 		DisableStartupMessage: true,
+		MCP:                   zip.MCPConfig{Path: routers.MCPPath},
 	})
 	routers.Route(app)
 	return app

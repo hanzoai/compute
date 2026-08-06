@@ -26,102 +26,122 @@ import (
 // and the ApiController method that serves it.
 type route struct{ method, path, handler string }
 
-// apiContract is the /v1 surface as it was registered under Beego, transcribed
-// verbatim from the pre-migration routers/router.go (commit 776c6fc~1) — the
-// method:handler table of every beego.Router call, multi-verb specs expanded one
-// row per verb.
+// apiContract is visor's /v1 surface, written out by hand: every verb, path and
+// handler this service serves.
 //
-// It is the migration's acceptance criterion, deliberately written out by hand
-// rather than derived from registerAPI: a test generated from the code under
-// test proves nothing. Beego's NSInclude namespace contributed no additional
-// runtime routes — no commentsRouter_*.go was ever generated, so the //@router
-// annotations were swagger metadata only.
+// It began as the migration's acceptance criterion — transcribed from the
+// pre-migration routers/router.go (commit 776c6fc~1), the method:handler table
+// of every route the old framework registered, multi-verb specs expanded one row
+// per verb — and it did that job: the framework was replaced and this table is
+// how we know the public surface came through unchanged.
+//
+// It is NOT retired now that the migration is over, and it is not a record of
+// what some previous framework happened to do. It is the declared contract, and
+// the property it pins is the one that outlives any framework: what visor SERVES
+// equals what visor SAYS it serves. A route added without a line here fails, and
+// so does a line here without a route.
+//
+// Deliberately hand-written rather than derived from registerAPI: a table
+// generated from the code under test agrees with that code by construction and
+// proves nothing.
 //
 // Changing a line here changes visor's public API. That is the point.
 var apiContract = []route{
-	{"POST",  "/v1/signin",                    "Signin"},
-	{"POST",  "/v1/signout",                   "Signout"},
-	{"GET",   "/v1/get-account",               "GetAccount"},
-	{"GET",   "/v1/get-records",               "GetRecords"},
-	{"GET",   "/v1/get-record",                "GetRecord"},
-	{"POST",  "/v1/update-record",             "UpdateRecord"},
-	{"POST",  "/v1/add-record",                "AddRecord"},
-	{"POST",  "/v1/delete-record",             "DeleteRecord"},
-	{"POST",  "/v1/commit-record",             "CommitRecord"},
-	{"GET",   "/v1/query-record",              "QueryRecord"},
-	{"GET",   "/v1/get-assets",                "GetAssets"},
-	{"GET",   "/v1/get-asset",                 "GetAsset"},
-	{"POST",  "/v1/update-asset",              "UpdateAsset"},
-	{"POST",  "/v1/add-asset",                 "AddAsset"},
-	{"POST",  "/v1/delete-asset",              "DeleteAsset"},
-	{"GET",   "/v1/get-providers",             "GetProviders"},
-	{"GET",   "/v1/get-provider",              "GetProvider"},
-	{"POST",  "/v1/update-provider",           "UpdateProvider"},
-	{"POST",  "/v1/add-provider",              "AddProvider"},
-	{"POST",  "/v1/delete-provider",           "DeleteProvider"},
-	{"GET",   "/v1/get-machines",              "GetMachines"},
-	{"GET",   "/v1/get-machine",               "GetMachine"},
-	{"POST",  "/v1/update-machine",            "UpdateMachine"},
-	{"POST",  "/v1/add-machine",               "AddMachine"},
-	{"POST",  "/v1/delete-machine",            "DeleteMachine"},
-	{"POST",  "/v1/launch-machine",            "LaunchMachine"},
-	{"GET",   "/v1/regions",                   "GetComputeRegions"},
-	{"GET",   "/v1/sizes",                     "GetComputeSizes"},
-	{"GET",   "/v1/gpus",                      "GetComputeGPUs"},
-	{"GET",   "/v1/machines",                  "ListComputeMachines"},
-	{"POST",  "/v1/machines/launch",           "LaunchComputeMachine"},
-	{"GET",   "/v1/machines/:id",              "GetComputeMachine"},
-	{"DELETE", "/v1/machines/:id",              "DeleteComputeMachine"},
-	{"GET",   "/v1/k8s/clusters",              "ListComputeKubernetesClusters"},
-	{"POST",  "/v1/k8s/clusters",              "CreateComputeKubernetesCluster"},
-	{"GET",   "/v1/k8s/clusters/:id",          "GetComputeKubernetesCluster"},
-	{"DELETE", "/v1/k8s/clusters/:id",          "DeleteComputeKubernetesCluster"},
-	{"GET",   "/v1/k8s/nodes",                 "ListComputeKubernetesNodes"},
-	{"GET",   "/v1/images",                    "ListImages"},
-	{"POST",  "/v1/images",                    "CreateImage"},
-	{"POST",  "/v1/machines/:id/bind-agent",   "BindAgent"},
-	{"GET",   "/v1/machines/:id/agent-binding", "GetAgentBinding"},
+	// The one TYPED op, and the only row whose handler is not an ApiController
+	// method: health is declared as zip.Get[Ping, Health], so it is in the
+	// registry every projection reads rather than only on the wire.
+	{"GET", "/v1/health", "health"},
+
+	{"POST", "/v1/signin", "Signin"},
+	{"POST", "/v1/signout", "Signout"},
+	{"GET", "/v1/get-account", "GetAccount"},
+	{"GET", "/v1/get-records", "GetRecords"},
+	{"GET", "/v1/get-record", "GetRecord"},
+	{"POST", "/v1/update-record", "UpdateRecord"},
+	{"POST", "/v1/add-record", "AddRecord"},
+	{"POST", "/v1/delete-record", "DeleteRecord"},
+	{"POST", "/v1/commit-record", "CommitRecord"},
+	{"GET", "/v1/query-record", "QueryRecord"},
+	{"GET", "/v1/get-assets", "GetAssets"},
+	{"GET", "/v1/get-asset", "GetAsset"},
+	{"POST", "/v1/update-asset", "UpdateAsset"},
+	{"POST", "/v1/add-asset", "AddAsset"},
+	{"POST", "/v1/delete-asset", "DeleteAsset"},
+	{"GET", "/v1/get-providers", "GetProviders"},
+	{"GET", "/v1/get-provider", "GetProvider"},
+	{"POST", "/v1/update-provider", "UpdateProvider"},
+	{"POST", "/v1/add-provider", "AddProvider"},
+	{"POST", "/v1/delete-provider", "DeleteProvider"},
+	{"GET", "/v1/get-machines", "GetMachines"},
+	{"GET", "/v1/get-machine", "GetMachine"},
+	{"POST", "/v1/update-machine", "UpdateMachine"},
+	{"POST", "/v1/add-machine", "AddMachine"},
+	{"POST", "/v1/delete-machine", "DeleteMachine"},
+	{"POST", "/v1/launch-machine", "LaunchMachine"},
+	{"GET", "/v1/regions", "GetComputeRegions"},
+	{"GET", "/v1/sizes", "GetComputeSizes"},
+	{"GET", "/v1/gpus", "GetComputeGPUs"},
+	{"GET", "/v1/machines", "ListComputeMachines"},
+	{"POST", "/v1/machines/launch", "LaunchComputeMachine"},
+	{"GET", "/v1/machines/:id", "GetComputeMachine"},
+	{"DELETE", "/v1/machines/:id", "DeleteComputeMachine"},
+	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
+	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
+	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},
+	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
+	{"GET", "/v1/k8s/nodes", "ListComputeKubernetesNodes"},
+	{"GET", "/v1/images", "ListImages"},
+	{"POST", "/v1/images", "CreateImage"},
+	{"POST", "/v1/machines/:id/bind-agent", "BindAgent"},
+	{"GET", "/v1/machines/:id/agent-binding", "GetAgentBinding"},
 	{"DELETE", "/v1/machines/:id/agent-binding", "UnbindAgent"},
-	{"GET",   "/v1/agent-bindings",            "GetAgentBindings"},
-	{"GET",   "/v1/get-sessions",              "GetSessions"},
-	{"GET",   "/v1/get-session",               "GetConnSession"},
-	{"POST",  "/v1/update-session",            "UpdateSession"},
-	{"POST",  "/v1/add-session",               "AddSession"},
-	{"POST",  "/v1/delete-session",            "DeleteSession"},
-	{"POST",  "/v1/start-session",             "StartSession"},
-	{"POST",  "/v1/stop-session",              "StopSession"},
-	{"POST",  "/v1/add-asset-tunnel",          "AddAssetTunnel"},
-	{"GET",   "/v1/get-asset-tunnel",          "GetAssetTunnel"},
-	{"GET",   "/v1/get-node-pools",            "GetNodePools"},
-	{"GET",   "/v1/get-node-pool",             "GetNodePool"},
-	{"POST",  "/v1/create-node-pool",          "CreateNodePool"},
-	{"POST",  "/v1/update-node-pool",          "UpdateNodePool"},
-	{"POST",  "/v1/delete-node-pool",          "DeleteNodePool"},
-	{"POST",  "/v1/scale-node-pool",           "ScaleNodePool"},
-	{"GET",   "/v1/get-plans",                 "GetPlans"},
-	{"GET",   "/v1/get-plan",                  "GetPlan"},
-	{"POST",  "/v1/add-plan",                  "AddPlan"},
-	{"POST",  "/v1/update-plan",               "UpdatePlan"},
-	{"POST",  "/v1/delete-plan",               "DeletePlan"},
-	{"GET",   "/v1/get-whitelabel",            "GetWhitelabel"},
-	{"GET",   "/v1/get-volumes",               "GetVolumes"},
-	{"GET",   "/v1/get-volume",                "GetVolume"},
-	{"POST",  "/v1/create-volume",             "CreateVolume"},
-	{"POST",  "/v1/delete-volume",             "DeleteVolume"},
-	{"POST",  "/v1/attach-volume",             "AttachVolume"},
-	{"POST",  "/v1/detach-volume",             "DetachVolume"},
-	{"POST",  "/v1/resize-volume",             "ResizeVolume"},}
+	{"GET", "/v1/agent-bindings", "GetAgentBindings"},
+	{"GET", "/v1/get-sessions", "GetSessions"},
+	{"GET", "/v1/get-session", "GetConnSession"},
+	{"POST", "/v1/update-session", "UpdateSession"},
+	{"POST", "/v1/add-session", "AddSession"},
+	{"POST", "/v1/delete-session", "DeleteSession"},
+	{"POST", "/v1/start-session", "StartSession"},
+	{"POST", "/v1/stop-session", "StopSession"},
+	{"POST", "/v1/add-asset-tunnel", "AddAssetTunnel"},
+	{"GET", "/v1/get-asset-tunnel", "GetAssetTunnel"},
+	{"GET", "/v1/get-node-pools", "GetNodePools"},
+	{"GET", "/v1/get-node-pool", "GetNodePool"},
+	{"POST", "/v1/create-node-pool", "CreateNodePool"},
+	{"POST", "/v1/update-node-pool", "UpdateNodePool"},
+	{"POST", "/v1/delete-node-pool", "DeleteNodePool"},
+	{"POST", "/v1/scale-node-pool", "ScaleNodePool"},
+	{"GET", "/v1/get-plans", "GetPlans"},
+	{"GET", "/v1/get-plan", "GetPlan"},
+	{"POST", "/v1/add-plan", "AddPlan"},
+	{"POST", "/v1/update-plan", "UpdatePlan"},
+	{"POST", "/v1/delete-plan", "DeletePlan"},
+	{"GET", "/v1/get-whitelabel", "GetWhitelabel"},
+	{"GET", "/v1/get-volumes", "GetVolumes"},
+	{"GET", "/v1/get-volume", "GetVolume"},
+	{"POST", "/v1/create-volume", "CreateVolume"},
+	{"POST", "/v1/delete-volume", "DeleteVolume"},
+	{"POST", "/v1/attach-volume", "AttachVolume"},
+	{"POST", "/v1/detach-volume", "DetachVolume"},
+	{"POST", "/v1/resize-volume", "ResizeVolume"},
+}
 
 // key renders a route as "METHOD path" for set comparison.
 func (r route) key() string { return r.method + " " + r.path }
 
-// registeredRoutes returns the verb+path set registerAPI actually installs on a
-// fresh app, read back off the live fiber router (not re-parsed from source), so
-// the assertion covers what the server will really serve. The filter chain is
-// omitted: Use-handlers are not routes and need config/DB to construct.
+// registeredRoutes returns the verb+path set visor actually installs on a fresh
+// app, read back off the live fiber router (not re-parsed from source), so the
+// assertion covers what the server will really serve.
+//
+// Both registration functions run, because the contract is the whole surface and
+// health is registered separately — ahead of the filter chain, deliberately (see
+// Route). Calling only registerAPI here would leave a served route outside the
+// contract, which is the exact gap this test exists to close. The filter chain
+// itself is omitted: Use-handlers are not routes.
 func registeredRoutes(t *testing.T) map[string]bool {
 	t.Helper()
 	app := zip.New(zip.Config{})
+	registerHealth(app)
 	registerAPI(app)
 
 	got := make(map[string]bool)
@@ -136,9 +156,10 @@ func registeredRoutes(t *testing.T) map[string]bool {
 	return got
 }
 
-// TestAPIContractPreserved is the migration guard: the routes zip registers are
-// exactly the routes Beego registered — none dropped, none invented. A framework
-// swap that changes the public surface is a breaking change, not a migration.
+// TestAPIContractPreserved is the standing check: the routes visor registers are
+// exactly the routes it declares — none dropped, none invented. It caught the
+// framework swap that motivated it, and it now catches the ordinary case: a
+// route that ships without a contract line, or a contract line with no route.
 func TestAPIContractPreserved(t *testing.T) {
 	got := registeredRoutes(t)
 
@@ -165,7 +186,7 @@ func TestAPIContractPreserved(t *testing.T) {
 		t.Errorf("route dropped by the migration: %s", k)
 	}
 	for _, k := range extra {
-		t.Errorf("route not present in the Beego contract: %s", k)
+		t.Errorf("route served but not declared: %s", k)
 	}
 	if len(got) != len(want) {
 		t.Errorf("route count = %d, want %d", len(got), len(want))
@@ -175,7 +196,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 72
+	const wantRoutes = 73
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -187,7 +208,7 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 31, "POST": 38, "DELETE": 3}
+	want := map[string]int{"GET": 32, "POST": 38, "DELETE": 3}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

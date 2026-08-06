@@ -13,7 +13,9 @@
 // limitations under the License.
 
 // Command visor is the Hanzo Visor cloud compute/VM/GPU management service:
-// zip-native (HTTP over fiber/fasthttp) on the hanzoai/orm store, no Beego.
+// zip-native on the hanzoai/orm store. It serves two addresses — the HTTP edge
+// the ingress reaches, and the canonical ZAP socket the rest of the fleet dials
+// it by name on.
 //
 // Run it with no arguments to serve (the container contract); `visor version`
 // prints the build version.
