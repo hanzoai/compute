@@ -142,7 +142,7 @@ func TestMeterPools_BillsEveryHourAfterTheFirst(t *testing.T) {
 	pool := activePool(created)
 
 	// Hour 1 — the create hour. The create path already debited it.
-	metered, skipped := meterPools(context.Background(), []*object.NodePool{pool}, created.Add(20*time.Minute))
+	metered, skipped := meterPools(context.Background(), nil, []*object.NodePool{pool}, created.Add(20*time.Minute))
 	if metered != 0 || skipped != 0 {
 		t.Fatalf("the create hour is the create path's: metered=%d skipped=%d, want 0/0", metered, skipped)
 	}
@@ -152,7 +152,7 @@ func TestMeterPools_BillsEveryHourAfterTheFirst(t *testing.T) {
 
 	// Hours 2, 3, 4 — one full pool-hour each, every hour, forever.
 	for i, at := range []time.Time{created.Add(time.Hour), created.Add(2 * time.Hour), created.Add(3 * time.Hour)} {
-		metered, skipped = meterPools(context.Background(), []*object.NodePool{pool}, at)
+		metered, skipped = meterPools(context.Background(), nil, []*object.NodePool{pool}, at)
 		if metered != 1 || skipped != 0 {
 			t.Fatalf("hour %d: metered=%d skipped=%d, want 1/0", i+2, metered, skipped)
 		}
@@ -185,7 +185,7 @@ func TestMeterPools_DebitRidesTheOneCommercePath(t *testing.T) {
 	f := commerceOf(t)
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 
-	if metered, _ := meterPools(context.Background(), []*object.NodePool{activePool(created)}, created.Add(time.Hour)); metered != 1 {
+	if metered, _ := meterPools(context.Background(), nil, []*object.NodePool{activePool(created)}, created.Add(time.Hour)); metered != 1 {
 		t.Fatalf("a funded, priced, running pool must be billed, metered=%d", metered)
 	}
 	debits := f.all()
@@ -213,7 +213,7 @@ func TestMeterPools_RefusesRatherThanBillZero(t *testing.T) {
 	pool := activePool(created)
 	pool.CostPerHour = 0 // no stored rate, and the catalog cannot resolve one either
 
-	metered, skipped := meterPools(context.Background(), []*object.NodePool{pool}, created.Add(time.Hour))
+	metered, skipped := meterPools(context.Background(), nil, []*object.NodePool{pool}, created.Add(time.Hour))
 	if metered != 0 || skipped != 1 {
 		t.Fatalf("an unpriceable pool must be skipped loudly: metered=%d skipped=%d, want 0/1", metered, skipped)
 	}
@@ -236,7 +236,7 @@ func TestMeterPools_SkipsWhatCannotOrShouldNotBill(t *testing.T) {
 	orphan := activePool(created)
 	orphan.Owner, orphan.OrgID = "", ""
 
-	metered, skipped := meterPools(context.Background(), []*object.NodePool{deleted, empty, orphan}, at)
+	metered, skipped := meterPools(context.Background(), nil, []*object.NodePool{deleted, empty, orphan}, at)
 	if metered != 0 {
 		t.Fatalf("nothing here is billable, metered=%d", metered)
 	}
@@ -251,17 +251,15 @@ func TestMeterPools_SkipsWhatCannotOrShouldNotBill(t *testing.T) {
 // The pool's OWN persisted rate wins over the live catalog: it was stamped from
 // the catalog at provision time and is the only price a slug the upstream has
 // since delisted still has.
-func TestPoolHourlyCents_PrefersTheStoredRate(t *testing.T) {
+func TestUnitRate_PrefersTheStampedRate(t *testing.T) {
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
-	pool := activePool(time.Now())
-	pool.Size = "a-slug-the-upstream-delisted"
 
-	cents, err := poolHourlyCents(pool)
+	cents, err := unitRate(unit{size: "a-slug-the-upstream-delisted", centsHour: 3178})
 	if err != nil {
 		t.Fatalf("a pool carrying its own rate must price even off-catalog: %v", err)
 	}
 	if cents != 3178 {
-		t.Fatalf("poolHourlyCents = %d, want the stored 3178", cents)
+		t.Fatalf("unitRate = %d, want the stamped 3178", cents)
 	}
 }
 
@@ -311,12 +309,12 @@ func TestSeedPoolIsBilledEveryHourAfterTheCreateHour(t *testing.T) {
 	}
 
 	// Hour one belongs to the create path, which already debited it.
-	if metered, _ := meterPools(context.Background(), []*object.NodePool{stored}, created); metered != 0 {
+	if metered, _ := meterPools(context.Background(), nil, []*object.NodePool{stored}, created); metered != 0 {
 		t.Fatalf("the create hour must not be billed twice, metered=%d", metered)
 	}
 	// Hour two, and every hour after.
 	for i := 1; i <= 3; i++ {
-		if metered, skipped := meterPools(context.Background(), []*object.NodePool{stored}, created.Add(time.Duration(i)*time.Hour)); metered != 1 {
+		if metered, skipped := meterPools(context.Background(), nil, []*object.NodePool{stored}, created.Add(time.Duration(i)*time.Hour)); metered != 1 {
 			t.Fatalf("hour %d must be billed: metered=%d skipped=%d", i+1, metered, skipped)
 		}
 	}
@@ -381,5 +379,277 @@ func TestMeterRunningNodePools_CannotDebitWithoutAToken(t *testing.T) {
 
 	if got := len(f.all()); got != 0 {
 		t.Fatalf("an unconfigured meter must debit nothing, got %d", got)
+	}
+}
+
+// ---- the provider is the authority for the house account ----
+
+// housePool is a live pool as the provider reports it: 4 nodes of H100 in a
+// cluster owned by org.
+func housePool(org, clusterID, poolID, name string, nodes int) service.HousePool {
+	return service.HousePool{
+		Org: org, ClusterID: clusterID, PoolID: poolID, Name: name,
+		Size: "gpu-h100x8-640gb", Nodes: nodes,
+	}
+}
+
+// unitsOf resolves what an hour would bill, keyed by the pool identity in the
+// debit. It is the level RED-1, RED-2 and RED-7 are decided at: which pools are
+// billable, whose they are, and for how many nodes. Pricing is a separate
+// question (unitRate), and one this package's fake deliberately cannot answer —
+// commerceOf clears the house token so the resale catalog stays empty.
+func unitsOf(live []service.HousePool, rows []*object.NodePool) map[string]unit {
+	out := map[string]unit{}
+	for _, u := range billableUnits(live, rows) {
+		out[u.id] = u
+	}
+	return out
+}
+
+// RED-1. Two clusters, two seed pools, ONE name — which is a thing any tenant can
+// do twice in a row, because the seed pool's name comes out of the create body.
+//
+// The rows collide on (Owner, Name), so recording the second one used to
+// overwrite the first: one row survived, pointing at the second cluster, and the
+// FIRST cluster stopped being anything the sweep could see. It ran on Hanzo's
+// house account for free for the rest of its life. The store here is left in
+// exactly that state — one row, naming the second cluster.
+//
+// Both clusters are live pools, so both are billed, and the surviving row decides
+// neither of them.
+func TestBothSameNamedClustersAreBilled(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 14, 0, 0, 0, time.UTC)
+	created := at.Add(-3 * time.Hour).Format(time.RFC3339)
+
+	rows := []*object.NodePool{{
+		Owner: "acme", Name: "pool", OrgID: "acme", ProjectID: "research",
+		ClusterID: "cl-second", Size: "gpu-h100x8-640gb", Count: 4, State: "Active",
+		CostPerHour: 3178, CreatedTime: created,
+	}}
+	first := housePool("acme", "cl-first", "p-first", "pool", 4)
+	first.Created = created
+	second := housePool("acme", "cl-second", "p-second", "pool", 4)
+	second.Created = created
+
+	units := unitsOf([]service.HousePool{first, second}, rows)
+	if len(units) != 2 {
+		t.Fatalf("both clusters must be billable, got %d units: %+v", len(units), units)
+	}
+	for _, id := range []string{"p-first", "p-second"} {
+		u, ok := units[id]
+		if !ok {
+			t.Fatalf("cluster pool %s is not billed at all — it runs free: %+v", id, units)
+		}
+		if u.org != "acme" || u.nodes != 4 {
+			t.Fatalf("%s must bill four nodes to acme, got org=%q nodes=%d", id, u.org, u.nodes)
+		}
+	}
+	// Each pool is keyed on its own upstream id, so two clusters never collapse
+	// onto one reconciliation line the way their rows collapsed onto one key.
+	if units["p-first"].id == units["p-second"].id {
+		t.Fatal("two clusters shared one billing identity")
+	}
+
+	// And the money moves for the one the surviving row can price. The other
+	// prices from the live resale catalog, which a house account always has and
+	// this fake deliberately does not.
+	if metered, _ := meterPools(context.Background(), []service.HousePool{second}, rows, at); metered != 1 {
+		t.Fatalf("the second cluster must bill, metered=%d", metered)
+	}
+	if d := f.all(); len(d) != 1 || d[0].amount != 3178*4 || d[0].org != "acme" {
+		t.Fatalf("want one four-node debit to acme, got %+v", d)
+	}
+}
+
+// RED-2. A delete that omits the pool id used to drop the meter-of-record row
+// without ever contacting the provider — the cluster kept running and nothing
+// billed it.
+//
+// The row is no longer the meter of record for a house cluster, so even a row
+// that is GONE leaves the pool billing: the provider still reports it.
+func TestADroppedRowDoesNotStopBillingALiveCluster(t *testing.T) {
+	at := time.Date(2026, 8, 6, 15, 0, 0, 0, time.UTC)
+
+	// The row is gone. The cluster is not.
+	live := []service.HousePool{housePool("acme", "cl-1", "p-1", "gpu", 4)}
+	live[0].Created = at.Add(-5 * time.Hour).Format(time.RFC3339)
+
+	units := unitsOf(live, nil)
+	u, ok := units["p-1"]
+	if !ok {
+		t.Fatalf("a live pool with no row must still bill, got %+v", units)
+	}
+	if u.org != "acme" || u.nodes != 4 {
+		t.Fatalf("it must bill four nodes to acme, got org=%q nodes=%d", u.org, u.nodes)
+	}
+	// With no row there is no stamped rate, so the live catalog prices it — and
+	// refuses rather than billing zero when it cannot.
+	if u.centsHour != 0 {
+		t.Fatalf("a row-less pool carries no stamped rate, got %d", u.centsHour)
+	}
+}
+
+// RED-7. A pool that autoscaled from one node to sixteen. Nothing wrote the new
+// count down: the upstream grows the pool on its own and no request reaches
+// visor, so the row still says one. Billing the row bills one-sixteenth of what
+// is running.
+func TestAnAutoscaledPoolBillsTheNodesItGrewTo(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 16, 0, 0, 0, time.UTC)
+
+	rows := []*object.NodePool{{
+		Owner: "acme", Name: "gpu", OrgID: "acme", ProjectID: "research",
+		ClusterID: "cl-1", PoolID: "p-1", Size: "gpu-h100x8-640gb",
+		Count: 1, MinNodes: 1, MaxNodes: 16, AutoScale: true, State: "Active",
+		CostPerHour: 3178, CreatedTime: at.Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+	live := []service.HousePool{housePool("acme", "cl-1", "p-1", "gpu", 16)}
+
+	if metered, skipped := meterPools(context.Background(), live, rows, at); metered != 1 || skipped != 0 {
+		t.Fatalf("metered=%d skipped=%d, want 1/0", metered, skipped)
+	}
+	debits := f.all()
+	if len(debits) != 1 {
+		t.Fatalf("want one debit, got %d", len(debits))
+	}
+	if debits[0].amount != 3178*16 {
+		t.Fatalf("an autoscaled pool bills what it GREW to: got %d cents, want %d (the row would say %d)",
+			debits[0].amount, 3178*16, 3178)
+	}
+	// The row still supplies what the provider does not know.
+	if debits[0].model != "gpu-h100x8-640gb" {
+		t.Fatalf("the debit must name the size, got %q", debits[0].model)
+	}
+}
+
+// A pool that shrank bills what it shrank TO, by the same rule.
+func TestAScaledDownPoolBillsTheNodesItHasLeft(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 17, 0, 0, 0, time.UTC)
+
+	rows := []*object.NodePool{{
+		Owner: "acme", Name: "gpu", OrgID: "acme", ClusterID: "cl-1", PoolID: "p-1",
+		Size: "gpu-h100x8-640gb", Count: 16, State: "Active", CostPerHour: 3178,
+		CreatedTime: at.Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+	live := []service.HousePool{housePool("acme", "cl-1", "p-1", "gpu", 2)}
+
+	meterPools(context.Background(), live, rows, at)
+	if d := f.all(); len(d) != 1 || d[0].amount != 3178*2 {
+		t.Fatalf("a shrunk pool must bill its remaining two nodes, got %+v", d)
+	}
+}
+
+// A pool the provider no longer reports is not billed, whatever the row says. A
+// row outliving its cluster is not stale data — it is an invoice for nodes that
+// do not exist.
+func TestARowWhoseHousePoolIsGoneStopsBilling(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 18, 0, 0, 0, time.UTC)
+
+	rows := []*object.NodePool{
+		{Owner: "acme", Name: "gone", OrgID: "acme", ClusterID: "cl-1", PoolID: "p-gone",
+			Size: "gpu-h100x8-640gb", Count: 4, State: "Active", CostPerHour: 3178,
+			CreatedTime: at.Add(-9 * time.Hour).Format(time.RFC3339)},
+		{Owner: "acme", Name: "live", OrgID: "acme", ClusterID: "cl-1", PoolID: "p-live",
+			Size: "gpu-h100x8-640gb", Count: 4, State: "Active", CostPerHour: 3178,
+			CreatedTime: at.Add(-9 * time.Hour).Format(time.RFC3339)},
+	}
+	// The cluster is up; only one of its two pools still is.
+	live := []service.HousePool{housePool("acme", "cl-1", "p-live", "live", 4)}
+
+	if metered, _ := meterPools(context.Background(), live, rows, at); metered != 1 {
+		t.Fatalf("only the surviving pool bills, metered=%d", metered)
+	}
+	if d := f.all(); len(d) != 1 || d[0].request != "pool-p-live-2026080618" {
+		t.Fatalf("the deleted pool was invoiced: %+v", d)
+	}
+}
+
+// A tenant's OWN cloud account is not the house account, and the house token
+// cannot enumerate it. Those rows are the only record there is, so they keep
+// billing from the row — and they are never double-billed, because the split is
+// on the cluster: a cluster is either one the provider reported or it is not.
+func TestBYOCPoolsStillBillFromTheirRow(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 19, 0, 0, 0, time.UTC)
+
+	rows := []*object.NodePool{
+		{Owner: "acme", Name: "byoc", OrgID: "acme", ClusterID: "cl-tenant-own", PoolID: "p-byoc",
+			Provider: "acme-do", Size: "gpu-h100x8-640gb", Count: 3, State: "Active",
+			CostPerHour: 3178, CreatedTime: at.Add(-4 * time.Hour).Format(time.RFC3339)},
+		{Owner: "acme", Name: "house", OrgID: "acme", ClusterID: "cl-house", PoolID: "p-house",
+			Size: "gpu-h100x8-640gb", Count: 4, State: "Active",
+			CostPerHour: 3178, CreatedTime: at.Add(-4 * time.Hour).Format(time.RFC3339)},
+	}
+	live := []service.HousePool{housePool("acme", "cl-house", "p-house", "house", 4)}
+
+	if metered, skipped := meterPools(context.Background(), live, rows, at); metered != 2 || skipped != 0 {
+		t.Fatalf("both the BYOC pool and the house pool bill exactly once: metered=%d skipped=%d", metered, skipped)
+	}
+	amounts := map[int64]int{}
+	for _, d := range f.all() {
+		amounts[d.amount]++
+	}
+	if amounts[3178*3] != 1 || amounts[3178*4] != 1 || len(amounts) != 2 {
+		t.Fatalf("want one 3-node BYOC debit and one 4-node house debit, got %v", amounts)
+	}
+}
+
+// The row is a cache, and a cache that disagrees with the provider about the SIZE
+// is a cache holding the wrong price. Pricing from the live catalog is right;
+// billing an H100 pool at the rate stamped for the CPU pool that used to carry
+// its name is not.
+func TestAStaleSizeInTheRowDoesNotPriceTheLivePool(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 20, 0, 0, 0, time.UTC)
+
+	rows := []*object.NodePool{{
+		Owner: "acme", Name: "gpu", OrgID: "acme", ClusterID: "cl-1", PoolID: "p-1",
+		Size: "s-1vcpu-1gb", Count: 1, State: "Active", CostPerHour: 1,
+		CreatedTime: at.Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+	live := []service.HousePool{housePool("acme", "cl-1", "p-1", "gpu", 4)} // now H100
+
+	metered, skipped := meterPools(context.Background(), live, rows, at)
+	if metered != 0 || skipped != 1 {
+		t.Fatalf("the stale one-cent rate must not price an H100 pool: metered=%d skipped=%d", metered, skipped)
+	}
+	if got := len(f.all()); got != 0 {
+		t.Fatalf("a pool that cannot be priced bills NOTHING, got %d debits", got)
+	}
+}
+
+// An untagged house cluster is unattributable. It is reported rather than
+// silently skipped, so somebody learns a cluster is running for nobody.
+func TestAnUntaggedHouseClusterIsALoudSkip(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 21, 0, 0, 0, time.UTC)
+
+	live := []service.HousePool{housePool("", "cl-orphan", "p-1", "gpu", 4)}
+
+	if metered, skipped := meterPools(context.Background(), live, nil, at); metered != 0 || skipped != 1 {
+		t.Fatalf("an unattributable pool is a loud skip: metered=%d skipped=%d, want 0/1", metered, skipped)
+	}
+	if got := len(f.all()); got != 0 {
+		t.Fatalf("want no debits, got %d", got)
+	}
+}
+
+// The create hour still belongs to the provision path, and the provider's own
+// cluster creation time is what says so for a pool with no row.
+func TestALivePoolCreatedThisHourIsNotBilledTwice(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 22, 30, 0, 0, time.UTC)
+
+	live := []service.HousePool{housePool("acme", "cl-1", "p-1", "gpu", 4)}
+	live[0].Created = at.Add(-20 * time.Minute).Format(time.RFC3339) // same UTC hour
+
+	if metered, skipped := meterPools(context.Background(), live, nil, at); metered != 0 || skipped != 0 {
+		t.Fatalf("the create hour is the create path's: metered=%d skipped=%d", metered, skipped)
+	}
+	if got := len(f.all()); got != 0 {
+		t.Fatalf("the create hour must not be billed twice, got %d debits", got)
 	}
 }

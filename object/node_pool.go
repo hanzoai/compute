@@ -202,8 +202,22 @@ func UpdateNodePool(id string, pool *NodePool) (bool, error) {
 // skips a pool created in the current hour. Hour two is the sweep's, and every
 // hour after.
 //
-// Idempotent on (Owner, Name): a re-recorded pool updates in place rather than
-// failing the PK, so a retried create never leaves the cluster unbilled.
+// Idempotent on (Owner, Name) FOR THE SAME CLUSTER: a re-recorded pool updates in
+// place rather than failing the PK, so a retried create never leaves the cluster
+// unbilled.
+//
+// A DIFFERENT cluster under the same (Owner, Name) is a COLLISION and is refused.
+// The name is the customer's — it comes straight out of the cluster-create body —
+// so two clusters asking for the same seed-pool name is a thing any tenant can do
+// twice in a row, by accident or otherwise. Updating in place there repointed the
+// first cluster's row at the second cluster, and the first cluster stopped being a
+// row anybody could bill.
+//
+// The refusal is safe precisely because the row is no longer the meter of record
+// for a house cluster: the hourly sweep bills the provider's live pools, so the
+// second cluster is billed whether or not this row lands. What the refusal buys is
+// that the FIRST cluster's row — its rate, its project, its create hour — is not
+// silently overwritten by the second.
 func RecordSeedPool(p service.SeedPool) error {
 	if p.Org == "" || p.Name == "" {
 		return fmt.Errorf("a billable pool needs an org and a name (got org=%q name=%q)", p.Org, p.Name)
@@ -231,6 +245,10 @@ func RecordSeedPool(p service.SeedPool) error {
 		return err
 	}
 	if existing != nil {
+		if existing.ClusterID != "" && existing.ClusterID != p.ClusterID {
+			return fmt.Errorf("a billable pool row for %s/%s already belongs to cluster %s; "+
+				"refusing to repoint it at cluster %s", p.Org, p.Name, existing.ClusterID, p.ClusterID)
+		}
 		pool.CreatedTime = existing.CreatedTime
 		_, err = engine.ID(schemas.PK{p.Org, p.Name}).AllCols().Update(pool)
 		return err
@@ -657,40 +675,71 @@ func confirmCloudPoolDeleted(client cloudNodePoolDeleter, poolID string) error {
 	return err
 }
 
-// DeleteNodePoolCloud deletes a node pool from its cloud provider (DOKS) and,
-// only once the provider confirms the pool is gone, removes the DB row. A pool
-// with no cloud linkage is a DB-only record and is removed directly. A provider
-// error other than 404 (e.g. a transient 422 during provisioning) is propagated
-// and the DB row is left intact so a retry can reconcile once the pool settles.
+// poolCloudClient builds the cloud client that can delete a STORED pool: the
+// per-org Provider named on the row, or Hanzo's house account when the row names
+// none (a cluster's seed pool is recorded by the house cluster create, which has
+// no Provider row to name).
+//
+// A Provider the row names but the store does not have is an ERROR, never a skip.
+// Skipping is how a row gets dropped while its pool keeps running.
+func poolCloudClient(stored *NodePool) (cloudNodePoolDeleter, error) {
+	if stored.Provider == "" {
+		return service.NewHouseDOKSClient(stored.ClusterID)
+	}
+	provider, err := getProvider(stored.Owner, stored.Provider)
+	if err != nil {
+		return nil, err
+	}
+	if provider == nil {
+		return nil, fmt.Errorf("node pool %s names provider %q, which does not exist for owner %q: "+
+			"refusing to drop a billable row without confirming the pool is gone upstream",
+			stored.GetId(), stored.Provider, stored.Owner)
+	}
+	token := provider.ClientSecret
+	if token == "" {
+		token = provider.ClientId
+	}
+	return service.NewDOKSClient(token, stored.ClusterID)
+}
+
+// DeleteNodePoolCloud deletes a node pool from its cloud provider and, only once
+// the provider confirms the pool is gone, removes the DB row. A pool with no
+// cloud linkage is a DB-only record and is removed directly. A provider error
+// other than 404 (e.g. a transient 422 during provisioning) is propagated and the
+// DB row is left intact so a retry can reconcile once the pool settles.
+//
+// EVERY field it acts on comes from the STORED ROW. The caller's pool argument
+// says WHICH row (owner+name, and the owner is the authenticated org — the
+// handler overwrites it); it never says which upstream pool that is, on whose
+// account, in which cluster.
+//
+// It used to gate the whole upstream round-trip on the BODY's PoolID and Provider
+// being non-empty. Omit either — send `{"name":"gpu"}` and nothing else — and
+// visor skipped the provider entirely and deleted the row: the cluster kept
+// running on Hanzo's house account and the row that billed it was gone. The body
+// is the customer's, so opting out of the upstream check was one absent JSON field
+// away. It also resolved the Provider from the body, and treated a Provider it
+// could not find as permission to drop the row.
 func DeleteNodePoolCloud(pool *NodePool) (bool, error) {
-	if pool.PoolID != "" && pool.Provider != "" && pool.Owner != "" {
-		dbPool, err := getNodePool(pool.Owner, pool.Name)
+	stored, err := getNodePool(pool.Owner, pool.Name)
+	if err != nil {
+		return false, err
+	}
+	if stored == nil {
+		return false, nil // no such row in this org; nothing to delete
+	}
+	// Linkage decides whether there is an upstream pool at all, and it is read from
+	// the row. A row carrying both is a pool that exists somewhere, and it is not
+	// dropped until that somewhere says it is gone.
+	if stored.PoolID != "" && stored.ClusterID != "" {
+		client, err := poolCloudClient(stored)
 		if err != nil {
 			return false, err
 		}
-		if dbPool != nil && dbPool.ClusterID != "" {
-			provider, err := getProvider(pool.Owner, pool.Provider)
-			if err != nil {
-				return false, err
-			}
-			if provider != nil {
-				token := provider.ClientSecret
-				if token == "" {
-					token = provider.ClientId
-				}
-				client, err := service.NewDOKSClient(token, dbPool.ClusterID)
-				if err != nil {
-					return false, err
-				}
-				// Delete the pool the STORED row points at, not the one the body
-				// names: the body says which row to remove, and the row says which
-				// upstream pool that is.
-				if err := confirmCloudPoolDeleted(client, dbPool.PoolID); err != nil {
-					return false, err
-				}
-			}
+		if err := confirmCloudPoolDeleted(client, stored.PoolID); err != nil {
+			return false, err
 		}
 	}
 
-	return DeleteNodePool(pool)
+	return DeleteNodePool(stored)
 }

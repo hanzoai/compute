@@ -239,6 +239,22 @@ func clusterFromGodo(c *godo.KubernetesCluster) *KubernetesCluster {
 	return kc
 }
 
+// liveNodes is how many nodes a pool ACTUALLY has, which is the number that
+// bills. Every one of them is a droplet Hanzo is paying the upstream for, so the
+// count that charges is the count that exists — not the count anybody asked for.
+//
+// The node list is preferred over the declared Count because an autoscaling pool
+// grows and shrinks without a request reaching visor: nothing writes the new
+// number down anywhere visor controls, and the nodes are the only ground truth.
+// Count is the fallback for a pool the provider returned without node detail, so
+// a missing list is never read as "free".
+func liveNodes(p *NodePool) int {
+	if n := len(p.Nodes); n > 0 {
+		return n
+	}
+	return p.Count
+}
+
 // poolsFromGodo maps DO node pools to visor NodePools via the ONE pool mapper, so
 // pools sourced from a cluster Get expand identically to those from ListNodePools.
 func poolsFromGodo(gpools []*godo.KubernetesNodePool) []*NodePool {

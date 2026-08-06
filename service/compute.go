@@ -335,17 +335,90 @@ func ListOrgKubernetesNodes(org string) ([]*Machine, error) {
 	return kubernetesNodeMachinesByTag(context.Background(), client.Client, orgTag(org))
 }
 
-// newHouseDOKSClient builds a DOKS client on Hanzo's house token for ACCOUNT-level
-// cluster operations (list/get/create/delete), which address a cluster by id rather
-// than a fixed ClusterID — so the ClusterID field is left empty. It is the cluster
-// analogue of newHouseDOClient; per-org isolation is enforced by the callers below
-// via the hanzo-org tag, never by this client.
-func newHouseDOKSClient() (*DOKSClient, error) {
+// NewHouseDOKSClient builds a DOKS client on Hanzo's house token. It is the
+// cluster analogue of newHouseDOClient; per-org isolation is enforced by the
+// callers via the hanzo-org tag, never by this client.
+//
+// clusterID is empty for ACCOUNT-level operations (list/get/create/delete), which
+// address a cluster by id, and set for the pool operations bound to one cluster.
+func NewHouseDOKSClient(clusterID string) (*DOKSClient, error) {
 	client, err := newHouseDOClient()
 	if err != nil {
 		return nil, err
 	}
-	return &DOKSClient{Client: client.Client}, nil
+	return &DOKSClient{Client: client.Client, ClusterID: clusterID}, nil
+}
+
+// HousePool is ONE node pool in Hanzo's house account as the PROVIDER reports it
+// right now — which cluster it belongs to, which org owns that cluster, its node
+// slug, and how many nodes it is ACTUALLY running.
+//
+// This is the billable unit of a house cluster, and the provider is its author.
+// The stored row is a cache of it: useful for the rate the org was authorized at
+// and the project it belongs to, and authoritative for neither existence nor
+// count.
+type HousePool struct {
+	// Org owns the cluster, recovered from its hanzo-org tag. Empty means the
+	// cluster is unattributable and nothing may be billed for it.
+	Org string
+	// ClusterID and PoolID are the upstream identity — the pair no customer can
+	// rename, delete, or collide with another tenant's.
+	ClusterID string
+	PoolID    string
+	// Name is the pool's upstream name. It addresses the cached row; it never
+	// identifies the pool.
+	Name string
+	Size string
+	// Nodes is the LIVE node count, so an autoscaled pool bills what it grew to.
+	Nodes int
+	// Created is the owning cluster's creation time (RFC3339), the fallback
+	// launch-hour marker for a pool with no stored row.
+	Created string
+}
+
+// ListHousePools returns every node pool of every cluster in Hanzo's house
+// account, with the org that owns it and its LIVE node count — the authoritative
+// answer to "what is this account running, for whom, and how much of it".
+//
+// It is the node-pool analogue of ListRunningHouseMachines and shares the ONE
+// cluster enumeration (listClustersFull) with the cluster and node listers, so a
+// pool's identity is sourced identically wherever it surfaces.
+//
+// A cluster with no hanzo-org tag yields pools with an empty Org: they are
+// returned rather than dropped, so the sweep can report them as unattributable
+// instead of silently running an untagged cluster for free.
+func ListHousePools(ctx context.Context) ([]HousePool, error) {
+	client, err := newHouseDOClient()
+	if err != nil {
+		return nil, err
+	}
+	clusters, err := listClustersFull(ctx, client.Client)
+	if err != nil {
+		return nil, err
+	}
+	var out []HousePool
+	for _, gc := range clusters {
+		org := orgFromClusterTags(gc.Tags)
+		created := ""
+		if !gc.CreatedAt.IsZero() {
+			created = gc.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		for _, p := range poolsFromGodo(gc.NodePools) {
+			out = append(out, HousePool{
+				Org: org, ClusterID: gc.ID, PoolID: p.ID, Name: p.Name,
+				Size: p.Size, Nodes: liveNodes(p), Created: created,
+			})
+		}
+	}
+	return out, nil
+}
+
+// orgFromClusterTags recovers the owning org from a cluster's tag LIST, through
+// the SAME hanzo-org read-back the droplet path uses on its comma-joined string
+// form. One parser, so a cluster and a droplet can never disagree about who owns
+// them.
+func orgFromClusterTags(tags []string) string {
+	return orgFromTag(strings.Join(tags, ","))
 }
 
 // ListOrgKubernetesClusters returns every DOKS cluster in Hanzo's HOUSE account
@@ -356,7 +429,7 @@ func ListOrgKubernetesClusters(org string) ([]*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	client, err := NewHouseDOKSClient("")
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +444,7 @@ func GetOrgKubernetesCluster(org, id string) (*KubernetesClusterDetail, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	client, err := NewHouseDOKSClient("")
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +506,7 @@ func CreateOrgKubernetesCluster(org, project string, spec *CreateClusterSpec, re
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	client, err := NewHouseDOKSClient("")
 	if err != nil {
 		return nil, err
 	}
@@ -502,7 +575,7 @@ func DeleteOrgKubernetesCluster(org, id string, forget forgetCluster) error {
 	if org == "" {
 		return fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	client, err := NewHouseDOKSClient("")
 	if err != nil {
 		return err
 	}
