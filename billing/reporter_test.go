@@ -34,14 +34,21 @@ import (
 // query the sweep runs) and is a property of neither alone. Testing the halves
 // separately is how a create that writes no row at all went unnoticed.
 //
-// DATA_ROOT is set before anything reads conf, so ${DATA_ROOT||/data} expands to
-// a temp dir and the Base backend opens its per-org SQLite there.
+// The temp root is set as `dataRoot`, the CONFIG KEY, and that is the whole
+// difference between a hermetic suite and one that writes to the machine.
+// conf.GetConfigString reads an environment variable named for the key first and
+// only then falls back to app.conf — where `dataRoot = ${DATA_ROOT||/data}` is
+// expanded ONCE, on the first read of any key. object's own package init reads
+// one (logPostOnly), and package init runs before TestMain, so DATA_ROOT set
+// here arrived after the answer was already cached: every run of this suite went
+// to the REAL /data, accumulated its rows there, and a second run of a test that
+// plants a row failed on the primary key.
 func TestMain(m *testing.M) {
 	root, err := os.MkdirTemp("", "visor-billing-store-")
 	if err != nil {
 		panic(err)
 	}
-	if err := os.Setenv("DATA_ROOT", root); err != nil {
+	if err := os.Setenv("dataRoot", root); err != nil {
 		panic(err)
 	}
 	object.InitAdapter()
