@@ -17,6 +17,7 @@ package billing
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -658,5 +659,88 @@ func TestALivePoolCreatedThisHourIsNotBilledTwice(t *testing.T) {
 	}
 	if got := len(f.all()); got != 0 {
 		t.Fatalf("the create hour must not be billed twice, got %d debits", got)
+	}
+}
+
+// ---- a provider blip is not a discount ----
+
+// storedPool plants one billable row: created an hour ago, so the sweep owns this
+// hour rather than the create path. A row that NAMES a provider runs on that
+// tenant's own credentials; a row that names none is on Hanzo's house account.
+func storedPool(t *testing.T, org, provider, clusterID string, at time.Time) {
+	t.Helper()
+	if _, err := object.AddNodePool(&object.NodePool{
+		Owner: org, Name: "gpu", OrgID: org, Provider: provider,
+		ClusterID: clusterID, PoolID: "pool-" + org,
+		Size: "gpu-h100x8-640gb", Count: 4, State: "Active", CostPerHour: 3178,
+		CreatedTime: at.Add(-time.Hour).UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("AddNodePool(%s): %v", org, err)
+	}
+}
+
+// debitedOrgs is the set of orgs this sweep actually charged. The store is shared
+// by the whole package, so what matters is WHICH orgs were billed, never how many
+// debits there were in total.
+func debitedOrgs(f *commerceFake) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range f.all() {
+		out[d.org] = true
+	}
+	return out
+}
+
+// TestAProviderBlipStillBillsTheTenantsOwnPools is the hour the sweep used to
+// throw away.
+//
+// ListHousePools walks every house cluster one call at a time, so one timeout or
+// one 5xx anywhere in that walk failed the whole thing — and the sweep returned,
+// billing NOTHING. The hour lease was already claimed by then, so that hour was
+// spent: no retry, no reconciliation, and every tenant-provisioned pool ran free
+// for it.
+//
+// Those pools were never the provider's to speak for. They are on the tenant's
+// own credentials and invisible to the house token, so the live set could not
+// have contained them whether or not the call succeeded. Not billing them is not
+// caution — it is a discount for a blip on somebody else's account.
+func TestAProviderBlipStillBillsTheTenantsOwnPools(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 23, 0, 0, 0, time.UTC)
+
+	storedPool(t, "blip-tenant", "do", "cl-tenant", at) // the tenant's own credentials
+	storedPool(t, "blip-house", "", "cl-house", at)     // Hanzo's house account
+
+	down := func(context.Context) ([]service.HousePool, error) {
+		return nil, fmt.Errorf("Get \"https://api.digitalocean.com/v2/kubernetes/clusters\": context deadline exceeded")
+	}
+	meterNodePools(context.Background(), down, at)
+
+	billed := debitedOrgs(f)
+	if !billed["blip-tenant"] {
+		t.Fatal("a pool on the tenant's own credentials must still be billed: the house account never ran it, " +
+			"so an unreachable house account says nothing about it")
+	}
+	if billed["blip-house"] {
+		t.Fatal("a house pool must NOT be billed from a stale row: with no live set there is no telling " +
+			"a running pool from a deleted one")
+	}
+}
+
+// The control, and without it the test above passes just as well against a sweep
+// that has stopped billing house pools altogether: with the provider REACHABLE,
+// the house row's cluster is live and it bills.
+func TestTheHousePoolBillsWhenTheProviderAnswers(t *testing.T) {
+	f := commerceOf(t)
+	at := time.Date(2026, 8, 6, 23, 0, 0, 0, time.UTC)
+
+	storedPool(t, "ok-house", "", "cl-ok-house", at)
+
+	up := func(context.Context) ([]service.HousePool, error) {
+		return []service.HousePool{housePool("ok-house", "cl-ok-house", "pool-ok-house", "gpu", 4)}, nil
+	}
+	meterNodePools(context.Background(), up, at)
+
+	if !debitedOrgs(f)["ok-house"] {
+		t.Fatal("a live house pool must be billed when the provider answers")
 	}
 }

@@ -59,6 +59,28 @@ import (
 // A NO from Billable is loud, never silent: an absent service token stops all
 // revenue collection while the pools keep costing us money upstream.
 func MeterRunningNodePools(ctx context.Context, now time.Time) {
+	meterNodePools(ctx, housePools, now)
+}
+
+// housePools is the live set for this hour: what Hanzo's house account is
+// actually running.
+//
+// An UNCONFIGURED house account is not a failure — it means there are no house
+// clusters at all, so the live set is legitimately empty and every row is a
+// tenant's own pool. That is why the gate lives here rather than at the call
+// site: "there is nothing to ask" and "the answer did not come back" are
+// different facts, and only the second one is an error.
+func housePools(ctx context.Context) ([]service.HousePool, error) {
+	if !service.ComputeConfigured() {
+		return nil, nil
+	}
+	return service.ListHousePools(ctx)
+}
+
+// meterNodePools is the sweep with its live-pool source injected, which is what
+// makes the unreachable-provider path testable — the branch that decides whether
+// an hour's revenue is collected at all.
+func meterNodePools(ctx context.Context, live func(context.Context) ([]service.HousePool, error), now time.Time) {
 	if !service.Billable(ctx, "pool.hourly") {
 		return
 	}
@@ -73,28 +95,54 @@ func MeterRunningNodePools(ctx context.Context, now time.Time) {
 	}
 
 	// The provider is the AUTHORITY for the house account, so a sweep that cannot
-	// reach it does not bill. Without the live pools there is no way to tell a
-	// running pool from a deleted one, or a pool that autoscaled from one that did
-	// not — and the rows alone are exactly the answer that was wrong. A missed
-	// hour is reconcilable; an hour billed against stale rows is a wrong invoice.
+	// reach it does not bill THE HOUSE ACCOUNT'S pools. Without the live set there
+	// is no way to tell a running pool from a deleted one, or a pool that
+	// autoscaled from one that did not — and the rows alone are exactly the answer
+	// that was wrong. A missed hour is reconcilable; an hour billed against stale
+	// rows is a wrong invoice.
 	//
-	// An UNCONFIGURED house account is not a failure: it means there are no house
-	// clusters at all, so the live set is legitimately empty and every row is a
-	// tenant's own (BYOC) pool.
-	var live []service.HousePool
-	if service.ComputeConfigured() {
-		var err error
-		if live, err = service.ListHousePools(ctx); err != nil {
-			span.RecordError(err)
-			logs.Warning("pool metering: cannot reach the provider (%v) — NO node pools billed this hour; "+
-				"billing from stale rows would invoice pools that may no longer exist", err)
-			return
-		}
+	// It says nothing about the pools that account never runs. A tenant's own
+	// pool is provisioned on the tenant's credentials and is INVISIBLE to the
+	// house token, so the row is the only record of it there is and the live set
+	// was never going to speak for it. Dropping those too meant one DigitalOcean
+	// timeout — on an N+1 walk of every house cluster, so one is enough — silently
+	// zeroed every tenant-provisioned pool's hour, and the hour lease was already
+	// claimed, so nothing retried and nothing reconciled it. A blip upstream is
+	// not a discount.
+	pools, err := live(ctx)
+	if err != nil {
+		span.RecordError(err)
+		rows = tenantPools(rows)
+		logs.Warning("pool metering: cannot reach the provider (%v) — billing the %d pool(s) on tenant "+
+			"credentials, which that account never runs; house pools are NOT billed this hour, because "+
+			"billing them from stale rows would invoice pools that may no longer exist", err, len(rows))
+		pools = nil
 	}
 
-	metered, skipped := meterPools(ctx, live, rows, now)
+	metered, skipped := meterPools(ctx, pools, rows, now)
 	logs.Info("pool metering: hourly sweep done (metered=%d skipped=%d live=%d rows=%d)",
-		metered, skipped, len(live), len(rows))
+		metered, skipped, len(pools), len(rows))
+}
+
+// tenantPools are the rows the house account could not have spoken for: a pool
+// whose row NAMES a provider was provisioned on that tenant's own credentials.
+//
+// It is the same predicate poolCloudClient reads to decide which cloud client can
+// delete a pool — house account when the row names no provider, the tenant's own
+// when it does — so "whose credentials is this pool on" has one answer in this
+// binary, not two.
+//
+// Billing these while the live set is missing cannot double-bill: billableUnits
+// splits on the CLUSTER, and a cluster the house token cannot see is not in the
+// live set by definition.
+func tenantPools(rows []*object.NodePool) []*object.NodePool {
+	out := make([]*object.NodePool, 0, len(rows))
+	for _, r := range rows {
+		if r.Provider != "" {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // unit is ONE pool-hour to debit: who pays, for what, how many nodes, at what
