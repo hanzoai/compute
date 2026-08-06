@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/digitalocean/godo"
 )
@@ -69,5 +70,122 @@ func TestConfirmCloudPoolDeleted(t *testing.T) {
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: confirmCloudPoolDeleted err = %v, wantErr %v", tc.name, err, tc.wantErr)
 		}
+	}
+}
+
+// billedPool is a running, priced GPU pool — exactly what the hourly sweep bills.
+func billedPool() *NodePool {
+	now := time.Now().Format(time.RFC3339)
+	return &NodePool{
+		Owner: "acme", Name: "gpu", OrgID: "acme", ProjectID: "research",
+		ClusterID: "cl-1", PoolID: "p-1", Provider: "do",
+		Size: "gpu-h100x8-640gb", Count: 4, State: "Active", CostPerHour: 3178,
+		MinNodes: 1, MaxNodes: 4, AutoScale: false,
+		CreatedTime: now, UpdatedTime: now,
+	}
+}
+
+// A customer could switch off their own meter with one request. The update wrote
+// EVERY column from the body, and the sweep trusts State, Count and CostPerHour —
+// so `{"state":"Deleted"}` removed a running eight-GPU pool from billing forever
+// while DigitalOcean kept charging Hanzo for it. So did `{"count":0}`, and
+// `{"costPerHour":1}` re-priced it to a cent an hour.
+func TestUpdateNodePoolCannotDisableTheMeter(t *testing.T) {
+	for name, body := range map[string]*NodePool{
+		"state Deleted":     {State: "Deleted"},
+		"count zeroed":      {Count: 0},
+		"price undercut":    {CostPerHour: 1},
+		"size downgraded":   {Size: "s-1vcpu-1gb"},
+		"provider unlinked": {ClusterID: "", PoolID: ""},
+		"org reassigned":    {OrgID: "someone-else", ProjectID: "elsewhere"},
+		"create hour reset": {CreatedTime: time.Now().Format(time.RFC3339)},
+		"everything at once": {State: "Deleted", Count: 0, CostPerHour: 1, Size: "s-1vcpu-1gb",
+			OrgID: "someone-else", ClusterID: "", PoolID: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			installBaseStore(t)
+			before := billedPool()
+			if _, err := AddNodePool(before); err != nil {
+				t.Fatalf("AddNodePool: %v", err)
+			}
+
+			if _, err := UpdateNodePool("acme/gpu", body); err != nil {
+				t.Fatalf("UpdateNodePool: %v", err)
+			}
+
+			after, err := GetNodePool("acme/gpu")
+			if err != nil || after == nil {
+				t.Fatalf("read back: %v", err)
+			}
+			if after.State != before.State || after.Count != before.Count ||
+				after.CostPerHour != before.CostPerHour || after.Size != before.Size ||
+				after.OrgID != before.OrgID || after.ProjectID != before.ProjectID ||
+				after.ClusterID != before.ClusterID || after.PoolID != before.PoolID ||
+				after.Provider != before.Provider || after.CreatedTime != before.CreatedTime {
+				t.Fatalf("a request body reached the meter:\n before %+v\n after  %+v", before, after)
+			}
+
+			// The pool is still in the set the cross-org sweep bills.
+			pools := []*NodePool{}
+			if err := GetAllNodePools(&pools); err != nil {
+				t.Fatalf("GetAllNodePools: %v", err)
+			}
+			if len(pools) != 1 || pools[0].CostPerHour != 3178 || pools[0].Count != 4 {
+				t.Fatalf("the pool must still be billable at its real rate, got %+v", pools)
+			}
+		})
+	}
+}
+
+// The autoscale bounds ARE the customer's to set — a whitelist that refuses
+// everything is not a whitelist, it is an outage.
+func TestUpdateNodePoolAppliesTheEditableFields(t *testing.T) {
+	installBaseStore(t)
+	if _, err := AddNodePool(billedPool()); err != nil {
+		t.Fatalf("AddNodePool: %v", err)
+	}
+
+	ok, err := UpdateNodePool("acme/gpu", &NodePool{MinNodes: 2, MaxNodes: 16, AutoScale: true})
+	if err != nil || !ok {
+		t.Fatalf("UpdateNodePool = %v, %v; want true, nil", ok, err)
+	}
+	after, err := GetNodePool("acme/gpu")
+	if err != nil || after == nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if after.MinNodes != 2 || after.MaxNodes != 16 || !after.AutoScale {
+		t.Fatalf("the editable fields must be applied, got min=%d max=%d auto=%v",
+			after.MinNodes, after.MaxNodes, after.AutoScale)
+	}
+	if after.UpdatedTime == "" {
+		t.Fatal("an applied edit must stamp updated_time")
+	}
+}
+
+// A body naming a different owner/name rewrote the primary key, moving the row
+// out from under its own meter and corrupting whatever sat at the new key.
+func TestUpdateNodePoolCannotRewriteThePrimaryKey(t *testing.T) {
+	installBaseStore(t)
+	if _, err := AddNodePool(billedPool()); err != nil {
+		t.Fatalf("AddNodePool: %v", err)
+	}
+
+	if _, err := UpdateNodePool("acme/gpu", &NodePool{Owner: "acme", Name: "somewhere-else", MaxNodes: 9}); err != nil {
+		t.Fatalf("UpdateNodePool: %v", err)
+	}
+
+	orig, err := GetNodePool("acme/gpu")
+	if err != nil || orig == nil {
+		t.Fatalf("the addressed pool must survive under its own key: %v", err)
+	}
+	if orig.MaxNodes != 9 {
+		t.Fatalf("the edit must land on the addressed pool, got max=%d", orig.MaxNodes)
+	}
+	moved, err := GetNodePool("acme/somewhere-else")
+	if err != nil {
+		t.Fatalf("GetNodePool: %v", err)
+	}
+	if moved != nil {
+		t.Fatalf("a body must not conjure a row at another key, got %+v", moved)
 	}
 }

@@ -151,22 +151,41 @@ func GetNodePool(id string) (*NodePool, error) {
 	return getNodePool(owner, name)
 }
 
+// UpdateNodePool applies a client's edit to a node pool — and the row it writes
+// is the STORED row with the editable fields applied, never the request body.
+//
+// The difference is the whole meter. The hourly sweep decides what to bill from
+// State, Count and CostPerHour; the create path decides ownership from Owner and
+// OrgID; the provider is identified by ClusterID and PoolID. Writing the body's
+// columns handed all of those to the customer: `{"state":"Deleted"}` removed a
+// running GPU pool from billing forever, `{"costPerHour":1}` re-priced it to a
+// cent an hour, and a body naming another owner/name rewrote the primary key and
+// corrupted a second row. The pool kept running either way — DigitalOcean never
+// heard about any of it.
+//
+// So there are exactly three editable fields, and they are the autoscale bounds:
+// nothing the meter reads is reachable from a request. Size, Count, State and
+// CostPerHour are the PROVIDER's answer, written only by the paths that ask it
+// (CreateNodePoolCloud, ScaleNodePoolCloud, SyncNodePoolsCloud, RecordSeedPool).
 func UpdateNodePool(id string, pool *NodePool) (bool, error) {
 	owner, name := util.GetOwnerAndNameFromId(id)
-	p, err := getNodePool(owner, name)
+	stored, err := getNodePool(owner, name)
 	if err != nil {
 		return false, err
-	} else if p == nil {
+	} else if stored == nil {
 		return false, nil
 	}
 
-	pool.UpdatedTime = time.Now().Format(time.RFC3339)
+	stored.MinNodes = pool.MinNodes
+	stored.MaxNodes = pool.MaxNodes
+	stored.AutoScale = pool.AutoScale
+	stored.UpdatedTime = time.Now().Format(time.RFC3339)
 
 	engine, err := EngineFor(owner)
 	if err != nil {
 		return false, err
 	}
-	affected, err := engine.ID(schemas.PK{owner, name}).AllCols().Update(pool)
+	affected, err := engine.ID(schemas.PK{owner, name}).AllCols().Update(stored)
 	if err != nil {
 		return false, err
 	}
