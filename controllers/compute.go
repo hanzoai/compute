@@ -559,6 +559,13 @@ func (c *ApiController) LaunchComputeMachine() {
 		size = strings.TrimSpace(req.InstanceType)
 	}
 	if size == "" {
+		// A launcher with no size picker — the tabs "New cloud machine" button, a
+		// bare CLI launch — still gets a machine. This is the same default the DO
+		// service falls back to (service/digitalocean.go), so the quote the handler
+		// computes and the droplet the service creates name one size, not two.
+		size = service.DefaultLaunchSize
+	}
+	if size == "" {
 		c.ResponseError("size is required")
 		return
 	}

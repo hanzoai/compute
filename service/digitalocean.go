@@ -186,7 +186,7 @@ func (client MachineDigitalOceanClient) CreateMachine(spec *CreateMachineSpec) (
 
 	size := spec.InstanceType
 	if size == "" {
-		size = "s-2vcpu-4gb"
+		size = DefaultLaunchSize
 	}
 
 	// Image: a numeric ImageID is a custom/user image (select by ID); anything

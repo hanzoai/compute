@@ -87,6 +87,13 @@ type GPUSpec struct {
 // SizeInfo is a resellable compute size. Only Hanzo's resale price is exposed —
 // the wholesale cost and the upstream provider are never surfaced (brand policy;
 // margin stays private). Markup is applied once in pricing.go.
+// DefaultLaunchSize is the size a launch gets when the caller names none — the
+// tabs "New cloud machine" button, a bare CLI launch. It is a real DO slug so the
+// quote the launch handler computes and the droplet the provider creates agree on
+// one size. A tab runs `hanzo link` and a terminal; this is the smallest tier that
+// comfortably does that.
+const DefaultLaunchSize = "s-2vcpu-4gb"
+
 type SizeInfo struct {
 	Slug         string   `json:"slug"`
 	Vcpus        int      `json:"vcpus"`
