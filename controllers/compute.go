@@ -31,6 +31,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -494,6 +495,39 @@ func batchMemberName(name string, i int) string {
 	return fmt.Sprintf("%s-%03d", name, i)
 }
 
+// mintMachineName names a machine whose caller did not name it.
+//
+// A droplet MUST have a name — DigitalOcean answers 422 "Droplet must have a
+// name" without one. The BATCH path has always refused an empty name; the single
+// path passed it straight through to the provider, so every launch that omitted
+// one failed at the far end with a provider error rather than here with ours.
+// Tabs is exactly that caller: it opens a scratch terminal and has no name to
+// give, so its button failed on every click.
+//
+// Naming a throwaway is not the caller's job, so the server does it. The kind
+// says what it is, and four random bytes keep two clicks in the same second
+// apart. Lowercased, and anything a hostname will not carry becomes a dash —
+// which is the intersection of what a droplet name and a hostname both allow.
+func mintMachineName(kind string) string {
+	k := strings.ToLower(strings.TrimSpace(kind))
+	if k == "" {
+		k = "machine"
+	}
+	k = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, k)
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Never fail a launch over a name. The clock is unique enough for the
+		// only case this can happen in, which is the entropy pool being unusable.
+		return fmt.Sprintf("%s-%d", k, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%x", k, b)
+}
+
 // launchMetered is the ONE metered launch shared by the single and batch launch
 // paths: authorize the org for the first hour of the size, provision + bootstrap
 // via LaunchOrgMachine, then debit that launch hour. Fail-closed — an unknown or
@@ -644,6 +678,9 @@ func (c *ApiController) LaunchComputeMachine() {
 	// Single: count<=1 keeps today's shape. The outer Name shadows the embedded
 	// spec's Name in JSON, so set it explicitly.
 	spec := base
+	if name == "" {
+		name = mintMachineName(req.Kind)
+	}
 	spec.Name = name
 	machine, err := launchMetered(ctx, org, project, &spec, si)
 	if err != nil {
