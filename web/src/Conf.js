@@ -57,7 +57,7 @@ export const IsDemoMode = false;
 
 export const ThemeDefault = {
   themeType: "default",
-  colorPrimary: "#5734d3",
+  colorPrimary: "#000000",
   borderRadius: 6,
   isCompact: false,
 };

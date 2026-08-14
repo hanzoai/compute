@@ -13,11 +13,12 @@ code {
 }
 
 .logo {
-  background: url("https://cdn.casbin.org/img/casvisor-logo_1200x256.png");
-  background-size: 130px, 30px;
+  background: url("/logo.svg");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: left center;
   width: 130px;
   height: 30px;
-  /*background: rgba(0, 0, 0, 0.2);*/
   margin: 17px 10px 16px 10px;
   float: left;
 }
