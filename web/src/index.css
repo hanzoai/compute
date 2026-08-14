@@ -13,7 +13,7 @@ code {
 }
 
 .logo {
-  background: url("/logo.svg");
+  background: url("./logo.svg");
   background-size: contain;
   background-repeat: no-repeat;
   background-position: left center;
