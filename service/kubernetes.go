@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // KubernetesClientInterface is the one Kubernetes expression Visor coordinates
@@ -70,27 +71,91 @@ func NewKubernetesClient(providerType, accessKeyId, accessKeySecret, region stri
 // the same three bytes as an empty estate.
 type ProviderStatus struct {
 	Provider string `json:"provider"`
-	OK       bool   `json:"ok"`
-	Reason   string `json:"reason,omitempty"`
+	// Account tells two credentials on one cloud apart. Empty when there is only one.
+	Account string `json:"account,omitempty"`
+	OK      bool   `json:"ok"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // cloudProvider is one platform-account cloud: its provider name and the credentials
 // Visor holds for it.
 type cloudProvider struct {
 	provider string
+	name     string
 	keyID    string
 	secret   string
 	region   string
 }
 
-// cloudProviders lists the clouds Visor has platform credentials for. Adding a cloud
-// is one entry here plus its case in NewKubernetesClient.
+// Credential is one cloud account this deployment may spend on: which cloud, a
+// name to tell several accounts of the same cloud apart, and the keys.
+//
+// Exported because the SOURCE of these lives in object (the Provider rows), and
+// object imports service — so the source is registered inward rather than read
+// outward. Same seam, same reason, as object.RegisterMembership.
+type Credential struct {
+	Provider string // "DigitalOcean", "AWS", "Hetzner", ... as NewMachineClient spells it
+	Name     string // tells two accounts of one cloud apart; "" means the only one
+	KeyID    string
+	Secret   string
+	Region   string
+}
+
+var (
+	credentialsMu sync.RWMutex
+	credentials   func() []Credential
+)
+
+// RegisterCredentials teaches this process which cloud accounts it may spend on.
+// A deployment that can enumerate them (object, from its Provider rows) registers
+// the reader; nothing here knows how they are stored.
+func RegisterCredentials(f func() []Credential) {
+	credentialsMu.Lock()
+	defer credentialsMu.Unlock()
+	credentials = f
+}
+
+// cloudProviders lists every cloud account, from the registered source when there
+// is one. Falling back to the single configured DigitalOcean token keeps a
+// deployment that registers nothing working exactly as it did.
 func cloudProviders() []cloudProvider {
-	var out []cloudProvider
-	if t := digitalOceanToken(); t != "" {
-		out = append(out, cloudProvider{provider: K8sDigitalOcean, secret: t})
+	credentialsMu.RLock()
+	f := credentials
+	credentialsMu.RUnlock()
+
+	if f != nil {
+		if creds := f(); len(creds) > 0 {
+			out := make([]cloudProvider, 0, len(creds))
+			for _, c := range creds {
+				out = append(out, cloudProvider{
+					provider: c.Provider, name: c.Name,
+					keyID: c.KeyID, secret: c.Secret, region: c.Region,
+				})
+			}
+			return out
+		}
 	}
-	return out
+	if t := digitalOceanToken(); t != "" {
+		return []cloudProvider{{provider: K8sDigitalOcean, secret: t}}
+	}
+	return nil
+}
+
+// account pairs a client with the credential row it was built from. The client
+// knows its cloud and nothing else — which of several accounts on that cloud it
+// is, is the registry's business, so it rides here instead of on the interface.
+type account struct {
+	KubernetesClientInterface
+	name string
+}
+
+// ref is how a caller names this account: "DigitalOcean" when it is the only one
+// on that cloud, "DigitalOcean/prod" when it is not.
+func (a account) ref() string {
+	if a.name == "" {
+		return a.Provider()
+	}
+	return a.Provider() + "/" + a.name
 }
 
 // kubernetesClients builds a client per configured cloud. Construction failures
@@ -102,11 +167,11 @@ func kubernetesClients() ([]KubernetesClientInterface, []ProviderStatus) {
 	for _, b := range cloudProviders() {
 		c, err := NewKubernetesClient(b.provider, b.keyID, b.secret, b.region)
 		if err != nil {
-			status = append(status, ProviderStatus{Provider: b.provider, OK: false, Reason: err.Error()})
+			status = append(status, ProviderStatus{Provider: b.provider, Account: b.name, OK: false, Reason: err.Error()})
 			continue
 		}
-		clients = append(clients, c)
-		status = append(status, ProviderStatus{Provider: b.provider, OK: true})
+		clients = append(clients, account{KubernetesClientInterface: c, name: b.name})
+		status = append(status, ProviderStatus{Provider: b.provider, Account: b.name, OK: true})
 	}
 	return clients, status
 }
@@ -222,17 +287,39 @@ func pick(clients []KubernetesClientInterface, provider string) (KubernetesClien
 	case provider == "" && len(clients) == 1:
 		return clients[0], nil
 	case provider == "":
-		names := make([]string, 0, len(clients))
-		for _, c := range clients {
-			names = append(names, c.Provider())
-		}
-		sort.Strings(names)
-		return nil, fmt.Errorf("provider is required: configured backends are %s", strings.Join(names, ", "))
+		return nil, fmt.Errorf("provider is required: configured accounts are %s", strings.Join(refs(clients), ", "))
 	}
+	// An exact "cloud/account" names one row; a bare cloud names it only while it
+	// is the sole account there. Picking the first of several would put a
+	// customer's cluster on whichever credential happened to sort first.
+	var onCloud []KubernetesClientInterface
 	for _, c := range clients {
-		if c.Provider() == provider {
+		if a, ok := c.(account); ok && a.ref() == provider {
 			return c, nil
 		}
+		if c.Provider() == provider {
+			onCloud = append(onCloud, c)
+		}
 	}
-	return nil, fmt.Errorf("kubernetes provider %s is not configured", provider)
+	switch len(onCloud) {
+	case 1:
+		return onCloud[0], nil
+	case 0:
+		return nil, fmt.Errorf("cloud provider %s is not configured", provider)
+	}
+	return nil, fmt.Errorf("%s has %d accounts: name one of %s", provider, len(onCloud), strings.Join(refs(onCloud), ", "))
+}
+
+// refs names each client the way a caller must spell it.
+func refs(clients []KubernetesClientInterface) []string {
+	out := make([]string, 0, len(clients))
+	for _, c := range clients {
+		if a, ok := c.(account); ok {
+			out = append(out, a.ref())
+			continue
+		}
+		out = append(out, c.Provider())
+	}
+	sort.Strings(out)
+	return out
 }

@@ -187,3 +187,62 @@ func TestLookupSearchesEveryCloud(t *testing.T) {
 		t.Errorf("an id no cloud has must be a clean miss, got %v %v", missing, err)
 	}
 }
+
+// Two accounts on ONE cloud is the point: several DO keys, or DO beside AWS.
+// A bare cloud name cannot pick between them, and picking the first would put a
+// customer's cluster on whichever credential happened to sort first.
+func TestTwoAccountsOnOneCloudMustBeNamed(t *testing.T) {
+	prod := account{KubernetesClientInterface: &fakeK8s{provider: "DigitalOcean"}, name: "prod"}
+	dev := account{KubernetesClientInterface: &fakeK8s{provider: "DigitalOcean"}, name: "dev"}
+	clients := []KubernetesClientInterface{prod, dev}
+
+	if _, err := pick(clients, "DigitalOcean"); err == nil {
+		t.Fatal("a bare cloud name picked between two accounts on it")
+	} else if !strings.Contains(err.Error(), "prod") || !strings.Contains(err.Error(), "dev") {
+		t.Errorf("refusal does not name the accounts: %v", err)
+	}
+	got, err := pick(clients, "DigitalOcean/dev")
+	if err != nil {
+		t.Fatalf("naming an account did not select it: %v", err)
+	}
+	if a, ok := got.(account); !ok || a.name != "dev" {
+		t.Errorf("selected the wrong account: %#v", got)
+	}
+}
+
+// One account on a cloud still answers to the bare cloud name, so the common
+// single-account case needs no ceremony.
+func TestASoleAccountAnswersToItsCloudName(t *testing.T) {
+	only := []KubernetesClientInterface{
+		account{KubernetesClientInterface: &fakeK8s{provider: "Hetzner"}, name: "main"},
+	}
+	if _, err := pick(only, "Hetzner"); err != nil {
+		t.Fatalf("sole account on a cloud should answer to the cloud: %v", err)
+	}
+}
+
+// Credentials come from whoever registered them, so a deployment can hold many
+// accounts across many clouds without this package knowing where they are kept.
+func TestRegisteredCredentialsReplaceTheSingleToken(t *testing.T) {
+	t.Cleanup(func() { RegisterCredentials(nil) })
+	RegisterCredentials(func() []Credential {
+		return []Credential{
+			{Provider: "DigitalOcean", Name: "prod", Secret: "a"},
+			{Provider: "DigitalOcean", Name: "dev", Secret: "b"},
+			{Provider: "Hetzner", Name: "eu", Secret: "c"},
+		}
+	})
+	got := cloudProviders()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 accounts, got %d: %#v", len(got), got)
+	}
+	var dos int
+	for _, p := range got {
+		if p.provider == "DigitalOcean" {
+			dos++
+		}
+	}
+	if dos != 2 {
+		t.Errorf("two DigitalOcean keys should both be accounts, got %d", dos)
+	}
+}
