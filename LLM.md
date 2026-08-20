@@ -382,9 +382,9 @@ swap and not an SDK rewrite.
     address and put the keys back.
   - The address is one value: `host:port`, `tcp://host:port`, or
     `unix:///path.sock`.
-  - Egress needs the matching `EGRESS_URLS=digitalocean=https://api.digitalocean.com`
-    on ITS host — a cloud has no built-in endpoint there and is refused without
-    one.
+  - Nothing else to configure: egress knows where each cloud it can pay for
+    answers. `EGRESS_URLS` there is an override for a regional endpoint, not a
+    requirement.
 
 **A cloud that builds its own transport cannot be carried, and under a carrier
 is REFUSED** (`NewMachineClient`, fail-closed). DigitalOcean and Hetzner take
