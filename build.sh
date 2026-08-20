@@ -8,7 +8,9 @@ set -e
 # direct-to-git (never through a public proxy).
 export GOPRIVATE="github.com/hanzoai/*,github.com/zooai/*,github.com/parsdao/*"
 if [ -f /run/secrets/gh_token ]; then
-  git config --global url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadOf "https://github.com/"
+  export GIT_CONFIG_COUNT=1 \
+         GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/gh_token)@github.com/.insteadOf" \
+         GIT_CONFIG_VALUE_0="https://github.com/"
 fi
 export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 
