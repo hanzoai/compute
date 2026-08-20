@@ -362,10 +362,48 @@ row above — those four are TYPED ops with no envelope at all (see "Typed ops")
   or the KMS-synced `digitalOceanToken` conf key; commerce token from
   `COMMERCE_SERVICE_TOKEN`. Never hardcoded; absent ⇒ fail closed.
 
+### How visor reaches a cloud — one seam, `service/transport.go`
+Every provider client is built over an `*http.Client` from `httpFor`, and that
+is the ONE place a cloud credential becomes an outbound request. Both SDKs take
+one (`godo.NewClient(c)`, `hcloud.WithHTTPClient(c)`), so this is a transport
+swap and not an SDK rewrite.
+
+- **Unregistered** (`RegisterCarrier` never called): `directHTTP()` — visor's own
+  bounded client, and the SDK attaches the token it was handed. What a local or
+  single-binary run wants, and what visor always did.
+- **Registered** (`egressAddress` + `egressToken` in conf, wired by `carry()` in
+  `egress.go`): the request is described to **hanzoai/egress**, which holds the
+  key and attaches it. Reading this pod's env, config or memory yields nothing
+  that spends. Visor still holds its OWN token — that is the trade, not an
+  oversight: a stolen caller token buys metered calls through our meter rather
+  than a vendor key that spends without limit, off our network.
+  - `egressAddress` without `egressToken` **refuses to start**. Booting anyway
+    would 401 every cloud call, and the obvious repair for that is to unset the
+    address and put the keys back.
+  - The address is one value: `host:port`, `tcp://host:port`, or
+    `unix:///path.sock`.
+  - Egress needs the matching `EGRESS_URLS=digitalocean=https://api.digitalocean.com`
+    on ITS host — a cloud has no built-in endpoint there and is refused without
+    one.
+
+**A cloud that builds its own transport cannot be carried, and under a carrier
+is REFUSED** (`NewMachineClient`, fail-closed). DigitalOcean and Hetzner take
+our client; AWS/Azure/GCP/Aliyun/VMware/KVM/PVE build their own. Silently
+falling back would put the credential back in the process the carrier exists to
+empty — worse than the cloud being unavailable. `TestACloudThatCannotBeCarriedIsRefused`
+pins it; egress refuses the same providers for the same reason.
+
+`TestNoUnboundedClient` fails the build on any `http.Client{}` or
+`http.DefaultClient` in `service/`: an outbound call with no deadline holds an
+org's provisioning lease until the socket closes.
+
 ### Key Dependencies
 - Go 1.26, `zap-proto/zip` v1.27.0 (the ONE framework), `hanzoai/orm` (the ONE
   ORM); `github.com/hanzoai/commerce/metering` v0.1.4
 - `hcloud-go/v2` v2.37, `godo` v1.197, `aws-sdk-go-v2/lightsail`
+- `github.com/hanzoai/egress/spend` v0.1.0 — the cloud-call contract and its
+  client. A LEAF module on purpose: requiring the egress parent moved authz
+  1.10.14 → 1.10.30, which relocated packages visor imports and broke the build.
 - **IAM client: `github.com/hanzoai/iamsdk/v2` — the ONE Go client for Hanzo
   IAM.** `InitConfig` is called once at startup (`controllers.InitAuthConfig`)
   and everything else rides the resulting global client: `ParseJwtToken`
