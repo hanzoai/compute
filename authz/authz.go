@@ -55,7 +55,7 @@ m = (r.subOwner == p.subOwner || p.subOwner == "*") && (r.subName == p.subName |
 
 	// The policy is STATIC (code-defined below) — it lives entirely in memory. No
 	// database (was a pointless Postgres api_rule persistence sink for hardcoded
-	// rules; house rule: no SQL). One source of truth: the ruleText string adapter.
+	// rules; platform rule: no SQL). One source of truth: the ruleText string adapter.
 	Enforcer, err = authz.NewEnforcer(m)
 	if err != nil {
 		panic(err)
@@ -102,7 +102,7 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 			return false
 		}
 
-		// Resell compute surface (catalog + house-account machines) is org-scoped
+		// Resell compute surface (catalog + platform-account machines) is org-scoped
 		// IN THE CONTROLLER: resolveComputeOrg pins org = user.Owner for real
 		// users (a client-supplied ?owner is ignored), so a maxpower user can only
 		// ever list/launch/destroy maxpower's machines. Any authenticated user of

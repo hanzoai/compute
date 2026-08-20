@@ -61,7 +61,7 @@ type baseStore struct {
 
 // newBaseStore opens the per-org SQLite substrate. The cross-pod shared tables
 // (Plan catalog + MeterLease lease) live in the ONE `_global` SQLite DB — no
-// Postgres anywhere (house rule: SQLite/Base for everything). This is a valid
+// Postgres anywhere (platform rule: SQLite/Base for everything). This is a valid
 // single coordination store because visor runs replicas=1: one pod == one writer,
 // so the MeterLease insert-once lease cannot double-fire. Scaling visor out later
 // needs a real cluster coordinator (WAL→object-storage single-writer election,

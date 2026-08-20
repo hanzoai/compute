@@ -115,7 +115,7 @@ const (
 )
 
 // ConfiguredBackend reads the storageBackend config knob. Default is Base (SQLite
-// for everything — the house rule); a multi-instance deployment opts INTO Postgres
+// for everything — the platform rule); a multi-instance deployment opts INTO Postgres
 // with storageBackend=postgres.
 func ConfiguredBackend() StorageBackend {
 	if conf.GetConfigString("storageBackend") == string(BackendPostgres) {

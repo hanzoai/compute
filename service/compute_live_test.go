@@ -20,7 +20,7 @@ import (
 )
 
 // TestLiveDOCatalog exercises the real DigitalOcean catalog through the exact
-// production code path (house client -> godo -> mapping -> resale pricing).
+// production code path (platform client -> godo -> mapping -> resale pricing).
 // It is skipped unless DIGITALOCEAN_ACCESS_TOKEN is set, so it never runs in CI
 // without credentials.
 func TestLiveDOCatalog(t *testing.T) {

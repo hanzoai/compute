@@ -54,9 +54,9 @@ func TestOrgFromTag(t *testing.T) {
 		{"hanzo-org:acme,", "acme"},
 		{"foo,hanzo-org:maxpower,bar", "maxpower"},
 		{" hanzo-org:acme ", "acme"},
-		{"foo,bar", ""},           // no org tag -> unattributable
-		{"", ""},                  // empty
-		{"hanzo-orgx:acme", ""},   // must be the exact key, not a prefix collision
+		{"foo,bar", ""},         // no org tag -> unattributable
+		{"", ""},                // empty
+		{"hanzo-orgx:acme", ""}, // must be the exact key, not a prefix collision
 	}
 	for _, c := range cases {
 		if got := orgFromTag(c.tags); got != c.want {
@@ -73,9 +73,9 @@ func TestProjectFromTag(t *testing.T) {
 		{"hanzo-org:acme,hanzo-project:web,", "web"},
 		{"foo,hanzo-project:api,bar", "api"},
 		{" hanzo-project:web ", "web"},
-		{"hanzo-org:acme,", ""},          // org only -> default project
-		{"", ""},                         // empty -> default project
-		{"hanzo-projectx:web", ""},       // exact key, not a prefix collision
+		{"hanzo-org:acme,", ""},    // org only -> default project
+		{"", ""},                   // empty -> default project
+		{"hanzo-projectx:web", ""}, // exact key, not a prefix collision
 	}
 	for _, c := range cases {
 		if got := projectFromTag(c.tags); got != c.want {

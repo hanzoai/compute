@@ -258,13 +258,13 @@ func TestRecordSeedPoolStillRetriesTheSameCluster(t *testing.T) {
 // The delete used to gate the whole upstream round-trip on the BODY carrying a
 // PoolID and a Provider. Send `{"name":"gpu"}` and nothing else and visor never
 // asked DigitalOcean anything: it deleted the row and returned success, while the
-// pool kept running on Hanzo's house account with nothing left to bill it.
+// pool kept running on the configured cloud account with nothing left to bill it.
 //
 // Linkage is read from the STORED row now, so the omission changes nothing.
 func TestDeleteNodePoolCloudIgnoresABodyThatOmitsTheLinkage(t *testing.T) {
 	installBaseStore(t)
 	stored := billedPool()
-	stored.Provider = "" // a house cluster's seed pool names no per-org provider
+	stored.Provider = "" // a platform cluster's seed pool names no per-org provider
 	if _, err := AddNodePool(stored); err != nil {
 		t.Fatalf("AddNodePool: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestDeleteNodePoolCloudIgnoresABodyThatOmitsTheLinkage(t *testing.T) {
 	// authenticated org, and NOTHING else is known.
 	_, err := DeleteNodePoolCloud(&NodePool{Owner: "acme", Name: "gpu"})
 	if err == nil {
-		t.Fatal("with no house token the provider cannot be reached, so the delete must fail rather than drop the row")
+		t.Fatal("with no provider token the provider cannot be reached, so the delete must fail rather than drop the row")
 	}
 
 	still, err := GetNodePool("acme/gpu")

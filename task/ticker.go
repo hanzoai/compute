@@ -45,7 +45,7 @@ func (t *Ticker) SetupTicker() {
 	// pool both keep drawing down the org's credit balance.
 	//
 	// ONE sweep, TWO resource kinds, ONE lease. Machines are enumerated from the
-	// house DigitalOcean account and node pools from the store, but they are the
+	// configured cloud account and node pools from the store, but they are the
 	// same billable hour, so they share the per-hour claim below. Two tickers each
 	// calling ClaimMeterHour would have one starve the other: the hour is a single
 	// PK, so whichever claimed first would win it and the other kind would never be
@@ -149,8 +149,8 @@ func liveHour() hour {
 // exactly one claim, and exactly one of them wins it. Nothing here is a second
 // mechanism; the probe only decides whether the existing one is asked.
 //
-// An UNCONFIGURED house account is not unreachable — ComputeReachable returns nil
-// with nothing to ask — so a deployment with no house token bills its tenants'
+// An UNCONFIGURED configured cloud account is not unreachable — ComputeReachable returns nil
+// with nothing to ask — so a deployment with no provider token bills its tenants'
 // own resources exactly as before.
 func (h hour) run(ctx context.Context, now time.Time) {
 	if !h.owner() {

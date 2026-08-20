@@ -95,7 +95,7 @@ var apiContract = []route{
 	{"DELETE", "/v1/machines/:id/agent", "UnbindAgent"},
 	{"GET", "/v1/machines/:id", "GetComputeMachine"},
 	{"DELETE", "/v1/machines/:id", "DeleteComputeMachine"},
-	{"GET", "/v1/k8s/backends", "ListComputeKubernetesBackends"},
+	{"GET", "/v1/k8s/providers", "ListComputeKubernetesProviders"},
 	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
 	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},

@@ -28,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/commerce/metering"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/telemetry"
 )
 
@@ -119,7 +119,7 @@ func CreatedInHour(createdTime, stamp string) bool {
 	return t.UTC().Format("2006010215") == stamp
 }
 
-// MeterRunningMachines debits every RUNNING house resell machine one hour of its
+// MeterRunningMachines debits every RUNNING metered machine one hour of its
 // resale price to its OWNING org — the recurring counterpart to the launch debit.
 // It is the "a running bound machine debits the org" rule: a machine that stays
 // up keeps drawing down the org's credit balance, hour by hour.
@@ -138,7 +138,7 @@ func CreatedInHour(createdTime, stamp string) bool {
 // single-flight lease (object.ClaimMeterHour) so only one replica sweeps, and
 // (2) skipping a machine's LAUNCH hour here (the launch path already billed it).
 //
-// No-op when metering is unconfigured or when compute is unconfigured (no house
+// No-op when metering is unconfigured or when compute is unconfigured (no platform
 // token) — nothing to enumerate, nothing to debit.
 func MeterRunningMachines(ctx context.Context) {
 	if !ComputeConfigured() || !Billable(ctx, "compute.hourly") {
@@ -146,7 +146,7 @@ func MeterRunningMachines(ctx context.Context) {
 	}
 	ctx, span := telemetry.Span(ctx, "billing.meter.hourly", "", "")
 	defer span.End()
-	machines, err := ListRunningHouseMachines()
+	machines, err := ListMeteredMachines()
 	if err != nil {
 		span.RecordError(err)
 		logs.Warning("compute metering: list running machines: %v", err)

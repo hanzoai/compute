@@ -17,9 +17,9 @@ package object
 import (
 	"fmt"
 
+	"github.com/hanzoai/orm/relational/schemas"
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/orm/relational/schemas"
 )
 
 type Provider struct {

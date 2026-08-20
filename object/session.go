@@ -19,9 +19,9 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/hanzoai/orm/relational/schemas"
 	"github.com/hanzoai/visor/util"
 	"github.com/hanzoai/visor/util/guacamole"
-	"github.com/hanzoai/orm/relational/schemas"
 )
 
 const (

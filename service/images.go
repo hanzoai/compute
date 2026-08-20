@@ -27,7 +27,7 @@ import (
 // 1-click application by Slug, or its OWN uploaded custom image by ID. Custom
 // images are org-scoped: CreateOrgImage tags each with the owning org and
 // ListImages only returns the caller org's own customs, so one tenant never
-// sees another's uploads even though they share Hanzo's house DO account.
+// sees another's uploads even though they share the configured cloud account.
 
 // ImageInfo is one selectable image.
 type ImageInfo struct {
@@ -62,7 +62,7 @@ func hasTag(tags []string, want string) bool {
 // ListImages returns what an org may launch: shared distributions + 1-click
 // applications, plus the org's OWN custom images.
 func ListImages(org string) ([]ImageInfo, error) {
-	hc, err := newHouseDOClient()
+	hc, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func ListImages(org string) ([]ImageInfo, error) {
 	return out, nil
 }
 
-// CreateOrgImage registers a custom image from a URL into the house account,
+// CreateOrgImage registers a custom image from a URL into the configured cloud account,
 // tagged to org so only that org sees it in ListImages. Creation is async
 // (Status "pending" -> "available"); once available the image is launchable by
 // its returned ID (LaunchOrgMachine accepts a numeric ImageID as a custom image).
@@ -102,7 +102,7 @@ func CreateOrgImage(org, name, url, region, distribution string) (*ImageInfo, er
 	if name == "" || url == "" || region == "" {
 		return nil, fmt.Errorf("name, url and region are required")
 	}
-	hc, err := newHouseDOClient()
+	hc, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}

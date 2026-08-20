@@ -23,7 +23,7 @@ import (
 
 // GetKubernetesNodesCloud returns DOKS worker nodes — as service.Machines — for
 // every active BYOC DigitalOcean provider that names a cluster (Provider.ClusterID).
-// This is the Provider-record cluster→org association; the house-account tag
+// This is the Provider-record cluster→org association; the platform-account tag
 // association lives in service.ListOrgKubernetesNodes and the controller unions
 // both, so a cluster discovered by either path surfaces its nodes (deduped by
 // droplet id) exactly once. The DO provider selection mirrors SyncNodePoolsCloud

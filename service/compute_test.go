@@ -189,7 +189,7 @@ func TestOrgIsolationPredicate(t *testing.T) {
 // The node-pool sweep is the meter of record for a cluster's nodes, so the
 // machine meter must not admit a Kubernetes worker — whether or not DigitalOcean
 // propagates the tag. That is what makes this a property of visor.
-func TestBillableHouseDroplet_KubernetesWorkersAreNotOnTheMachineMeter(t *testing.T) {
+func TestBillableDroplet_KubernetesWorkersAreNotOnTheMachineMeter(t *testing.T) {
 	for name, tc := range map[string]struct {
 		droplet godo.Droplet
 		want    bool
@@ -204,12 +204,12 @@ func TestBillableHouseDroplet_KubernetesWorkersAreNotOnTheMachineMeter(t *testin
 			godo.Droplet{Status: "active", Tags: []string{"k8s-worker", "hanzo-org:acme"}}, false},
 		"a stopped resell droplet is not billed": {
 			godo.Droplet{Status: "off", Tags: []string{"hanzo-org:acme"}}, false},
-		"an untagged house droplet is never billed to a tenant": {
+		"an untagged platform droplet is never billed to a tenant": {
 			godo.Droplet{Status: "active", Tags: []string{"managed-by:hanzo-visor"}}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := billableHouseDroplet(tc.droplet); got != tc.want {
-				t.Fatalf("billableHouseDroplet(%v) = %v, want %v", tc.droplet.Tags, got, tc.want)
+			if got := billableDroplet(tc.droplet); got != tc.want {
+				t.Fatalf("billableDroplet(%v) = %v, want %v", tc.droplet.Tags, got, tc.want)
 			}
 		})
 	}
@@ -238,7 +238,7 @@ func TestBuildDropletTags_ACustomerCannotForgeTheKubernetesExclusion(t *testing.
 		}
 	}
 	// And the droplet those tags describe is still on the meter.
-	if !billableHouseDroplet(godo.Droplet{Status: "active", Tags: tags}) {
+	if !billableDroplet(godo.Droplet{Status: "active", Tags: tags}) {
 		t.Fatalf("a customer escaped the machine meter with launch tags: %v", tags)
 	}
 }

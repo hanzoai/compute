@@ -91,7 +91,7 @@ func billedHour() time.Time {
 // down is the unreachable provider: what a revoked token produces. A revoked token
 // is still a non-empty string, so the presence checks all still say "configured"
 // and the failure surfaces here, at the call, exactly as it does in production.
-var down = errors.New("house DigitalOcean account unreachable: GET https://api.digitalocean.com/v2/account: 401 Unable to authenticate you")
+var down = errors.New("configured cloud account unreachable: GET https://api.digitalocean.com/v2/account: 401 Unable to authenticate you")
 
 // reachable/unreachable are the two probe outcomes.
 func reachable(context.Context) error   { return nil }

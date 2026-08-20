@@ -32,7 +32,7 @@
 // is (Owner, Name), and the Name comes from the customer's own create body. A row
 // a customer can name is a row a customer can collide with, delete, or leave
 // stale, and each of those turns into free compute. The provider knows what it is
-// actually running; the row does not. So for Hanzo's house account the PROVIDER is
+// actually running; the row does not. So for the configured cloud account the PROVIDER is
 // the authority and the row is a cache of it. See billableUnits.
 package billing
 
@@ -72,19 +72,19 @@ func MeterRunningNodePools(ctx context.Context, now time.Time) {
 		return
 	}
 
-	// The provider is the AUTHORITY for the house account, so a sweep that cannot
+	// The provider is the AUTHORITY for the configured cloud account, so a sweep that cannot
 	// reach it does not bill. Without the live pools there is no way to tell a
 	// running pool from a deleted one, or a pool that autoscaled from one that did
 	// not — and the rows alone are exactly the answer that was wrong. A missed
 	// hour is reconcilable; an hour billed against stale rows is a wrong invoice.
 	//
-	// An UNCONFIGURED house account is not a failure: it means there are no house
+	// An UNCONFIGURED configured cloud account is not a failure: it means there are no platform
 	// clusters at all, so the live set is legitimately empty and every row is a
 	// tenant's own (BYOC) pool.
-	var live []service.HousePool
+	var live []service.LivePool
 	if service.ComputeConfigured() {
 		var err error
-		if live, err = service.ListHousePools(ctx); err != nil {
+		if live, err = service.ListLivePools(ctx); err != nil {
 			span.RecordError(err)
 			logs.Warning("pool metering: cannot reach the provider (%v) — NO node pools billed this hour; "+
 				"billing from stale rows would invoice pools that may no longer exist", err)
@@ -122,7 +122,7 @@ type unit struct {
 // bucket is deterministic under test): resolve both sources into billable units,
 // then debit each one. Returns (metered, skipped). A per-pool failure is logged
 // and skipped — one bad pool never aborts the sweep.
-func meterPools(ctx context.Context, live []service.HousePool, rows []*object.NodePool, now time.Time) (metered, skipped int) {
+func meterPools(ctx context.Context, live []service.LivePool, rows []*object.NodePool, now time.Time) (metered, skipped int) {
 	stamp := service.HourStamp(now)
 	for _, u := range billableUnits(live, rows) {
 		if u.nodes < 1 {
@@ -161,7 +161,7 @@ func meterPools(ctx context.Context, live []service.HousePool, rows []*object.No
 // billableUnits is the ONE answer to "what does this hour bill", and the whole
 // point is WHERE each field comes from.
 //
-// The PROVIDER is authoritative for Hanzo's house account: which pools exist,
+// The PROVIDER is authoritative for the configured cloud account: which pools exist,
 // which cluster and org they belong to, and how many nodes they are ACTUALLY
 // running. The stored row is a CACHE of that. It contributes the two things the
 // provider does not know — the rate the org was authorized at and the project the
@@ -182,16 +182,16 @@ func meterPools(ctx context.Context, live []service.HousePool, rows []*object.No
 //     because nothing writes the new count anywhere visor controls. Now the count
 //     comes from the provider, so it bills sixteen from the next hour.
 //
-// A row whose cluster the house account does NOT have is billed FROM THE ROW.
+// A row whose cluster the configured cloud account does NOT have is billed FROM THE ROW.
 // That is a BYOC pool — provisioned on a tenant's own provider credentials and
-// invisible to the house token — and the row is the only record of it there is.
+// invisible to the provider token — and the row is the only record of it there is.
 // Splitting on the CLUSTER rather than on anything written in the row is what
 // makes double-billing impossible: every pool falls on exactly one side of that
 // line, and the provider owns everything on its side.
-func billableUnits(live []service.HousePool, rows []*object.NodePool) []unit {
-	house := map[string]bool{}
+func billableUnits(live []service.LivePool, rows []*object.NodePool) []unit {
+	platform := map[string]bool{}
 	for _, p := range live {
-		house[p.ClusterID] = true
+		platform[p.ClusterID] = true
 	}
 	cache := indexRows(rows)
 
@@ -223,7 +223,7 @@ func billableUnits(live []service.HousePool, rows []*object.NodePool) []unit {
 	}
 
 	for _, r := range rows {
-		if house[r.ClusterID] {
+		if platform[r.ClusterID] {
 			continue // the provider already spoke for this cluster
 		}
 		if r.State != "Active" || r.Count < 1 {
@@ -265,7 +265,7 @@ func indexRows(rows []*object.NodePool) poolCache {
 	return c
 }
 
-func (c poolCache) find(p service.HousePool) *object.NodePool {
+func (c poolCache) find(p service.LivePool) *object.NodePool {
 	if r := c.byPool[p.ClusterID+"/"+p.PoolID]; r != nil {
 		return r
 	}

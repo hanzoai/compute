@@ -166,7 +166,7 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/launch-machine", h((*controllers.ApiController).LaunchMachine))
 
 	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
-	// per-org machines over Hanzo's house account (controllers/compute.go).
+	// per-org machines over the configured cloud account (controllers/compute.go).
 	app.Get("/v1/regions", h((*controllers.ApiController).GetComputeRegions))
 	app.Get("/v1/sizes", h((*controllers.ApiController).GetComputeSizes))
 	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
@@ -177,7 +177,7 @@ func registerAPI(app *zip.App) {
 	app.Delete("/v1/machines/:id", h((*controllers.ApiController).DeleteComputeMachine))
 	// Unified /v1/k8s noun — the ONE Kubernetes surface: DOKS cluster lifecycle
 	// (list / detail+nodes / create / delete) plus the worker NODES on the fleet.
-	app.Get("/v1/k8s/backends", h((*controllers.ApiController).ListComputeKubernetesBackends))
+	app.Get("/v1/k8s/providers", h((*controllers.ApiController).ListComputeKubernetesProviders))
 	app.Get("/v1/k8s/clusters", h((*controllers.ApiController).ListComputeKubernetesClusters))
 	app.Post("/v1/k8s/clusters", h((*controllers.ApiController).CreateComputeKubernetesCluster))
 	app.Get("/v1/k8s/clusters/:id", h((*controllers.ApiController).GetComputeKubernetesCluster))

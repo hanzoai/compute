@@ -64,63 +64,63 @@ func NewKubernetesClient(providerType, accessKeyId, accessKeySecret, region stri
 	}
 }
 
-// BackendStatus is one configured cloud and whether it answered. Reported by
-// KubernetesBackendStatus so an empty cluster list means "you have none" only
+// ProviderStatus is one configured cloud and whether it answered. Reported by
+// KubernetesProviderStatus so an empty cluster list means "you have none" only
 // when every backend is ok — a list that silently drops an unreachable cloud is
 // the same three bytes as an empty estate.
-type BackendStatus struct {
+type ProviderStatus struct {
 	Provider string `json:"provider"`
 	OK       bool   `json:"ok"`
 	Reason   string `json:"reason,omitempty"`
 }
 
-// houseBackend is one house-account cloud: its provider name and the credentials
+// cloudProvider is one platform-account cloud: its provider name and the credentials
 // Visor holds for it.
-type houseBackend struct {
+type cloudProvider struct {
 	provider string
 	keyID    string
 	secret   string
 	region   string
 }
 
-// houseBackends lists the clouds Visor has house credentials for. Adding a cloud
+// cloudProviders lists the clouds Visor has platform credentials for. Adding a cloud
 // is one entry here plus its case in NewKubernetesClient.
-func houseBackends() []houseBackend {
-	var out []houseBackend
-	if t := houseDOToken(); t != "" {
-		out = append(out, houseBackend{provider: K8sDigitalOcean, secret: t})
+func cloudProviders() []cloudProvider {
+	var out []cloudProvider
+	if t := digitalOceanToken(); t != "" {
+		out = append(out, cloudProvider{provider: K8sDigitalOcean, secret: t})
 	}
 	return out
 }
 
-// kubernetesBackends builds a client per configured cloud. Construction failures
+// kubernetesClients builds a client per configured cloud. Construction failures
 // are returned beside the clients rather than aborting: one cloud with a bad
 // credential must not hide the others.
-func kubernetesBackends() ([]KubernetesClientInterface, []BackendStatus) {
+func kubernetesClients() ([]KubernetesClientInterface, []ProviderStatus) {
 	var clients []KubernetesClientInterface
-	var status []BackendStatus
-	for _, b := range houseBackends() {
+	var status []ProviderStatus
+	for _, b := range cloudProviders() {
 		c, err := NewKubernetesClient(b.provider, b.keyID, b.secret, b.region)
 		if err != nil {
-			status = append(status, BackendStatus{Provider: b.provider, OK: false, Reason: err.Error()})
+			status = append(status, ProviderStatus{Provider: b.provider, OK: false, Reason: err.Error()})
 			continue
 		}
 		clients = append(clients, c)
-		status = append(status, BackendStatus{Provider: b.provider, OK: true})
+		status = append(status, ProviderStatus{Provider: b.provider, OK: true})
 	}
 	return clients, status
 }
 
 // KubernetesConfigured reports whether any cloud is configured, so a caller can
 // answer "not configured" distinctly from "configured and empty".
-func KubernetesConfigured() bool { return len(houseBackends()) > 0 }
+func KubernetesConfigured() bool { return len(cloudProviders()) > 0 }
 
-// KubernetesBackendStatus reports every configured cloud and whether it answers
+// KubernetesProviderStatus reports every configured cloud and whether it answers
 // right now, by making the cheapest real call each one has. This is the health
 // half of the plane; the cluster list is the data half, and neither reports the
 // other's business.
-func KubernetesBackendStatus(ctx context.Context) []BackendStatus {
-	clients, status := kubernetesBackends()
+func KubernetesProviderStatus(ctx context.Context) []ProviderStatus {
+	clients, status := kubernetesClients()
 	byProvider := map[string]int{}
 	for i, s := range status {
 		byProvider[s.Provider] = i
@@ -128,7 +128,7 @@ func KubernetesBackendStatus(ctx context.Context) []BackendStatus {
 	for _, c := range clients {
 		if _, err := c.ListClusters(ctx); err != nil {
 			if i, ok := byProvider[c.Provider()]; ok {
-				status[i] = BackendStatus{Provider: c.Provider(), OK: false, Reason: err.Error()}
+				status[i] = ProviderStatus{Provider: c.Provider(), OK: false, Reason: err.Error()}
 			}
 		}
 	}
@@ -140,9 +140,9 @@ func KubernetesBackendStatus(ctx context.Context) []BackendStatus {
 // and naming what did not. err is non-nil only when NO backend answered, so one
 // unreachable cloud costs its own rows and not the whole fleet.
 func listClustersAcross(ctx context.Context) ([]*KubernetesCluster, []string, error) {
-	clients, _ := kubernetesBackends()
+	clients, _ := kubernetesClients()
 	if len(clients) == 0 {
-		return nil, nil, fmt.Errorf("no kubernetes backend is configured")
+		return nil, nil, fmt.Errorf("no cloud provider is configured")
 	}
 	return gather(ctx, clients)
 }
@@ -165,7 +165,7 @@ func gather(ctx context.Context, clients []KubernetesClientInterface) ([]*Kubern
 		}
 	}
 	if len(failed) == len(clients) {
-		return nil, failed, fmt.Errorf("every kubernetes backend failed: %s", strings.Join(failed, "; "))
+		return nil, failed, fmt.Errorf("every cloud provider failed: %s", strings.Join(failed, "; "))
 	}
 	return out, failed, nil
 }
@@ -174,9 +174,9 @@ func gather(ctx context.Context, clients []KubernetesClientInterface) ([]*Kubern
 // owns it. Ids are provider-scoped, so this asks each in turn; a miss everywhere
 // is (nil, nil, nil) and the caller renders "not found".
 func findCluster(ctx context.Context, id string) (KubernetesClientInterface, *KubernetesClusterDetail, error) {
-	clients, _ := kubernetesBackends()
+	clients, _ := kubernetesClients()
 	if len(clients) == 0 {
-		return nil, nil, fmt.Errorf("no kubernetes backend is configured")
+		return nil, nil, fmt.Errorf("no cloud provider is configured")
 	}
 	return locate(ctx, clients, id)
 }
@@ -201,7 +201,7 @@ func locate(ctx context.Context, clients []KubernetesClientInterface, id string)
 		}
 	}
 	if len(failed) == len(clients) {
-		return nil, nil, fmt.Errorf("every kubernetes backend failed: %s", strings.Join(failed, "; "))
+		return nil, nil, fmt.Errorf("every cloud provider failed: %s", strings.Join(failed, "; "))
 	}
 	return nil, nil, nil
 }
@@ -210,7 +210,7 @@ func locate(ctx context.Context, clients []KubernetesClientInterface, id string)
 // one; with several the spec must say, because guessing puts a customer's
 // cluster on a cloud they did not choose.
 func backendFor(provider string) (KubernetesClientInterface, error) {
-	clients, _ := kubernetesBackends()
+	clients, _ := kubernetesClients()
 	return pick(clients, provider)
 }
 
@@ -218,7 +218,7 @@ func backendFor(provider string) (KubernetesClientInterface, error) {
 func pick(clients []KubernetesClientInterface, provider string) (KubernetesClientInterface, error) {
 	switch {
 	case len(clients) == 0:
-		return nil, fmt.Errorf("no kubernetes backend is configured")
+		return nil, fmt.Errorf("no cloud provider is configured")
 	case provider == "" && len(clients) == 1:
 		return clients[0], nil
 	case provider == "":
