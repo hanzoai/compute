@@ -304,8 +304,8 @@ func (c *ApiController) ListComputeKubernetesClusters() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no kubernetes backend is configured")
 		return
 	}
 	clusters, err := service.ListOrgKubernetesClusters(org)
@@ -327,8 +327,8 @@ func (c *ApiController) GetComputeKubernetesCluster() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no kubernetes backend is configured")
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -355,8 +355,8 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no kubernetes backend is configured")
 		return
 	}
 	// The request body IS the service spec (one shape, no re-mapping).
@@ -403,8 +403,8 @@ func (c *ApiController) DeleteComputeKubernetesCluster() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no kubernetes backend is configured")
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -643,4 +643,17 @@ func (c *ApiController) LaunchComputeMachine() {
 		return
 	}
 	c.ResponseOk(map[string]interface{}{"machine": machine, "quote": quote})
+}
+
+// ListComputeKubernetesBackends
+// @Title ListComputeKubernetesBackends
+// @Tag Compute API
+// @Description every configured kubernetes cloud and whether it answers right now
+// @router /k8s/backends [get]
+func (c *ApiController) ListComputeKubernetesBackends() {
+	if c.resolveComputeOrg() == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	c.ResponseOk(service.KubernetesBackendStatus(context.Background()))
 }

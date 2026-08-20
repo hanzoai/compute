@@ -78,6 +78,21 @@ func NewDOKSClient(token, clusterID string) (*DOKSClient, error) {
 	return &DOKSClient{Client: client, ClusterID: clusterID}, nil
 }
 
+// newDOKSCloudClient builds a client for CLUSTER-level work, where there is no
+// cluster id yet. NewDOKSClient requires one because its node-pool methods are
+// scoped to a cluster; the cluster list/create/delete are not.
+func newDOKSCloudClient(token string) (*DOKSClient, error) {
+	if token == "" {
+		return nil, fmt.Errorf("DigitalOcean API token is required")
+	}
+	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	client := godo.NewClient(oauth2.NewClient(context.Background(), tokenSource))
+	return &DOKSClient{Client: client}, nil
+}
+
+// Provider satisfies KubernetesClientInterface.
+func (c *DOKSClient) Provider() string { return K8sDigitalOcean }
+
 func nodePoolFromGodo(pool *godo.KubernetesNodePool) *NodePool {
 	np := &NodePool{
 		ID:        pool.ID,
@@ -224,6 +239,9 @@ type KubernetesCluster struct {
 	RegionSlug string   `json:"regionSlug"`
 	Status     string   `json:"status"`
 	Tags       []string `json:"tags"`
+	// Provider names the cloud this cluster is on. Additive and omitted when
+	// unset, so a single-cloud response is byte-identical to what it was.
+	Provider string `json:"provider,omitempty"`
 }
 
 func clusterFromGodo(c *godo.KubernetesCluster) *KubernetesCluster {
@@ -390,6 +408,10 @@ type CreateClusterSpec struct {
 	Region   string                `json:"region"`
 	Version  string                `json:"version"`
 	NodePool CreateClusterNodePool `json:"nodePool"`
+	// Provider picks the cloud. Optional while exactly one is configured;
+	// required once there are several, because guessing puts a customer's
+	// cluster on a cloud they did not choose.
+	Provider string `json:"provider,omitempty"`
 }
 
 // CreateClusterNodePool is the initial worker pool of a new cluster: its instance

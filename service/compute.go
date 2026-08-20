@@ -355,11 +355,24 @@ func ListOrgKubernetesClusters(org string) ([]*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	all, failed, err := listClustersAcross(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	return clustersByTag(context.Background(), client.Client, orgTag(org))
+	tag := orgTag(org)
+	out := make([]*KubernetesCluster, 0, len(all))
+	for _, k := range all {
+		if clusterHasTag(k.Tags, tag) {
+			out = append(out, k)
+		}
+	}
+	// A cloud that did not answer costs its own rows, never the whole fleet.
+	// The list cannot carry that fact (callers decode an array), so it is on
+	// KubernetesBackendStatus — GET /v1/k8s/backends.
+	if len(failed) > 0 {
+		fmt.Printf("visor: kubernetes backends degraded for org %s: %s\n", org, strings.Join(failed, "; "))
+	}
+	return out, nil
 }
 
 // GetOrgKubernetesCluster returns one house cluster's detail (pools + worker nodes),
@@ -370,16 +383,12 @@ func GetOrgKubernetesCluster(org, id string) (*KubernetesClusterDetail, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	_, detail, err := findCluster(context.Background(), id)
 	if err != nil {
 		return nil, err
 	}
-	detail, err := client.GetCluster(context.Background(), id)
-	if err != nil {
-		if IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
+	if detail == nil {
+		return nil, nil
 	}
 	if !clusterHasTag(detail.Tags, orgTag(org)) {
 		return nil, nil // isolation: not this org's cluster
@@ -395,12 +404,22 @@ func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*Kubernete
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	if spec == nil {
+		return nil, fmt.Errorf("spec is required")
+	}
+	client, err := backendFor(spec.Provider)
 	if err != nil {
 		return nil, err
 	}
 	tags := []string{"managed-by:hanzo-visor", orgTag(org)}
-	return client.CreateCluster(context.Background(), spec, tags)
+	kc, err := client.CreateCluster(context.Background(), spec, tags)
+	if err != nil {
+		return nil, err
+	}
+	if kc != nil && kc.Provider == "" {
+		kc.Provider = client.Provider()
+	}
+	return kc, nil
 }
 
 // DeleteOrgKubernetesCluster destroys a house cluster by id, but ONLY if it carries
@@ -411,21 +430,18 @@ func DeleteOrgKubernetesCluster(org, id string) error {
 	if org == "" {
 		return fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOKSClient()
+	ctx := context.Background()
+	client, detail, err := findCluster(ctx, id)
 	if err != nil {
 		return err
 	}
-	detail, err := client.GetCluster(context.Background(), id)
-	if err != nil {
-		if IsNotFound(err) {
-			return nil // already gone
-		}
-		return err
+	if detail == nil {
+		return nil // already gone
 	}
 	if !clusterHasTag(detail.Tags, orgTag(org)) {
 		return fmt.Errorf("cluster not found")
 	}
-	return client.DeleteCluster(context.Background(), id)
+	return client.DeleteCluster(ctx, id)
 }
 
 // ListRunningHouseMachines returns every RUNNING droplet in Hanzo's house

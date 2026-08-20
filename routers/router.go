@@ -177,6 +177,7 @@ func registerAPI(app *zip.App) {
 	app.Delete("/v1/machines/:id", h((*controllers.ApiController).DeleteComputeMachine))
 	// Unified /v1/k8s noun — the ONE Kubernetes surface: DOKS cluster lifecycle
 	// (list / detail+nodes / create / delete) plus the worker NODES on the fleet.
+	app.Get("/v1/k8s/backends", h((*controllers.ApiController).ListComputeKubernetesBackends))
 	app.Get("/v1/k8s/clusters", h((*controllers.ApiController).ListComputeKubernetesClusters))
 	app.Post("/v1/k8s/clusters", h((*controllers.ApiController).CreateComputeKubernetesCluster))
 	app.Get("/v1/k8s/clusters/:id", h((*controllers.ApiController).GetComputeKubernetesCluster))
