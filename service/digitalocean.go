@@ -30,6 +30,13 @@ type MachineDigitalOceanClient struct {
 	region string
 }
 
+// Kubernetes is DigitalOcean's managed-cluster face, over the SAME godo client
+// this machine client already holds. One credential, one transport, two nouns —
+// which is what keeps there from being a second way to reach DigitalOcean.
+func (c MachineDigitalOceanClient) Kubernetes() KubernetesClientInterface {
+	return &DOKSClient{Client: c.Client}
+}
+
 // doAPITimeout bounds every call visor makes to DigitalOcean.
 //
 // An HTTP client with no timeout waits for as long as the socket stays open, and

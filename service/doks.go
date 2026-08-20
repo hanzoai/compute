@@ -90,7 +90,7 @@ func newDOKSCloudClient(token string) (*DOKSClient, error) {
 }
 
 // Provider satisfies KubernetesClientInterface.
-func (c *DOKSClient) Provider() string { return K8sDigitalOcean }
+func (c *DOKSClient) Provider() string { return providerDigitalOcean }
 
 func nodePoolFromGodo(pool *godo.KubernetesNodePool) *NodePool {
 	np := &NodePool{

@@ -23,9 +23,9 @@ import (
 )
 
 // KubernetesClientInterface is the one Kubernetes expression Visor coordinates
-// across k8s-native clouds, the same shape MachineClientInterface has one plane
-// down. A cloud is added by writing this interface once and naming it in
-// NewKubernetesClient; nothing above here changes.
+// across k8s-native clouds, the same shape MachineClientInterface has beside it.
+// A cloud gains clusters by implementing KubernetesCapable on the provider client
+// NewMachineClient already builds — never by being named in a second registry.
 type KubernetesClientInterface interface {
 	// Provider names the cloud, matching the provider Type strings used by
 	// NewMachineClient ("DigitalOcean", "AWS", ...).
@@ -37,32 +37,26 @@ type KubernetesClientInterface interface {
 	NodeMachines(ctx context.Context) ([]*Machine, error)
 }
 
-// Kubernetes provider names. These match the machine-plane provider Type strings
-// so one provider row drives both planes.
-const (
-	K8sDigitalOcean = "DigitalOcean"
-	K8sAWS          = "AWS"
-	K8sAzure        = "Azure"
-	K8sGCP          = "Google Cloud"
-	K8sLinked       = "Linked" // k8s on linked Hanzo computers
-)
+// KubernetesCapable is a provider client that ALSO speaks Kubernetes. Not every
+// cloud sells managed clusters, so this is an assertion on the one provider
+// client, never a second registry of clouds — NewMachineClient is the registry,
+// and a second switch beside it would be a second list of vendor names to drift.
+// providerDigitalOcean is DigitalOcean's name as NewMachineClient spells it.
+// Stated once so the k8s side cannot drift from the machine side.
+const providerDigitalOcean = "DigitalOcean"
 
-// NewKubernetesClient builds the client for one cloud. Mirrors NewMachineClient:
-// the switch IS the registry, so a cloud is present or it is not, and an
-// unsupported one says so instead of returning something that answers emptily.
-func NewKubernetesClient(providerType, accessKeyId, accessKeySecret, region string) (KubernetesClientInterface, error) {
-	switch providerType {
-	case K8sDigitalOcean:
-		token := accessKeySecret
-		if token == "" {
-			token = accessKeyId
-		}
-		return newDOKSCloudClient(token)
-	case K8sAWS, K8sAzure, K8sGCP, K8sLinked:
-		return nil, fmt.Errorf("kubernetes provider %s: not implemented yet", providerType)
-	default:
-		return nil, fmt.Errorf("unsupported kubernetes provider type: %s", providerType)
+type KubernetesCapable interface {
+	Kubernetes() KubernetesClientInterface
+}
+
+// kubernetesFor asks a provider client for its Kubernetes face. A cloud that has
+// none is not an error: it is a machine cloud, and saying so is the answer.
+func kubernetesFor(c MachineClientInterface) (KubernetesClientInterface, bool) {
+	k, ok := c.(KubernetesCapable)
+	if !ok {
+		return nil, false
 	}
+	return k.Kubernetes(), true
 }
 
 // ProviderStatus is one configured cloud and whether it answered. Reported by
@@ -136,7 +130,7 @@ func cloudProviders() []cloudProvider {
 		}
 	}
 	if t := digitalOceanToken(); t != "" {
-		return []cloudProvider{{provider: K8sDigitalOcean, secret: t}}
+		return []cloudProvider{{provider: providerDigitalOcean, secret: t}}
 	}
 	return nil
 }
@@ -165,12 +159,20 @@ func kubernetesClients() ([]KubernetesClientInterface, []ProviderStatus) {
 	var clients []KubernetesClientInterface
 	var status []ProviderStatus
 	for _, b := range cloudProviders() {
-		c, err := NewKubernetesClient(b.provider, b.keyID, b.secret, b.region)
+		// ONE registry. A cloud reaches visor exactly once, through the same
+		// factory the machine plane uses, so there is never a second way to DO.
+		mc, err := NewMachineClient(b.provider, b.keyID, b.secret, b.region)
 		if err != nil {
 			status = append(status, ProviderStatus{Provider: b.provider, Account: b.name, OK: false, Reason: err.Error()})
 			continue
 		}
-		clients = append(clients, account{KubernetesClientInterface: c, name: b.name})
+		k, ok := kubernetesFor(mc)
+		if !ok {
+			// A machine cloud with no managed clusters. Not a failure, and not
+			// listed as one — it simply contributes no clusters.
+			continue
+		}
+		clients = append(clients, account{KubernetesClientInterface: k, name: b.name})
 		status = append(status, ProviderStatus{Provider: b.provider, Account: b.name, OK: true})
 	}
 	return clients, status

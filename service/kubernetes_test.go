@@ -77,8 +77,8 @@ func TestDOKSIsAKubernetesBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newDOKSCloudClient: %v", err)
 	}
-	if c.Provider() != K8sDigitalOcean {
-		t.Errorf("provider = %q, want %q", c.Provider(), K8sDigitalOcean)
+	if c.Provider() != providerDigitalOcean {
+		t.Errorf("provider = %q, want %q", c.Provider(), providerDigitalOcean)
 	}
 	// Cluster-level work has no cluster id; NewDOKSClient demands one.
 	if _, err := NewDOKSClient("tok", ""); err == nil {
@@ -86,17 +86,28 @@ func TestDOKSIsAKubernetesBackend(t *testing.T) {
 	}
 }
 
-// An unsupported cloud says so. It must not return a client that answers emptily
-// — that is indistinguishable from a cloud with no clusters.
-func TestAnUnsupportedCloudIsRefusedNotFaked(t *testing.T) {
-	for _, p := range []string{K8sAWS, K8sAzure, K8sGCP, K8sLinked, "Nonsense"} {
-		c, err := NewKubernetesClient(p, "id", "secret", "region")
-		if err == nil {
-			t.Errorf("%s: got a client with no implementation behind it", p)
-		}
-		if c != nil {
-			t.Errorf("%s: returned a non-nil client alongside an error", p)
-		}
+// A cloud with no managed clusters contributes none, and is not an error. This
+// replaces a test of the second registry that used to live here: there is no
+// k8s-specific list of clouds to be absent from any more, only whether the ONE
+// provider client speaks Kubernetes.
+func TestAMachineOnlyCloudContributesNoClusters(t *testing.T) {
+	machineOnly, err := NewMachineClient("Hetzner", "id", "secret", "fsn1")
+	if err != nil {
+		t.Skipf("hetzner client unavailable: %v", err)
+	}
+	if _, ok := kubernetesFor(machineOnly); ok {
+		t.Error("Hetzner reported a Kubernetes face it does not have")
+	}
+	do, err := NewMachineClient(providerDigitalOcean, "", "tok", "")
+	if err != nil {
+		t.Fatalf("digitalocean client: %v", err)
+	}
+	k, ok := kubernetesFor(do)
+	if !ok {
+		t.Fatal("DigitalOcean lost its Kubernetes face")
+	}
+	if k.Provider() != providerDigitalOcean {
+		t.Errorf("provider = %q, want %q", k.Provider(), providerDigitalOcean)
 	}
 }
 
