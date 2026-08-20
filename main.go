@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/hanzoai/ha"
@@ -105,6 +106,12 @@ func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	// that values file says 1. Raising replicas REQUIRES replacing this with a
 	// real membership source first — see object/coordinator.go.
 	object.RegisterMembership(ha.Static(object.SelfID()))
+
+	// Which cloud accounts this deployment may spend on: the active cloud
+	// Providers owned by platformOwner. Unset registers nothing and service
+	// falls back to the single configured DigitalOcean token, which is what a
+	// deployment that has not been told where its accounts live did before.
+	object.RegisterCloudCredentials(strings.TrimSpace(conf.GetConfigString("platformOwner")))
 
 	app := visor.Bootstrap()
 

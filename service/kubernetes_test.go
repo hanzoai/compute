@@ -293,3 +293,18 @@ func TestOnlyOneFileMatchesProviderNames(t *testing.T) {
 		}
 	}
 }
+
+// An empty registration falls back to the single configured token, so a
+// deployment that has not been told where its accounts live keeps working.
+func TestNoRegistrationFallsBackToTheSingleToken(t *testing.T) {
+	t.Cleanup(func() { RegisterCredentials(nil) })
+	RegisterCredentials(func() []Credential { return nil })
+	// With no DO token configured either, there is simply nothing — which is a
+	// different answer from "one account", and both are correct answers.
+	got := cloudProviders()
+	if tok := digitalOceanToken(); tok == "" && len(got) != 0 {
+		t.Errorf("no token and no registration should yield no accounts, got %d", len(got))
+	} else if tok != "" && len(got) != 1 {
+		t.Errorf("a configured token should yield exactly one account, got %d", len(got))
+	}
+}
