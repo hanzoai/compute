@@ -47,10 +47,16 @@ type VolumeClientInterface interface {
 }
 
 func NewVolumeClient(providerType string, accessKeyId string, accessKeySecret string, region string) (VolumeClientInterface, error) {
-	if providerType == "Hetzner" {
-		return newVolumeHetznerClient(accessKeyId, accessKeySecret, region)
-	} else if providerType == "DigitalOcean" {
-		return newVolumeDigitalOceanClient(accessKeyId, accessKeySecret, region)
+	// ONE registry. NewMachineClient is the only place a cloud name is matched;
+	// volume support is a capability of the client it returns, so a cloud
+	// is never listed twice and the two lists can never disagree.
+	c, err := NewMachineClient(providerType, accessKeyId, accessKeySecret, region)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("volume support not available for provider type: %s", providerType)
+	p, ok := c.(VolumeCapable)
+	if !ok {
+		return nil, fmt.Errorf("volume support not available for provider type: %s", providerType)
+	}
+	return p.Volumes(), nil
 }

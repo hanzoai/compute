@@ -37,6 +37,21 @@ func (c MachineDigitalOceanClient) Kubernetes() KubernetesClientInterface {
 	return &DOKSClient{Client: c.Client}
 }
 
+// Volumes, Vpcs and LoadBalancers are DigitalOcean's other nouns over the SAME
+// godo client and region. Each was a separate factory with its own list of cloud
+// names; a capability on the one client is the same fact with nothing to drift.
+func (c MachineDigitalOceanClient) Volumes() VolumeClientInterface {
+	return &VolumeDigitalOceanClient{Client: c.Client, region: c.region}
+}
+
+func (c MachineDigitalOceanClient) Vpcs() VpcClientInterface {
+	return &VpcDigitalOceanClient{Client: c.Client, region: c.region}
+}
+
+func (c MachineDigitalOceanClient) LoadBalancers() LoadBalancerClientInterface {
+	return &LoadBalancerDigitalOceanClient{Client: c.Client, region: c.region}
+}
+
 // doAPITimeout bounds every call visor makes to DigitalOcean.
 //
 // An HTTP client with no timeout waits for as long as the socket stays open, and

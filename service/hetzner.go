@@ -27,6 +27,13 @@ type MachineHetznerClient struct {
 	region string
 }
 
+// Volumes is Hetzner's volume noun over the same hcloud client. Hetzner sells no
+// managed Kubernetes, VPC or load balancer through this service, so it implements
+// none of those capabilities and the factories say so without a list.
+func (c MachineHetznerClient) Volumes() VolumeClientInterface {
+	return &VolumeHetznerClient{Client: c.Client, region: c.region}
+}
+
 func newMachineHetznerClient(accessKeyId string, accessKeySecret string, region string) (MachineHetznerClient, error) {
 	token := accessKeySecret
 	if token == "" {

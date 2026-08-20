@@ -45,6 +45,21 @@ type KubernetesClientInterface interface {
 // Stated once so the k8s side cannot drift from the machine side.
 const providerDigitalOcean = "DigitalOcean"
 
+// VolumeCapable, VpcCapable and LoadBalancerCapable are the other nouns a
+// provider client may speak. Same rule as KubernetesCapable: an assertion on the
+// one client, never a second registry of clouds.
+type VolumeCapable interface {
+	Volumes() VolumeClientInterface
+}
+
+type VpcCapable interface {
+	Vpcs() VpcClientInterface
+}
+
+type LoadBalancerCapable interface {
+	LoadBalancers() LoadBalancerClientInterface
+}
+
 type KubernetesCapable interface {
 	Kubernetes() KubernetesClientInterface
 }

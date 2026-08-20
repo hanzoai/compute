@@ -17,6 +17,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -255,5 +257,39 @@ func TestRegisteredCredentialsReplaceTheSingleToken(t *testing.T) {
 	}
 	if dos != 2 {
 		t.Errorf("two DigitalOcean keys should both be accounts, got %d", dos)
+	}
+}
+
+// ONE registry. NewMachineClient is the only place a cloud name is matched, and
+// every other noun — volumes, vpcs, load balancers, kubernetes — is a capability
+// of the client it returns.
+//
+// This is a gate, not a note. Four factories each carried their own list of
+// vendor names, so adding a cloud to one and not the others was a silent drift
+// waiting to happen. A second list reintroduced anywhere fails here.
+func TestOnlyOneFileMatchesProviderNames(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") || f == "machine.go" {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			code := line
+			if c := strings.Index(code, "//"); c >= 0 {
+				code = code[:c] // a comment may name a cloud; only code may not match on one
+			}
+			if strings.Contains(code, "providerType ==") {
+				t.Errorf("%s:%d matches a provider name outside the registry: %s\n"+
+					"    add a capability to the client NewMachineClient returns instead",
+					f, i+1, strings.TrimSpace(line))
+			}
+		}
 	}
 }
