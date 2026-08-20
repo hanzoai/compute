@@ -68,12 +68,24 @@ func soleWriter(t *testing.T) {
 	t.Cleanup(func() { object.RegisterMembership(nil) })
 }
 
-// billedHour is a distinct hour per test, so tests never collide on the lease PK
-// (which is global to the shared store for the life of the process) and can run in
-// any order. Offsets are whole hours into a fixed past date well outside any
-// prune window's interaction with wall-clock now.
-func billedHour(offset int) time.Time {
-	return time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC).Add(time.Duration(offset) * time.Hour)
+// hourSeq hands out hours nothing in this process has used yet.
+var hourSeq atomic.Int64
+
+// billedHour returns a fresh hour on every call, so no two claims in this process
+// ever collide on the lease primary key.
+//
+// It counts rather than taking a fixed offset because the lease is a REAL row in a
+// REAL store, and that row outlives the test that wrote it — including across
+// passes under `go test -count=N`. A fixed hour is unclaimed on the first pass and
+// already claimed on the second, so the suite goes red on pass two for a reason
+// that has nothing to do with the property under test. Since `-count` is exactly
+// how a flaky money test gets caught, the suite has to survive it.
+//
+// A test that needs the SAME hour twice binds one call to a variable and reuses it;
+// that is the point of the first test, and it is a different question from two
+// tests wanting different hours.
+func billedHour() time.Time {
+	return time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC).Add(time.Duration(hourSeq.Add(1)) * time.Hour)
 }
 
 // down is the unreachable provider: what a revoked token produces. A revoked token
@@ -100,7 +112,7 @@ func unreachable(context.Context) error { return down }
 // SAME hour is still billable. Only an unspent lease can do that.
 func TestAnUnreachableProviderDoesNotSpendTheHour(t *testing.T) {
 	soleWriter(t)
-	now := billedHour(1)
+	now := billedHour()
 
 	var billed atomic.Int32
 	h := hour{
@@ -136,7 +148,7 @@ func TestAnUnreachableProviderDoesNotSpendTheHour(t *testing.T) {
 // mid-hour restart, or a post-flip new owner re-running a claimed hour).
 func TestAnHourCannotBeBilledTwice(t *testing.T) {
 	soleWriter(t)
-	now := billedHour(2)
+	now := billedHour()
 
 	var billed atomic.Int32
 	newHour := func() hour {
@@ -186,7 +198,7 @@ func TestAnHourCannotBeBilledTwice(t *testing.T) {
 // failure".
 func TestAnUnclaimedHourIsStillOneHour(t *testing.T) {
 	soleWriter(t)
-	now := billedHour(3)
+	now := billedHour()
 
 	var billed atomic.Int32
 	h := hour{
@@ -220,7 +232,7 @@ func TestAnUnclaimedHourIsStillOneHour(t *testing.T) {
 // call the estate bounds deliberately.
 func TestANonOwnerNeverProbesOrClaims(t *testing.T) {
 	soleWriter(t)
-	now := billedHour(4)
+	now := billedHour()
 
 	var probed, billed atomic.Int32
 	h := hour{
