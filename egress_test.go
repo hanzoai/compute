@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -146,4 +147,57 @@ func TestDial(t *testing.T) {
 			t.Errorf("dial(%q) = %q, %q; want %q, %q", address, network, addr, want[0], want[1])
 		}
 	}
+}
+
+// carry() is the operator contract, and each of its three states matters.
+func TestCarry(t *testing.T) {
+	t.Run("unset, visor calls clouds itself", func(t *testing.T) {
+		t.Setenv("egressAddress", "")
+		t.Setenv("egressToken", "")
+		t.Cleanup(func() { service.RegisterCarrier(nil) })
+		service.RegisterCarrier(nil)
+
+		if err := carry(); err != nil {
+			t.Fatalf("an unconfigured visor must start: %v", err)
+		}
+		// AWS builds its own transport, so it is refused ONLY under a carrier.
+		// Building here is what proves none was registered.
+		if _, err := service.NewMachineClient(service.Credential{
+			Provider: "AWS", KeyID: "k", Secret: "s", Region: "us-east-1",
+		}); err != nil {
+			t.Errorf("a carrier was registered when none was configured: %v", err)
+		}
+	})
+
+	t.Run("an address with no token refuses to start", func(t *testing.T) {
+		t.Setenv("egressAddress", "egress.hanzo.ai:9653")
+		t.Setenv("egressToken", "")
+		t.Cleanup(func() { service.RegisterCarrier(nil) })
+
+		err := carry()
+		if err == nil {
+			t.Fatal("visor started with an address and no token — every cloud call would be a 401")
+		}
+		if !strings.Contains(err.Error(), "egressToken") {
+			t.Errorf("the refusal does not name what is missing: %v", err)
+		}
+	})
+
+	t.Run("both, and the cloud keys are egress's", func(t *testing.T) {
+		t.Setenv("egressAddress", "tcp://egress.hanzo.ai:9653")
+		t.Setenv("egressToken", "visor-own-token")
+		t.Cleanup(func() { service.RegisterCarrier(nil) })
+		service.RegisterCarrier(nil)
+
+		if err := carry(); err != nil {
+			t.Fatalf("carry: %v", err)
+		}
+		// Under a carrier, a cloud that cannot use one is refused rather than
+		// falling back to holding a key.
+		if _, err := service.NewMachineClient(service.Credential{
+			Provider: "AWS", KeyID: "k", Secret: "s", Region: "us-east-1",
+		}); err == nil {
+			t.Error("AWS was built under a carrier it cannot use — the token would be held here")
+		}
+	})
 }
