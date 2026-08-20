@@ -97,12 +97,23 @@ func getMachineFromDroplet(droplet godo.Droplet) *Machine {
 		Id:          strconv.Itoa(droplet.ID),
 		DisplayName: droplet.Name,
 		CreatedTime: droplet.Created, // DO's RFC3339 create time — the launch-hour boundary the meter must not re-bill.
-		Region:      droplet.Region.Slug,
-		Size:        droplet.Size.Slug,
-		Image:       droplet.Image.Slug,
-		Os:          fmt.Sprintf("%s %s", droplet.Image.Distribution, droplet.Image.Name),
 		CpuSize:     strconv.Itoa(droplet.Vcpus),
 		MemSize:     strconv.Itoa(droplet.Memory),
+	}
+	// godo makes these three pointers, and reading one that is not there takes
+	// down a process serving every tenant. A droplet arrives without them more
+	// readily than it sounds: a cloud answering mid-incident, a page returned
+	// with a partial body. A machine missing its region is worth listing; a
+	// panic is not.
+	if droplet.Region != nil {
+		machine.Region = droplet.Region.Slug
+	}
+	if droplet.Size != nil {
+		machine.Size = droplet.Size.Slug
+	}
+	if droplet.Image != nil {
+		machine.Image = droplet.Image.Slug
+		machine.Os = fmt.Sprintf("%s %s", droplet.Image.Distribution, droplet.Image.Name)
 	}
 
 	switch droplet.Status {
@@ -116,8 +127,8 @@ func getMachineFromDroplet(droplet godo.Droplet) *Machine {
 		machine.State = droplet.Status
 	}
 
-	if v4 := droplet.Networks.V4; len(v4) > 0 {
-		for _, net := range v4 {
+	if droplet.Networks != nil {
+		for _, net := range droplet.Networks.V4 {
 			if net.Type == "public" {
 				machine.PublicIp = net.IPAddress
 			} else if net.Type == "private" {
@@ -144,7 +155,9 @@ func (client MachineDigitalOceanClient) GetMachines() ([]*Machine, error) {
 		}
 
 		for _, d := range droplets {
-			if client.region != "" && d.Region.Slug != client.region {
+			// A droplet with no region cannot match one, so it is filtered out
+			// rather than dereferenced.
+			if client.region != "" && (d.Region == nil || d.Region.Slug != client.region) {
 				continue
 			}
 			allMachines = append(allMachines, getMachineFromDroplet(d))

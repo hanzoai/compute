@@ -73,6 +73,7 @@ require (
 	github.com/hanzoai/builder v0.3.13 // indirect
 	github.com/hanzoai/csqlite v0.1.0 // indirect
 	github.com/hanzoai/decimal v0.1.2 // indirect
+	github.com/hanzoai/egress/spend v0.1.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/hanzoai/xorm v1.4.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -97,7 +98,7 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/zap-proto/go v1.3.0 // indirect
-	github.com/zap-proto/http v0.3.1 // indirect
+	github.com/zap-proto/http v0.3.5 // indirect
 	github.com/zap-proto/mcp v1.0.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/log v0.20.0 // indirect

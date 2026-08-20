@@ -113,6 +113,12 @@ func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	// deployment that has not been told where its accounts live did before.
 	object.RegisterCloudCredentials(strings.TrimSpace(conf.GetConfigString("platformOwner")))
 
+	// And how those accounts are reached: through hanzoai/egress when it is
+	// configured, so the cloud keys are not in this process at all.
+	if err := carry(); err != nil {
+		return fmt.Errorf("serve: %w", err)
+	}
+
 	app := visor.Bootstrap()
 
 	// Translate ctx cancellation (SIGINT/SIGTERM) into a graceful shutdown.
