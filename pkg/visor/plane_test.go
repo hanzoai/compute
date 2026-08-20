@@ -16,6 +16,7 @@ package visor
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +27,29 @@ import (
 )
 
 // bind serves a routed visor on its canonical socket inside a runtime dir owned
-// by the test, and returns the app. Not Bootstrap: that opens the store and
-// starts tickers, and none of that is what these tests are about.
+// by the test, and returns the app once that socket EXISTS. Not Bootstrap: that
+// opens the store and starts tickers, and none of that is what these tests are
+// about.
+//
+// Waiting is not politeness, it is what orders the teardown. zip.Serve returns
+// once the listener goroutine is launched, and that goroutine creates the socket
+// — and the directory holding it — some time later. A test that never touches
+// the wire (zip.Here does not) can therefore finish and run its cleanups while
+// the listener is still starting. The cleanups are LIFO — Close, then t.TempDir's
+// RemoveAll — but a Close that lands before the servers are installed closes
+// NOTHING, and the socket is then created inside a directory already being
+// removed:
+//
+//	TempDir RemoveAll cleanup: unlinkat /tmp/TestX123: directory not empty
+//
+// which fails whichever test happened to be last, having nothing to do with it.
+// Measured: at GOMAXPROCS=1 the socket was unbound at the end of the body 300
+// times out of 300, and in parallel a loop of 300 subtests failed several of
+// them this way every run.
+//
+// Once the socket exists, the servers are installed (they are assigned before the
+// listeners start), so Close finds them, the unix listener unlinks on close, and
+// RemoveAll meets an empty directory.
 func bind(t *testing.T) *zip.App {
 	t.Helper()
 	t.Setenv(zip.RuntimeDirEnv, t.TempDir())
@@ -35,12 +57,23 @@ func bind(t *testing.T) *zip.App {
 	app := zip.New(zip.Config{AppName: Name, DisableStartupMessage: true})
 	routers.Route(app)
 
-	h, err := zip.Serve(app, zip.SocketPath(Name))
+	sock := zip.SocketPath(Name)
+	h, err := zip.Serve(app, sock)
 	if err != nil {
-		t.Fatalf("serve %s on %s: %v", Name, zip.SocketPath(Name), err)
+		t.Fatalf("serve %s on %s: %v", Name, sock, err)
 	}
 	t.Cleanup(func() { _ = h.Close() })
-	return app
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(sock); err == nil {
+			return app
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s never appeared: visor is not listening", sock)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // bound waits for name's socket to actually be bound, and reports whether it
