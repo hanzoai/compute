@@ -72,7 +72,51 @@ func newHouseDOClient() (MachineDigitalOceanClient, error) {
 
 // ComputeConfigured reports whether the house DO token is present, so callers
 // can return a clean 503 instead of a cryptic client error.
+//
+// It answers "is a credential SET", which is a different question from "does the
+// credential WORK" — see ComputeReachable. A revoked token is still a non-empty
+// string, so this stays true through a revocation and every fallback written for
+// the unconfigured case is dead code exactly when it is needed.
 func ComputeConfigured() bool { return houseDOToken() != "" }
+
+// ComputeReachable proves the house credential actually works, by spending one
+// authenticated round trip on it rather than inspecting its length.
+//
+// It exists because presence is not reachability. `token != ""` cannot tell a
+// live token from a revoked one, so every caller that gated on ComputeConfigured
+// took the configured branch and failed INSIDE it — reporting zeros that read as
+// real data instead of "not connected". The hourly money sweep is where that is
+// most expensive, so the sweep asks this question before it commits to an hour.
+//
+// The two answers a caller must tell apart:
+//
+//	nil   — either the house account has nothing to ask (no token configured, so
+//	        there are no house resources at all and an empty answer is the TRUE
+//	        one), or the provider answered. Both mean: proceed.
+//	error — a credential IS configured and did not work. Nothing about the house
+//	        account can be known this hour.
+//
+// That distinction is the whole point and it is the same one housePools already
+// draws one level down: "there is nothing to ask" and "the answer did not come
+// back" are different facts, and only the second is an error.
+//
+// Account.Get is the cheapest call that proves the credential itself: O(1), no
+// paging, and it is what a revoked token 401s on. The client is built through the
+// one constructor, so this inherits the 30s bound every other DigitalOcean call
+// gets and cannot wedge the caller.
+func ComputeReachable(ctx context.Context) error {
+	if !ComputeConfigured() {
+		return nil // nothing to ask
+	}
+	client, err := newHouseDOClient()
+	if err != nil {
+		return err
+	}
+	if _, _, err := client.Client.Account.Get(ctx); err != nil {
+		return fmt.Errorf("house DigitalOcean account unreachable: %w", err)
+	}
+	return nil
+}
 
 // ---- Catalog types (resellable) ----
 
