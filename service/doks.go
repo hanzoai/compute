@@ -70,7 +70,7 @@ func NewDOKSClient(token, clusterID string) (*DOKSClient, error) {
 		return nil, fmt.Errorf("DOKS cluster ID is required")
 	}
 
-	return &DOKSClient{Client: newDOClient(token), ClusterID: clusterID}, nil
+	return &DOKSClient{Client: newDOClient(token, nil), ClusterID: clusterID}, nil
 }
 
 // newDOKSCloudClient builds a client for CLUSTER-level work, where there is no
@@ -82,7 +82,7 @@ func newDOKSCloudClient(token string) (*DOKSClient, error) {
 	}
 	// Same construction the machine plane uses, so there is one place a DO client
 	// is built and one place its transport can be changed.
-	m, err := newMachineDigitalOceanClient("", token, "")
+	m, err := newMachineDigitalOceanClient(token, "", "", nil)
 	if err != nil {
 		return nil, err
 	}

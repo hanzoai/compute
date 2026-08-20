@@ -44,7 +44,7 @@ func newDOCostReader(clientId, clientSecret string) (CloudCostReader, error) {
 	if token == "" {
 		return nil, ErrCostUnavailable
 	}
-	return &doCostReader{client: newDOClient(token)}, nil
+	return &doCostReader{client: newDOClient(token, nil)}, nil
 }
 
 // MonthToDateCents reads the account's month-to-date usage. The balance endpoint is

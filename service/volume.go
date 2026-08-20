@@ -50,7 +50,7 @@ func NewVolumeClient(providerType string, accessKeyId string, accessKeySecret st
 	// ONE registry. NewMachineClient is the only place a cloud name is matched;
 	// volume support is a capability of the client it returns, so a cloud
 	// is never listed twice and the two lists can never disagree.
-	c, err := NewMachineClient(providerType, accessKeyId, accessKeySecret, region)
+	c, err := NewMachineClient(Credential{Provider: providerType, KeyID: accessKeyId, Secret: accessKeySecret, Region: region})
 	if err != nil {
 		return nil, err
 	}

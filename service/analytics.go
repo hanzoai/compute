@@ -314,7 +314,7 @@ func writeComputeEvent(ev ComputeEvent) {
 		req.Header.Set("X-Datastore-Key", p)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := directHTTP().Do(req)
 	if err != nil {
 		logs.Warning("compute analytics: emit %s for machine %s: %v", ev.Event, ev.MachineID, err)
 		return

@@ -67,7 +67,7 @@ func newDigitalOceanClient() (MachineDigitalOceanClient, error) {
 	if token == "" {
 		return MachineDigitalOceanClient{}, fmt.Errorf("hanzo compute is not configured: DigitalOcean token unset (resolve from KMS)")
 	}
-	return newMachineDigitalOceanClient("", token, "")
+	return newMachineDigitalOceanClient(token, "", "", nil)
 }
 
 // ComputeConfigured reports whether the platform DO token is present, so callers

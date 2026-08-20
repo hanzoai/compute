@@ -176,7 +176,7 @@ func kubernetesClients() ([]KubernetesClientInterface, []ProviderStatus) {
 	for _, b := range cloudProviders() {
 		// ONE registry. A cloud reaches visor exactly once, through the same
 		// factory the machine plane uses, so there is never a second way to DO.
-		mc, err := NewMachineClient(b.provider, b.keyID, b.secret, b.region)
+		mc, err := NewMachineClient(Credential{Provider: b.provider, Name: b.name, KeyID: b.keyID, Secret: b.secret, Region: b.region})
 		if err != nil {
 			status = append(status, ProviderStatus{Provider: b.provider, Account: b.name, OK: false, Reason: err.Error()})
 			continue

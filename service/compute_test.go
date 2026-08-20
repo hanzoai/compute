@@ -251,7 +251,7 @@ func TestBuildDropletTags_ACustomerCannotForgeTheKubernetesExclusion(t *testing.
 // Every DO surface builds through the one constructor, so the bound is one
 // statement rather than four that have to agree.
 func TestEveryDigitalOceanClientIsBounded(t *testing.T) {
-	machine, err := newMachineDigitalOceanClient("", "tok", "nyc3")
+	machine, err := newMachineDigitalOceanClient("", "tok", "nyc3", nil)
 	if err != nil {
 		t.Fatalf("machine client: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestEveryDigitalOceanClientIsBounded(t *testing.T) {
 		if c.HTTPClient == nil {
 			t.Fatalf("%s: no HTTP client at all", name)
 		}
-		if c.HTTPClient.Timeout != doAPITimeout {
+		if c.HTTPClient.Timeout != providerTimeout {
 			t.Fatalf("%s: DigitalOcean calls are unbounded (timeout=%v), so a hung upstream holds the org's provisioning lease forever",
 				name, c.HTTPClient.Timeout)
 		}

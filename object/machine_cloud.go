@@ -90,7 +90,7 @@ func getMachinesCloud(owner string) ([]*Machine, error) {
 	}
 
 	for _, provider := range providers {
-		client, err2 := service.NewMachineClient(provider.Type, provider.ClientId, provider.ClientSecret, provider.Region)
+		client, err2 := service.NewMachineClient(service.Credential{Provider: provider.Type, Name: provider.Name, KeyID: provider.ClientId, Secret: provider.ClientSecret, Region: provider.Region})
 		if err2 != nil {
 			return nil, err2
 		}
@@ -159,7 +159,7 @@ func CreateMachineCloud(owner string, providerName string, spec *service.CreateM
 		return nil, fmt.Errorf("provider %q not found for owner %q", providerName, owner)
 	}
 
-	client, err := service.NewMachineClient(provider.Type, provider.ClientId, provider.ClientSecret, provider.Region)
+	client, err := service.NewMachineClient(service.Credential{Provider: provider.Type, Name: provider.Name, KeyID: provider.ClientId, Secret: provider.ClientSecret, Region: provider.Region})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create machine client: %w", err)
 	}
@@ -203,7 +203,7 @@ func updateMachineCloud(oldMachine *Machine, machine *Machine) (bool, error) {
 		return false, fmt.Errorf("The provider: %s does not exist", machine.Provider)
 	}
 
-	client, err := service.NewMachineClient(provider.Type, provider.ClientId, provider.ClientSecret, provider.Region)
+	client, err := service.NewMachineClient(service.Credential{Provider: provider.Type, Name: provider.Name, KeyID: provider.ClientId, Secret: provider.ClientSecret, Region: provider.Region})
 	if err != nil {
 		return false, err
 	}

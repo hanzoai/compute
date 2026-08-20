@@ -64,8 +64,7 @@ func (client MachineVmwareClient) sendRequest(method, path string) ([]byte, erro
 	encodedAuth := base64.StdEncoding.EncodeToString([]byte(client.basicAuthKey))
 	req.Header.Add("Authorization", "Basic "+encodedAuth)
 
-	c := http.Client{}
-	resp, err := c.Do(req)
+	resp, err := directHTTP().Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,14 +94,14 @@ func TestDOKSIsAKubernetesBackend(t *testing.T) {
 // k8s-specific list of clouds to be absent from any more, only whether the ONE
 // provider client speaks Kubernetes.
 func TestAMachineOnlyCloudContributesNoClusters(t *testing.T) {
-	machineOnly, err := NewMachineClient("Hetzner", "id", "secret", "fsn1")
+	machineOnly, err := NewMachineClient(Credential{Provider: "Hetzner", KeyID: "id", Secret: "secret", Region: "fsn1"})
 	if err != nil {
 		t.Skipf("hetzner client unavailable: %v", err)
 	}
 	if _, ok := kubernetesFor(machineOnly); ok {
 		t.Error("Hetzner reported a Kubernetes face it does not have")
 	}
-	do, err := NewMachineClient(providerDigitalOcean, "", "tok", "")
+	do, err := NewMachineClient(Credential{Provider: providerDigitalOcean, Secret: "tok"})
 	if err != nil {
 		t.Fatalf("digitalocean client: %v", err)
 	}
@@ -306,5 +307,53 @@ func TestNoRegistrationFallsBackToTheSingleToken(t *testing.T) {
 		t.Errorf("no token and no registration should yield no accounts, got %d", len(got))
 	} else if tok != "" && len(got) != 1 {
 		t.Errorf("a configured token should yield exactly one account, got %d", len(got))
+	}
+}
+
+// Under a carrier, a cloud that cannot use it is REFUSED rather than falling back
+// to holding the token itself. Silently bypassing the carrier is the one outcome
+// worse than the cloud being unavailable: the credential is back in this process,
+// which is the thing the carrier exists to prevent.
+func TestACloudThatCannotBeCarriedIsRefused(t *testing.T) {
+	t.Cleanup(func() { RegisterCarrier(nil) })
+	RegisterCarrier(func(Credential) (*http.Client, error) { return &http.Client{}, nil })
+
+	// AWS builds its own transport, so it cannot be carried yet.
+	if _, err := NewMachineClient(Credential{Provider: "AWS", KeyID: "k", Secret: "s", Region: "us-east-1"}); err == nil {
+		t.Fatal("AWS was built under a carrier it cannot use — the token would be held here")
+	} else if !strings.Contains(err.Error(), "credential directly") {
+		t.Errorf("refusal does not say why: %v", err)
+	}
+	// DigitalOcean and Hetzner take our transport, so they are carried.
+	for _, p := range []string{providerDigitalOcean, "Hetzner"} {
+		if _, err := NewMachineClient(Credential{Provider: p}); err != nil {
+			t.Errorf("%s should be carried, got: %v", p, err)
+		}
+	}
+}
+
+// Without a carrier the same cloud builds normally — a local or single-binary run
+// holds its own tokens and is unaffected.
+func TestWithoutACarrierEveryCloudStillBuilds(t *testing.T) {
+	RegisterCarrier(nil)
+	if _, err := NewMachineClient(Credential{Provider: "AWS", KeyID: "k", Secret: "s", Region: "us-east-1"}); err != nil {
+		t.Errorf("AWS should build with no carrier registered: %v", err)
+	}
+}
+
+// A carried client carries NO token: the whole point is that the key is not here.
+func TestACarriedClientHoldsNoToken(t *testing.T) {
+	t.Cleanup(func() { RegisterCarrier(nil) })
+	var saw Credential
+	RegisterCarrier(func(c Credential) (*http.Client, error) { saw = c; return &http.Client{}, nil })
+
+	if _, err := NewMachineClient(Credential{Provider: providerDigitalOcean, Name: "prod"}); err != nil {
+		t.Fatalf("carried build: %v", err)
+	}
+	if saw.Provider != providerDigitalOcean || saw.Name != "prod" {
+		t.Errorf("the carrier was not told which account: %+v", saw)
+	}
+	if saw.Secret != "" {
+		t.Errorf("a secret reached the carrier; under egress there is none to send")
 	}
 }

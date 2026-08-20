@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -34,14 +35,22 @@ func (c MachineHetznerClient) Volumes() VolumeClientInterface {
 	return &VolumeHetznerClient{Client: c.Client, region: c.region}
 }
 
-func newMachineHetznerClient(accessKeyId string, accessKeySecret string, region string) (MachineHetznerClient, error) {
+func newMachineHetznerClient(accessKeySecret string, accessKeyId string, region string, hc *http.Client) (MachineHetznerClient, error) {
 	token := accessKeySecret
 	if token == "" {
 		token = accessKeyId
 	}
 
-	client := hcloud.NewClient(hcloud.WithToken(token))
-	return MachineHetznerClient{Client: client, region: region}, nil
+	// Options in order: the carried transport, then the token only if we hold
+	// one. Under a carrier the token is empty and egress attaches it.
+	opts := []hcloud.ClientOption{}
+	if hc != nil {
+		opts = append(opts, hcloud.WithHTTPClient(hc))
+	}
+	if token != "" {
+		opts = append(opts, hcloud.WithToken(token))
+	}
+	return MachineHetznerClient{Client: hcloud.NewClient(opts...), region: region}, nil
 }
 
 func getMachineFromHetznerServer(server *hcloud.Server) *Machine {
