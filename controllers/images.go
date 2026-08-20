@@ -41,7 +41,11 @@ func (c *ApiController) ListImages() {
 	}
 	images, err := service.ListImages(org)
 	if err != nil {
-		c.ResponseError(err.Error())
+		// The rows that answered ride along with the named gap. This is a read a
+		// caller makes while choosing what to launch, so a partial catalog that
+		// says which part is missing serves them better than either an empty list
+		// (which reads as "there are none") or a bare error (which hides the rest).
+		c.ResponseError(err.Error(), images)
 		return
 	}
 	c.ResponseOk(images)

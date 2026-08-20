@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/digitalocean/godo"
@@ -66,30 +67,63 @@ func ListImages(org string) ([]ImageInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	cli := hc.Client
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	opt := &godo.ListOptions{Page: 1, PerPage: 200}
+	return listImages(ctx, hc.Client, org)
+}
 
+// listImages folds the three catalog reads, and is where the honesty lives.
+//
+// Each read used to be guarded by `err == nil`, which threw the failure away and
+// folded it into the same empty slice an account with no images produces. An empty
+// catalog is a legitimate answer, so it can never also be how a failure is
+// reported: when the credential stopped working every read failed at once and the
+// surface answered "there are no operating systems" with a 200, which is a
+// different and much more convincing lie than an error.
+//
+// A read that FAILS is not a read that returned nothing, so a failed source is
+// named instead of silently dropped. The rows that DID answer are returned
+// ALONGSIDE that error rather than discarded — the caller renders a partial
+// catalog with the gap named, which beats both a lie and a blank page. Sources are
+// named by what they hold, not by the upstream that serves them: provider identity
+// stays internal on this surface (see the file header).
+func listImages(ctx context.Context, cli *godo.Client, org string) ([]ImageInfo, error) {
+	opt := &godo.ListOptions{Page: 1, PerPage: 200}
 	out := []ImageInfo{}
-	if dist, _, err := cli.Images.ListDistribution(ctx, opt); err == nil {
-		for _, i := range dist {
-			out = append(out, imageInfo(i, "distribution"))
-		}
+	var missing []string
+
+	// A failed read leaves its slice nil, so each range below is a no-op and the
+	// fold carries on with whatever the other sources returned.
+	dist, _, derr := cli.Images.ListDistribution(ctx, opt)
+	if derr != nil {
+		missing = append(missing, "distributions")
 	}
-	if apps, _, err := cli.Images.ListApplication(ctx, opt); err == nil {
-		for _, i := range apps {
-			out = append(out, imageInfo(i, "application"))
-		}
+	for _, i := range dist {
+		out = append(out, imageInfo(i, "distribution"))
 	}
+
+	apps, _, aerr := cli.Images.ListApplication(ctx, opt)
+	if aerr != nil {
+		missing = append(missing, "applications")
+	}
+	for _, i := range apps {
+		out = append(out, imageInfo(i, "application"))
+	}
+
 	// Org-scoped custom images: user images carrying this org's tag.
-	if user, _, err := cli.Images.ListUser(ctx, opt); err == nil {
-		tag := orgTag(org)
-		for _, i := range user {
-			if hasTag(i.Tags, tag) {
-				out = append(out, imageInfo(i, "custom"))
-			}
+	user, _, uerr := cli.Images.ListUser(ctx, opt)
+	if uerr != nil {
+		missing = append(missing, "custom images")
+	}
+	tag := orgTag(org)
+	for _, i := range user {
+		if hasTag(i.Tags, tag) {
+			out = append(out, imageInfo(i, "custom"))
 		}
+	}
+
+	if len(missing) > 0 {
+		return out, fmt.Errorf("image catalog unavailable: no answer for %s", strings.Join(missing, ", "))
 	}
 	return out, nil
 }
