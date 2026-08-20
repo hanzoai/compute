@@ -153,14 +153,14 @@ func TestMeterMachines_AttributesProjectViaActor(t *testing.T) {
 func TestHourStamp_IdempotencyBucket(t *testing.T) {
 	base := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
 	// Same hour -> same stamp (debit dedups).
-	if a, b := hourStamp(base), hourStamp(base.Add(59*time.Minute)); a != b {
+	if a, b := HourStamp(base), HourStamp(base.Add(59*time.Minute)); a != b {
 		t.Fatalf("same-hour stamps differ: %q vs %q", a, b)
 	}
 	// Next hour -> different stamp (a new hour is a new billable unit).
-	if a, b := hourStamp(base), hourStamp(base.Add(time.Hour)); a == b {
+	if a, b := HourStamp(base), HourStamp(base.Add(time.Hour)); a == b {
 		t.Fatalf("cross-hour stamps equal: %q", a)
 	}
-	if got := hourStamp(base); got != "2026070215" {
+	if got := HourStamp(base); got != "2026070215" {
 		t.Fatalf("hourStamp = %q, want 2026070215", got)
 	}
 }
@@ -330,48 +330,56 @@ func TestMeterMachines_SkipsLaunchHour(t *testing.T) {
 
 func TestCreatedInHour(t *testing.T) {
 	stamp := "2026070215"
-	if !createdInHour("2026-07-02T15:05:00Z", stamp) {
+	if !CreatedInHour("2026-07-02T15:05:00Z", stamp) {
 		t.Fatal("same-hour create time must be in-hour")
 	}
-	if createdInHour("2026-07-02T14:59:00Z", stamp) {
+	if CreatedInHour("2026-07-02T14:59:00Z", stamp) {
 		t.Fatal("previous-hour create time must NOT be in-hour")
 	}
-	if createdInHour("2026-07-02T16:00:00Z", stamp) {
+	if CreatedInHour("2026-07-02T16:00:00Z", stamp) {
 		t.Fatal("next-hour create time must NOT be in-hour")
 	}
 	// Empty / unparseable -> never in-hour (metered normally, never wrongly skipped).
-	if createdInHour("", stamp) {
+	if CreatedInHour("", stamp) {
 		t.Fatal("empty create time must not skip metering")
 	}
-	if createdInHour("not-a-time", stamp) {
+	if CreatedInHour("not-a-time", stamp) {
 		t.Fatal("unparseable create time must not skip metering")
 	}
 }
 
 // An untagged machine (no hanzo-org tag) is skipped, never billed to a wrong
-// tenant; an unknown-size machine is skipped; a $0 size is not debited.
-func TestMeterMachines_SkipsUnattributableUnknownAndFree(t *testing.T) {
+// tenant; a machine whose price cannot be RESOLVED is skipped and counted as
+// skipped, whether the slug is missing from the catalog or the catalog priced it
+// at zero.
+//
+// The zero case is the one worth stating: the upstream publishes no $0 size, so a
+// zero is an unresolved price wearing a free-tier costume. This used to `continue`
+// without incrementing skipped — "a $0 size is free" — which meant a machine
+// running on an unpriced slug was invisible in both the ledger AND the sweep
+// counters. Now it is a loud skip, and the count says so.
+func TestMeterMachines_SkipsUnattributableAndUnpriceable(t *testing.T) {
 	url, recs, mu := fakeCommerce(t)
 	t.Setenv("COMMERCE_URL", url)
 	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 	seedCatalog(t,
 		SizeInfo{Slug: "paid", PriceHourly: 0.05, Currency: "USD"},
-		SizeInfo{Slug: "free", PriceHourly: 0.0, Currency: "USD"},
+		SizeInfo{Slug: "zero", PriceHourly: 0.0, Currency: "USD"},
 	)
 
 	now := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
 	machines := []*Machine{
 		{Id: "1", Size: "paid", Tag: "foo,bar"},           // no org tag -> skip
-		{Id: "2", Size: "unknown", Tag: "hanzo-org:acme"}, // size not in catalog -> skip
-		{Id: "3", Size: "free", Tag: "hanzo-org:acme"},    // $0 -> not debited (not skipped-count)
+		{Id: "2", Size: "unknown", Tag: "hanzo-org:acme"}, // not in catalog -> skip
+		{Id: "3", Size: "zero", Tag: "hanzo-org:acme"},    // priced at zero -> skip, never a $0 debit
 		{Id: "4", Size: "paid", Tag: "hanzo-org:acme"},    // the only billable one
 	}
 	metered, skipped := meterMachines(context.Background(), machines, now)
 	if metered != 1 {
 		t.Fatalf("metered = %d, want 1 (only the paid+tagged machine)", metered)
 	}
-	if skipped != 2 { // untagged + unknown-size (free is neither metered nor skipped)
-		t.Fatalf("skipped = %d, want 2", skipped)
+	if skipped != 3 { // untagged + not-in-catalog + priced-at-zero
+		t.Fatalf("skipped = %d, want 3", skipped)
 	}
 	mu.Lock()
 	defer mu.Unlock()

@@ -100,7 +100,7 @@ func meterFleetLine(ctx context.Context, org, project, tier, label string, cents
 // next (the cursor is only advanced on a successful read). Single-flight per
 // (provider, day) via BillingLease, so replicas never double-bill.
 func CollectBYOCCosts(ctx context.Context, now time.Time) {
-	if !service.MeteringConfigured() {
+	if !service.Billable(ctx, "byoc.daily") {
 		return
 	}
 	ctx, span := telemetry.Span(ctx, "billing.collect.byoc", "", "")
@@ -189,7 +189,7 @@ func meterWorkerDevice(ctx context.Context, w *object.FleetWorker, now time.Time
 // than once a month — the per-(worker, month) lease makes each worker's fee
 // exactly-once.
 func MeterConnectedDevices(ctx context.Context, now time.Time) {
-	if !service.MeteringConfigured() {
+	if !service.Billable(ctx, "device.monthly") {
 		return
 	}
 	ctx, span := telemetry.Span(ctx, "billing.meter.devices", "", "")
@@ -212,7 +212,7 @@ func MeterConnectedDevices(ctx context.Context, now time.Time) {
 // month via the same lease the monthly sweep uses), so a box connected mid-month is
 // billed at once, and the monthly sweep never double-bills it.
 func BillWorkerOnConnect(ctx context.Context, w *object.FleetWorker) {
-	if !service.MeteringConfigured() {
+	if !service.Billable(ctx, "device.connect") {
 		return
 	}
 	meterWorkerDevice(ctx, w, time.Now())

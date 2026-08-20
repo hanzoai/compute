@@ -22,7 +22,6 @@ import (
 
 	"github.com/digitalocean/godo"
 	"github.com/hanzoai/money"
-	"golang.org/x/oauth2"
 )
 
 // doCostReader reads a BYOC DigitalOcean account's spend via the customer balance
@@ -45,9 +44,7 @@ func newDOCostReader(clientId, clientSecret string) (CloudCostReader, error) {
 	if token == "" {
 		return nil, ErrCostUnavailable
 	}
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	client := godo.NewClient(oauth2.NewClient(context.Background(), ts))
-	return &doCostReader{client: client}, nil
+	return &doCostReader{client: newDOClient(token)}, nil
 }
 
 // MonthToDateCents reads the account's month-to-date usage. The balance endpoint is

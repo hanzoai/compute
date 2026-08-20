@@ -31,6 +31,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,7 +40,6 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/commerce/metering"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
@@ -384,7 +384,7 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 		c.ResponseError("nodePool.count must be at least 1")
 		return
 	}
-	cluster, err := service.CreateOrgKubernetesCluster(org, &spec)
+	cluster, err := service.CreateOrgKubernetesCluster(org, c.resolveComputeProject(""), &spec, object.RecordSeedPool)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -408,7 +408,7 @@ func (c *ApiController) DeleteComputeKubernetesCluster() {
 		return
 	}
 	id := c.Ctx.Param("id")
-	if err := service.DeleteOrgKubernetesCluster(org, id); err != nil {
+	if err := service.DeleteOrgKubernetesCluster(org, id, object.ForgetClusterPools); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
@@ -495,43 +495,78 @@ func batchMemberName(name string, i int) string {
 	return fmt.Sprintf("%s-%03d", name, i)
 }
 
+// mintMachineName names a machine whose caller did not name it.
+//
+// A droplet MUST have a name — DigitalOcean answers 422 "Droplet must have a
+// name" without one. The BATCH path has always refused an empty name; the single
+// path passed it straight through to the provider, so every launch that omitted
+// one failed at the far end with a provider error rather than here with ours.
+// Tabs is exactly that caller: it opens a scratch terminal and has no name to
+// give, so its button failed on every click.
+//
+// Naming a throwaway is not the caller's job, so the server does it. The kind
+// says what it is, and four random bytes keep two clicks in the same second
+// apart. Lowercased, and anything a hostname will not carry becomes a dash —
+// which is the intersection of what a droplet name and a hostname both allow.
+func mintMachineName(kind string) string {
+	k := strings.ToLower(strings.TrimSpace(kind))
+	if k == "" {
+		k = "machine"
+	}
+	k = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, k)
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Never fail a launch over a name. The clock is unique enough for the
+		// only case this can happen in, which is the entropy pool being unusable.
+		return fmt.Sprintf("%s-%d", k, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%x", k, b)
+}
+
 // launchMetered is the ONE metered launch shared by the single and batch launch
-// paths: authorize the org for the first hour of si, provision + bootstrap via
-// LaunchOrgMachine, then debit that launch hour. Fail-closed — an unknown or
+// paths: authorize the org for the first hour of the size, provision + bootstrap
+// via LaunchOrgMachine, then debit that launch hour. Fail-closed — an unknown or
 // insufficient balance launches nothing and spends nothing. The caller sets the
 // spec's kind (service.SetKind) before calling; launchMetered is kind-agnostic.
 // Every SUBSEQUENT running hour is debited by service.MeterRunningMachines (the
 // hourly ticker) on this SAME commerce path; the launch owns the launch hour and
 // the sweep skips a machine created in the current clock hour, so the hour is
-// never double-billed. A metering write failure never fails the launch — the
-// machine exists and the ticker/reconciler reconciles.
+// never double-billed.
+//
+// It composes the same three primitives every other provision path uses
+// (service.HourlyCents → AuthorizeCompute → RecordCompute), so a machine, a node
+// pool and a cluster are priced by one rule and gated by one rule.
+//
+// A metering WRITE failure does not fail the launch — the machine exists, and
+// refusing to return it would leave the customer paying for something they were
+// told they did not get. It is logged loudly instead: nothing reconciles it.
 func launchMetered(ctx context.Context, org, project string, spec *service.CreateMachineSpec, si *service.SizeInfo) (*service.Machine, error) {
-	meter := service.NewMeteringClient(org)
-	firstHourCents := service.PriceToCents(si.PriceHourly)
-	if err := meter.Authorize(ctx, metering.AuthInput{User: org, Actor: org, Org: org, Currency: "usd", AmountCents: firstHourCents}); err != nil {
-		if err == metering.ErrInsufficientBalance {
-			return nil, fmt.Errorf("insufficient balance to launch machine")
-		}
-		return nil, fmt.Errorf("billing authorization failed: %v", err)
-	}
-	machine, err := service.LaunchOrgMachine(org, project, spec)
+	firstHourCents, err := service.RateOf(si)
 	if err != nil {
 		return nil, err
 	}
-	// Roll a launched event into the analytics datastore (best-effort; never
-	// blocks or fails the launch) — the analytical mirror of the commerce debit.
-	service.EmitCompute(org, service.ComputeLaunched, machine, firstHourCents)
-	_, _ = meter.Record(ctx, metering.Usage{
-		User:        org,
-		Actor:       org,
-		Org:         org,
-		Currency:    "usd",
-		AmountCents: firstHourCents,
-		Provider:    "compute",
-		Model:       spec.InstanceType,
-		Status:      "launched",
-		RequestID:   machine.Id,
+	var machine *service.Machine
+	// A droplet has one fixed size and does not grow on its own, so the ceiling
+	// the org is authorized for and the hour it is charged are the same number.
+	err = service.Provision(ctx, org, project, firstHourCents, firstHourCents, spec.InstanceType, func() (string, error) {
+		m, err := service.LaunchOrgMachine(org, project, spec)
+		if err != nil {
+			return "", err
+		}
+		machine = m
+		// Roll a launched event into the analytics datastore (best-effort; never
+		// blocks or fails the launch) — the analytical mirror of the commerce debit.
+		service.EmitCompute(org, service.ComputeLaunched, m, firstHourCents)
+		return m.Id, nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	return machine, nil
 }
 
@@ -556,6 +591,13 @@ func (c *ApiController) LaunchComputeMachine() {
 	size := strings.TrimSpace(req.Size)
 	if size == "" {
 		size = strings.TrimSpace(req.InstanceType)
+	}
+	if size == "" {
+		// A launcher with no size picker — the tabs "New cloud machine" button, a
+		// bare CLI launch — still gets a machine. This is the same default the DO
+		// service falls back to (service/digitalocean.go), so the quote the handler
+		// computes and the droplet the service creates name one size, not two.
+		size = service.DefaultLaunchSize
 	}
 	if size == "" {
 		c.ResponseError("size is required")
@@ -636,6 +678,9 @@ func (c *ApiController) LaunchComputeMachine() {
 	// Single: count<=1 keeps today's shape. The outer Name shadows the embedded
 	// spec's Name in JSON, so set it explicitly.
 	spec := base
+	if name == "" {
+		name = mintMachineName(req.Kind)
+	}
 	spec.Name = name
 	machine, err := launchMetered(ctx, org, project, &spec, si)
 	if err != nil {

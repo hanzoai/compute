@@ -12,27 +12,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// node_pool.go serves a node pool's lifecycle, and every handler here takes its
+// tenant from ONE place: resolveComputeOrg, the same principal rule the machine
+// and cluster surfaces run.
+//
+// It used to take it from two. The authorization filter derives the object's
+// owner from `?id=` or the request BODY, while these handlers read
+// `?owner=` — so `POST /v1/create-node-pool?owner=hanzo` with a body naming
+// `acme` cleared authorization against acme and then provisioned against hanzo's
+// cloud credentials, hanzo's balance and hanzo's invoice. A tenant read from a
+// different field than the one authorization judged is not a second opinion, it
+// is a house account.
 package controllers
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
 )
 
+// poolId resolves a request into the fully-qualified `owner/name` node-pool id it
+// addresses: the OWNER is always the caller's own org and the NAME is whatever
+// the request named. A client may still send the historical `owner/name` form —
+// only its name half is read, so an id naming another org addresses nothing but
+// the caller's own pool of that name.
+//
+// It is the node-pool twin of `machine` (agent_binding.go): the id a caller can
+// build is always scoped to its own org.
+func poolId(org, id string) string {
+	name := strings.TrimSpace(id)
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	if org == "" || name == "" {
+		return ""
+	}
+	return util.GetIdFromOwnerAndName(org, name)
+}
+
 // GetNodePools
 // @Title GetNodePools
 // @Tag NodePool API
 // @Description get all node pools
-// @Param   owner     query    string  true        "The owner"
 // @Param   pageSize     query    string  false        "The size of each page"
 // @Param   p     query    string  false        "The number of the page"
 // @Success 200 {object} object.NodePool The Response object
 // @router /get-node-pools [get]
 func (c *ApiController) GetNodePools() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	limit := c.Ctx.Query("pageSize")
 	page := c.Ctx.Query("p")
 	field := c.Ctx.Query("field")
@@ -81,7 +115,11 @@ func (c *ApiController) GetNodePools() {
 // @Success 200 {object} object.NodePool The Response object
 // @router /get-node-pool [get]
 func (c *ApiController) GetNodePool() {
-	id := c.Ctx.Query("id")
+	id := poolId(c.resolveComputeOrg(), c.Ctx.Query("id"))
+	if id == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 
 	pool, err := object.GetNodePool(id)
 	if err != nil {
@@ -96,19 +134,22 @@ func (c *ApiController) GetNodePool() {
 // @Title CreateNodePool
 // @Tag NodePool API
 // @Description create a new node pool in DOKS
-// @Param   owner     query    string  true  "The owner"
 // @Param   provider  query    string  true  "The provider name"
 // @Param   clusterId query    string  false "The DOKS cluster ID (optional, uses provider default)"
 // @Param   body      body     service.CreateNodePoolSpec  true  "The spec for the node pool"
 // @Success 200 {object} object.NodePool The Response object
 // @router /create-node-pool [post]
 func (c *ApiController) CreateNodePool() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	provider := c.Ctx.Query("provider")
 	clusterID := c.Ctx.Query("clusterId")
 
-	if owner == "" || provider == "" {
-		c.ResponseError("owner and provider query parameters are required")
+	if provider == "" {
+		c.ResponseError("provider query parameter is required")
 		return
 	}
 
@@ -137,7 +178,11 @@ func (c *ApiController) CreateNodePool() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-node-pool [post]
 func (c *ApiController) UpdateNodePool() {
-	id := c.Ctx.Query("id")
+	id := poolId(c.resolveComputeOrg(), c.Ctx.Query("id"))
+	if id == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 
 	var pool object.NodePool
 	err := json.Unmarshal(c.Ctx.Body(), &pool)
@@ -158,12 +203,20 @@ func (c *ApiController) UpdateNodePool() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /delete-node-pool [post]
 func (c *ApiController) DeleteNodePool() {
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+
 	var pool object.NodePool
 	err := json.Unmarshal(c.Ctx.Body(), &pool)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	// The body names WHICH pool; it never names WHOSE.
+	pool.Owner = owner
 
 	c.Data["json"] = wrapActionResponse(object.DeleteNodePoolCloud(&pool))
 	c.ServeJSON()
@@ -173,7 +226,6 @@ func (c *ApiController) DeleteNodePool() {
 // @Title ScaleNodePool
 // @Tag NodePool API
 // @Description quick-scale a node pool (just count)
-// @Param   owner     query    string  true  "The owner"
 // @Param   provider  query    string  true  "The provider name"
 // @Param   clusterId query    string  false "The DOKS cluster ID"
 // @Param   poolId    query    string  true  "The DOKS node pool ID"
@@ -181,14 +233,18 @@ func (c *ApiController) DeleteNodePool() {
 // @Success 200 {object} object.NodePool The Response object
 // @router /scale-node-pool [post]
 func (c *ApiController) ScaleNodePool() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	provider := c.Ctx.Query("provider")
 	clusterID := c.Ctx.Query("clusterId")
 	poolID := c.Ctx.Query("poolId")
 	countStr := c.Ctx.Query("count")
 
-	if owner == "" || provider == "" || poolID == "" || countStr == "" {
-		c.ResponseError("owner, provider, poolId, and count query parameters are required")
+	if provider == "" || poolID == "" || countStr == "" {
+		c.ResponseError("provider, poolId, and count query parameters are required")
 		return
 	}
 

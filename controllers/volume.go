@@ -12,6 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// volume.go serves a volume's lifecycle, and every handler here takes its tenant
+// from ONE place: resolveComputeOrg, the same principal rule the node-pool,
+// machine and cluster surfaces run.
+//
+// It used to take it from two. The authorization filter derives the object's
+// owner from `?id=` or the request BODY, while these handlers read `?owner=` — so
+// `POST /v1/create-volume?owner=victim` with a body naming the caller cleared
+// authorization against the caller and then provisioned against the victim's
+// cloud credentials, onto the victim's invoice. The reads had the same split by a
+// different field: authorization keys a GET on `?id=`, which a caller could point
+// at its own org while `?owner=` pointed the handler at another's.
 package controllers
 
 import (
@@ -25,11 +36,14 @@ import (
 // @Title GetVolumes
 // @Tag Volume API
 // @Description get all volumes for an owner
-// @Param   owner  query  string  true  "The owner"
 // @Success 200 {array} object.Volume
 // @router /get-volumes [get]
 func (c *ApiController) GetVolumes() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	volumes, err := object.GetVolumes(owner)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -42,12 +56,16 @@ func (c *ApiController) GetVolumes() {
 // @Title GetVolume
 // @Tag Volume API
 // @Description get a single volume
-// @Param   owner  query  string  true  "The owner"
 // @Param   name   query  string  true  "The volume name"
 // @Success 200 {object} object.Volume
 // @router /get-volume [get]
 func (c *ApiController) GetVolume() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	// The query names WHICH volume; it never names WHOSE.
 	name := c.Ctx.Query("name")
 
 	volume, err := object.GetVolume(owner, name)
@@ -62,17 +80,19 @@ func (c *ApiController) GetVolume() {
 // @Title CreateVolume
 // @Tag Volume API
 // @Description create a block storage volume via a provider
-// @Param   owner     query  string  true  "The owner"
 // @Param   provider  query  string  true  "The provider name"
 // @Param   body      body   service.CreateVolumeSpec  true  "The volume spec"
 // @Success 200 {object} object.Volume
 // @router /create-volume [post]
 func (c *ApiController) CreateVolume() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	providerName := c.Ctx.Query("provider")
-
-	if owner == "" || providerName == "" {
-		c.ResponseError("owner and provider query parameters are required")
+	if providerName == "" {
+		c.ResponseError("provider query parameter is required")
 		return
 	}
 
@@ -96,13 +116,16 @@ func (c *ApiController) CreateVolume() {
 // @Title DeleteVolume
 // @Tag Volume API
 // @Description delete a volume
-// @Param   owner     query  string  true  "The owner"
 // @Param   provider  query  string  true  "The provider name"
 // @Param   name      query  string  true  "The volume cloud ID"
 // @Success 200 {object} controllers.Response
 // @router /delete-volume [post]
 func (c *ApiController) DeleteVolume() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	providerName := c.Ctx.Query("provider")
 	name := c.Ctx.Query("name")
 
@@ -122,7 +145,11 @@ func (c *ApiController) DeleteVolume() {
 // @Description attach a volume to a machine
 // @router /attach-volume [post]
 func (c *ApiController) AttachVolume() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	providerName := c.Ctx.Query("provider")
 	volumeName := c.Ctx.Query("volume")
 	machineName := c.Ctx.Query("machine")
@@ -143,7 +170,11 @@ func (c *ApiController) AttachVolume() {
 // @Description detach a volume from its machine
 // @router /detach-volume [post]
 func (c *ApiController) DetachVolume() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	providerName := c.Ctx.Query("provider")
 	volumeName := c.Ctx.Query("volume")
 
@@ -163,7 +194,11 @@ func (c *ApiController) DetachVolume() {
 // @Description resize a volume
 // @router /resize-volume [post]
 func (c *ApiController) ResizeVolume() {
-	owner := c.Ctx.Query("owner")
+	owner := c.resolveComputeOrg()
+	if owner == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
 	providerName := c.Ctx.Query("provider")
 	volumeName := c.Ctx.Query("volume")
 	sizeStr := c.Ctx.Query("size")

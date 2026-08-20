@@ -32,6 +32,7 @@ import (
 
 	"github.com/digitalocean/godo"
 	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/visor/logs"
 )
 
 // orgTagKey/orgTag namespace droplets by the Hanzo org that owns them. Per-org
@@ -71,7 +72,51 @@ func newHouseDOClient() (MachineDigitalOceanClient, error) {
 
 // ComputeConfigured reports whether the house DO token is present, so callers
 // can return a clean 503 instead of a cryptic client error.
+//
+// It answers "is a credential SET", which is a different question from "does the
+// credential WORK" — see ComputeReachable. A revoked token is still a non-empty
+// string, so this stays true through a revocation and every fallback written for
+// the unconfigured case is dead code exactly when it is needed.
 func ComputeConfigured() bool { return houseDOToken() != "" }
+
+// ComputeReachable proves the house credential actually works, by spending one
+// authenticated round trip on it rather than inspecting its length.
+//
+// It exists because presence is not reachability. `token != ""` cannot tell a
+// live token from a revoked one, so every caller that gated on ComputeConfigured
+// took the configured branch and failed INSIDE it — reporting zeros that read as
+// real data instead of "not connected". The hourly money sweep is where that is
+// most expensive, so the sweep asks this question before it commits to an hour.
+//
+// The two answers a caller must tell apart:
+//
+//	nil   — either the house account has nothing to ask (no token configured, so
+//	        there are no house resources at all and an empty answer is the TRUE
+//	        one), or the provider answered. Both mean: proceed.
+//	error — a credential IS configured and did not work. Nothing about the house
+//	        account can be known this hour.
+//
+// That distinction is the whole point and it is the same one housePools already
+// draws one level down: "there is nothing to ask" and "the answer did not come
+// back" are different facts, and only the second is an error.
+//
+// Account.Get is the cheapest call that proves the credential itself: O(1), no
+// paging, and it is what a revoked token 401s on. The client is built through the
+// one constructor, so this inherits the 30s bound every other DigitalOcean call
+// gets and cannot wedge the caller.
+func ComputeReachable(ctx context.Context) error {
+	if !ComputeConfigured() {
+		return nil // nothing to ask
+	}
+	client, err := newHouseDOClient()
+	if err != nil {
+		return err
+	}
+	if _, _, err := client.Client.Account.Get(ctx); err != nil {
+		return fmt.Errorf("house DigitalOcean account unreachable: %w", err)
+	}
+	return nil
+}
 
 // ---- Catalog types (resellable) ----
 
@@ -86,6 +131,13 @@ type GPUSpec struct {
 // SizeInfo is a resellable compute size. Only Hanzo's resale price is exposed —
 // the wholesale cost and the upstream provider are never surfaced (brand policy;
 // margin stays private). Markup is applied once in pricing.go.
+// DefaultLaunchSize is the size a launch gets when the caller names none — the
+// tabs "New cloud machine" button, a bare CLI launch. It is a real DO slug so the
+// quote the launch handler computes and the droplet the provider creates agree on
+// one size. A tab runs `hanzo link` and a terminal; this is the smallest tier that
+// comfortably does that.
+const DefaultLaunchSize = "s-2vcpu-4gb"
+
 type SizeInfo struct {
 	Slug         string   `json:"slug"`
 	Vcpus        int      `json:"vcpus"`
@@ -334,17 +386,90 @@ func ListOrgKubernetesNodes(org string) ([]*Machine, error) {
 	return kubernetesNodeMachinesByTag(context.Background(), client.Client, orgTag(org))
 }
 
-// newHouseDOKSClient builds a DOKS client on Hanzo's house token for ACCOUNT-level
-// cluster operations (list/get/create/delete), which address a cluster by id rather
-// than a fixed ClusterID — so the ClusterID field is left empty. It is the cluster
-// analogue of newHouseDOClient; per-org isolation is enforced by the callers below
-// via the hanzo-org tag, never by this client.
-func newHouseDOKSClient() (*DOKSClient, error) {
+// NewHouseDOKSClient builds a DOKS client on Hanzo's house token. It is the
+// cluster analogue of newHouseDOClient; per-org isolation is enforced by the
+// callers via the hanzo-org tag, never by this client.
+//
+// clusterID is empty for ACCOUNT-level operations (list/get/create/delete), which
+// address a cluster by id, and set for the pool operations bound to one cluster.
+func NewHouseDOKSClient(clusterID string) (*DOKSClient, error) {
 	client, err := newHouseDOClient()
 	if err != nil {
 		return nil, err
 	}
-	return &DOKSClient{Client: client.Client}, nil
+	return &DOKSClient{Client: client.Client, ClusterID: clusterID}, nil
+}
+
+// HousePool is ONE node pool in Hanzo's house account as the PROVIDER reports it
+// right now — which cluster it belongs to, which org owns that cluster, its node
+// slug, and how many nodes it is ACTUALLY running.
+//
+// This is the billable unit of a house cluster, and the provider is its author.
+// The stored row is a cache of it: useful for the rate the org was authorized at
+// and the project it belongs to, and authoritative for neither existence nor
+// count.
+type HousePool struct {
+	// Org owns the cluster, recovered from its hanzo-org tag. Empty means the
+	// cluster is unattributable and nothing may be billed for it.
+	Org string
+	// ClusterID and PoolID are the upstream identity — the pair no customer can
+	// rename, delete, or collide with another tenant's.
+	ClusterID string
+	PoolID    string
+	// Name is the pool's upstream name. It addresses the cached row; it never
+	// identifies the pool.
+	Name string
+	Size string
+	// Nodes is the LIVE node count, so an autoscaled pool bills what it grew to.
+	Nodes int
+	// Created is the owning cluster's creation time (RFC3339), the fallback
+	// launch-hour marker for a pool with no stored row.
+	Created string
+}
+
+// ListHousePools returns every node pool of every cluster in Hanzo's house
+// account, with the org that owns it and its LIVE node count — the authoritative
+// answer to "what is this account running, for whom, and how much of it".
+//
+// It is the node-pool analogue of ListRunningHouseMachines and shares the ONE
+// cluster enumeration (listClustersFull) with the cluster and node listers, so a
+// pool's identity is sourced identically wherever it surfaces.
+//
+// A cluster with no hanzo-org tag yields pools with an empty Org: they are
+// returned rather than dropped, so the sweep can report them as unattributable
+// instead of silently running an untagged cluster for free.
+func ListHousePools(ctx context.Context) ([]HousePool, error) {
+	client, err := newHouseDOClient()
+	if err != nil {
+		return nil, err
+	}
+	clusters, err := listClustersFull(ctx, client.Client)
+	if err != nil {
+		return nil, err
+	}
+	var out []HousePool
+	for _, gc := range clusters {
+		org := orgFromClusterTags(gc.Tags)
+		created := ""
+		if !gc.CreatedAt.IsZero() {
+			created = gc.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		for _, p := range poolsFromGodo(gc.NodePools) {
+			out = append(out, HousePool{
+				Org: org, ClusterID: gc.ID, PoolID: p.ID, Name: p.Name,
+				Size: p.Size, Nodes: liveNodes(p), Created: created,
+			})
+		}
+	}
+	return out, nil
+}
+
+// orgFromClusterTags recovers the owning org from a cluster's tag LIST, through
+// the SAME hanzo-org read-back the droplet path uses on its comma-joined string
+// form. One parser, so a cluster and a droplet can never disagree about who owns
+// them.
+func orgFromClusterTags(tags []string) string {
+	return orgFromTag(strings.Join(tags, ","))
 }
 
 // ListOrgKubernetesClusters returns every DOKS cluster in Hanzo's HOUSE account
@@ -366,11 +491,10 @@ func ListOrgKubernetesClusters(org string) ([]*KubernetesCluster, error) {
 			out = append(out, k)
 		}
 	}
-	// A cloud that did not answer costs its own rows, never the whole fleet.
-	// The list cannot carry that fact (callers decode an array), so it is on
-	// KubernetesBackendStatus — GET /v1/k8s/backends.
+	// A cloud that did not answer costs its own rows, never the fleet. The list
+	// cannot carry that (callers decode an array), so it is on GET /v1/k8s/backends.
 	if len(failed) > 0 {
-		fmt.Printf("visor: kubernetes backends degraded for org %s: %s\n", org, strings.Join(failed, "; "))
+		logs.Warning("kubernetes backends degraded for org %s: %s", org, strings.Join(failed, "; "))
 	}
 	return out, nil
 }
@@ -396,11 +520,48 @@ func GetOrgKubernetesCluster(org, id string) (*KubernetesClusterDetail, error) {
 	return detail, nil
 }
 
+// clusterCreator is the minimal cloud surface a metered cluster create needs. It
+// is satisfied by *DOKSClient and by a test fake, which is what makes "refused
+// requests provision NOTHING" a property a test can observe rather than a claim.
+type clusterCreator interface {
+	CreateCluster(ctx context.Context, spec *CreateClusterSpec, tags []string) (*KubernetesCluster, error)
+}
+
+// SeedPool is the node pool a cluster create provisions, in the terms the store
+// needs to make it BILLABLE. A cluster's nodes are the cluster's whole cost, and
+// the hourly sweep bills node-pool rows — so a cluster that provisions a pool and
+// writes no row is billed its first hour by the provision path and then runs free
+// forever. That is what this type exists to prevent.
+type SeedPool struct {
+	Org       string
+	Project   string
+	ClusterID string
+	Name      string
+	Size      string
+	Count     int
+	CentsHour int64
+}
+
+// recordSeed / forgetCluster are the node-pool store as the cluster provision path
+// sees it: where a metered create writes its seed pool, and where a teardown
+// clears what it wrote. They are plain functions because each call site depends on
+// exactly one of them, and they are PARAMETERS because service cannot import
+// object (object imports service) — handing the store in at the composition root
+// is also what lets a test fake observe "a create wrote its billable row" and
+// "a delete stopped the meter" instead of taking either on faith.
+type recordSeed func(SeedPool) error
+
+type forgetCluster func(org, clusterID string) error
+
 // CreateOrgKubernetesCluster provisions a DOKS cluster in Hanzo's house account for
 // org, stamping it managed-by + hanzo-org:<org> so it associates to the tenant
 // exactly like a droplet — which is what makes it visible to that org's cluster and
 // node listers (and invisible to every other org).
-func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
+//
+// HOUSE ACCOUNT means Hanzo pays the upstream bill for every node in the seed
+// pool, so this goes through the money gate exactly like a droplet launch — and
+// records the pool it provisioned, so the sweep keeps billing it.
+func CreateOrgKubernetesCluster(org, project string, spec *CreateClusterSpec, record recordSeed) (*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
@@ -411,8 +572,7 @@ func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*Kubernete
 	if err != nil {
 		return nil, err
 	}
-	tags := []string{"managed-by:hanzo-visor", orgTag(org)}
-	kc, err := client.CreateCluster(context.Background(), spec, tags)
+	kc, err := createClusterMetered(context.Background(), client, record, org, project, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -422,11 +582,65 @@ func CreateOrgKubernetesCluster(org string, spec *CreateClusterSpec) (*Kubernete
 	return kc, nil
 }
 
+// createClusterMetered is the ONE metered cluster provision: price the seed pool
+// from the resale catalog, authorize the org for its first hour at that price,
+// provision, PERSIST the pool as a billable row, then record the first hour.
+// Fail-closed on the balance AND on the price — an org that cannot be authorized
+// and a size that cannot be priced both provision nothing.
+//
+// The charge is the seed pool's FULL first hour (hourly × node count), read from
+// the same seedPoolCount the upstream request is built with, so the quantity
+// authorized is the quantity provisioned.
+//
+// Hour one is this function's. EVERY HOUR AFTER IS THE SWEEP'S, and the sweep
+// reads node-pool rows — so the row is not bookkeeping, it IS the recurring bill.
+// Without it a cluster was gated and debited exactly once and then ran free: it
+// writes no droplet tag either, so neither meter could see it. The row is written
+// BEFORE the debit, because a debit with no row is a cluster that bills once, and
+// a row with no debit is one reconciled hour.
+func createClusterMetered(ctx context.Context, client clusterCreator, record recordSeed, org, project string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
+	count := seedPoolCount(spec)
+	hourly, err := HourlyCents(spec.NodePool.Size)
+	if err != nil {
+		return nil, err
+	}
+	var cluster *KubernetesCluster
+	// A cluster's seed pool does not autoscale — CreateClusterSpec carries no
+	// bounds — so the ceiling and the charge are the same count.
+	err = Provision(ctx, org, project, hourly*int64(count), hourly*int64(count), spec.NodePool.Size, func() (string, error) {
+		c, err := client.CreateCluster(ctx, spec, []string{"managed-by:hanzo-visor", orgTag(org)})
+		if err != nil {
+			return "", err
+		}
+		cluster = c
+		if err := record(SeedPool{
+			Org: org, Project: project, ClusterID: c.ID, Name: seedPoolName(spec),
+			Size: spec.NodePool.Size, Count: count, CentsHour: hourly,
+		}); err != nil {
+			// The cluster is up and drawing upstream cost; refusing to return it
+			// would leave the customer paying for something they were told they did
+			// not get. But an unrecorded pool is an UNBILLED pool for every hour it
+			// runs, so this is the loudest line in the file. Nothing reconciles it.
+			logs.Warning("compute metering: cluster %s (org %s) provisioned but its seed pool was NOT recorded — it will be billed for its first hour only: %v", c.ID, org, err)
+		}
+		return "cluster-" + c.ID, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cluster, nil
+}
+
 // DeleteOrgKubernetesCluster destroys a house cluster by id, but ONLY if it carries
 // the caller org's hanzo-org tag — the same isolation as GetOrgKubernetesCluster, so
 // a tenant can never delete another tenant's cluster. An already-absent cluster is a
 // no-op success (idempotent delete).
-func DeleteOrgKubernetesCluster(org, id string) error {
+//
+// The cluster's billable rows go with it. They are what the hourly sweep bills, so
+// a row outliving its cluster is not stale data — it is an invoice for nodes that
+// no longer exist. The meter is stopped even for an already-absent cluster, so a
+// retry after a partial delete still closes the bill.
+func DeleteOrgKubernetesCluster(org, id string, forget forgetCluster) error {
 	if org == "" {
 		return fmt.Errorf("org is required")
 	}
@@ -436,27 +650,138 @@ func DeleteOrgKubernetesCluster(org, id string) error {
 		return err
 	}
 	if detail == nil {
-		return nil // already gone
+		// Gone on every backend. Stop billing it, same as the metered path does
+		// for an upstream 404 — a cluster that no cloud has must not keep metering.
+		stopClusterMeter(forget, org, id)
+		return nil
+	}
+	return deleteClusterMetered(ctx, client, forget, org, id)
+}
+
+// clusterDestroyer is the minimal cloud surface a metered cluster teardown needs
+// — the mirror of clusterCreator, and satisfied by the same *DOKSClient, so
+// "a delete stops the meter" is observable against a fake exactly like
+// "a refused create provisions nothing" is.
+type clusterDestroyer interface {
+	GetCluster(ctx context.Context, id string) (*KubernetesClusterDetail, error)
+	DeleteCluster(ctx context.Context, id string) error
+}
+
+// deleteClusterMetered is the ONE metered cluster teardown: verify the cluster is
+// this org's, destroy it, then stop its meter. A cluster already absent upstream
+// still has its meter stopped, so a retry after a partial delete closes the bill.
+//
+// Clearing the rows is not tidiness. The hourly sweep bills node-pool rows, so a
+// row that outlives its cluster is an invoice for nodes that no longer exist.
+func deleteClusterMetered(ctx context.Context, client clusterDestroyer, forget forgetCluster, org, id string) error {
+	detail, err := client.GetCluster(ctx, id)
+	if err != nil {
+		if IsNotFound(err) {
+			stopClusterMeter(forget, org, id) // already gone upstream; stop billing it
+			return nil
+		}
+		return err
 	}
 	if !clusterHasTag(detail.Tags, orgTag(org)) {
 		return fmt.Errorf("cluster not found")
 	}
-	return client.DeleteCluster(ctx, id)
+	if err := client.DeleteCluster(ctx, id); err != nil {
+		return err
+	}
+	stopClusterMeter(forget, org, id)
+	return nil
 }
 
-// ListRunningHouseMachines returns every RUNNING droplet in Hanzo's house
-// account that carries a hanzo-org tag — the set the recurring hourly meter
-// debits. It lists across ALL orgs (no per-org tag filter): the org is recovered
-// per machine from its own tag, so ONE sweep meters every tenant's running
-// machines. Untagged/non-resell droplets (no hanzo-org tag) are excluded, so a
-// non-resell house droplet is never billed to a tenant. Only "Running" machines
-// are returned — a stopped droplet consumes no compute-hour.
+// stopClusterMeter drops the cluster's billable rows. A failure is loud and never
+// fails the delete — the cluster is gone either way, and the operator needs to
+// know that a row is still metering nodes that no longer run.
+func stopClusterMeter(forget forgetCluster, org, id string) {
+	if err := forget(org, id); err != nil {
+		logs.Warning("compute metering: cluster %s (org %s) deleted but its node-pool rows were NOT cleared — they will keep billing: %v", id, org, err)
+	}
+}
+
+// kubernetesAutoTags are the BARE tags DigitalOcean puts on the droplets it
+// creates as managed-Kubernetes node-pool workers. They are DO's, not ours: every
+// node pool (and the workers it creates) is automatically tagged `k8s`,
+// `k8s-worker` and `k8s:<cluster-id>`.
+//
+// Only the bare ones are listed, and that is what makes the guard safe rather
+// than merely convenient: a client's launch tags always reach DigitalOcean as
+// "key:value" (buildDropletTags formats every one of them with a colon), so a
+// customer can produce `k8s:anything` but can NEVER produce the bare `k8s`. A
+// prefix match here would hand every tenant a way to opt their own droplets out
+// of the meter.
+var kubernetesAutoTags = map[string]bool{"k8s": true, "k8s-worker": true}
+
+// isKubernetesWorker reports whether a droplet is a managed-Kubernetes node-pool
+// worker rather than a standalone resell machine.
+func isKubernetesWorker(d godo.Droplet) bool {
+	for _, t := range d.Tags {
+		if kubernetesAutoTags[t] {
+			return true
+		}
+	}
+	return false
+}
+
+// dropletHasAnyOrgTag reports whether a droplet is attributed to SOME Hanzo org —
+// the "is this a resell machine at all" question, as opposed to dropletHasOrgTag's
+// "is it THIS org's".
+func dropletHasAnyOrgTag(d godo.Droplet) bool {
+	for _, t := range d.Tags {
+		if strings.HasPrefix(t, orgTagKey+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// billableHouseDroplet reports whether a droplet in Hanzo's house account is on
+// the hourly MACHINE meter. It is the ONE answer to that question, kept pure and
+// separate from the DigitalOcean enumeration so "exactly one meter per node" is a
+// property a test can check rather than a claim about a loop.
+//
+// Three conditions, each excluding a different way of not being a billable resell
+// machine:
+//
+//   - RUNNING. A stopped droplet consumes no compute-hour.
+//
+//   - NOT a managed-Kubernetes worker. This is the one that is easy to get wrong,
+//     and getting it wrong bills the customer twice. A cluster's worker nodes ARE
+//     droplets, and DigitalOcean propagates a cluster's tags to them — hanzo-org
+//     among them, because that is the tag the cluster create stamps. So the same
+//     node is reachable by two sweeps: this one, as a droplet, and the node-pool
+//     sweep, as one node of its pool. The node-pool sweep is the meter of record
+//     for a cluster's nodes — it is the one that knows the pool, its size and its
+//     live count — so a Kubernetes worker is not a machine here.
+//
+//     Skipping it is now a property of VISOR, not of how DigitalOcean happens to
+//     tag things: the guard holds whether or not the cluster tag propagates. It
+//     used to rest on the unverified belief that worker droplets carry no
+//     hanzo-org tag, which is a claim about somebody else's product.
+//
+//   - carries a hanzo-org tag. An untagged house droplet is not a resell machine
+//     and is never billed to a tenant.
+func billableHouseDroplet(d godo.Droplet) bool {
+	if d.Status != "active" { // godo "active" == running
+		return false
+	}
+	if isKubernetesWorker(d) {
+		return false // the pool sweep bills this node, as part of its pool
+	}
+	return dropletHasAnyOrgTag(d)
+}
+
+// ListRunningHouseMachines returns every droplet in Hanzo's house account that
+// billableHouseDroplet admits — the set the recurring hourly meter debits. It
+// lists across ALL orgs (no per-org tag filter): the org is recovered per machine
+// from its own tag, so ONE sweep meters every tenant's running machines.
 func ListRunningHouseMachines() ([]*Machine, error) {
 	client, err := newHouseDOClient()
 	if err != nil {
 		return nil, err
 	}
-	orgPrefix := orgTagKey + ":"
 	var machines []*Machine
 	opt := &godo.ListOptions{Page: 1, PerPage: 200}
 	for {
@@ -465,18 +790,8 @@ func ListRunningHouseMachines() ([]*Machine, error) {
 			return nil, fmt.Errorf("list house droplets: %w", err)
 		}
 		for _, d := range droplets {
-			if d.Status != "active" { // godo "active" == running
+			if !billableHouseDroplet(d) {
 				continue
-			}
-			hasOrg := false
-			for _, t := range d.Tags {
-				if strings.HasPrefix(t, orgPrefix) {
-					hasOrg = true
-					break
-				}
-			}
-			if !hasOrg {
-				continue // not a resell machine — never bill it to a tenant
 			}
 			machines = append(machines, getMachineFromDroplet(d))
 		}

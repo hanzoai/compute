@@ -20,7 +20,6 @@ import (
 	"strconv"
 
 	"github.com/digitalocean/godo"
-	"golang.org/x/oauth2"
 )
 
 type VolumeDigitalOceanClient struct {
@@ -33,10 +32,7 @@ func newVolumeDigitalOceanClient(accessKeyId string, accessKeySecret string, reg
 	if token == "" {
 		token = accessKeyId
 	}
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	oauthClient := oauth2.NewClient(context.Background(), tokenSource)
-	client := godo.NewClient(oauthClient)
-	return &VolumeDigitalOceanClient{Client: client, region: region}, nil
+	return &VolumeDigitalOceanClient{Client: newDOClient(token), region: region}, nil
 }
 
 func getVolumeFromDOVolume(vol *godo.Volume) *Volume {

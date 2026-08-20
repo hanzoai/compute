@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/digitalocean/godo"
-	"golang.org/x/oauth2"
 )
 
 type NodeInfo struct {
@@ -71,11 +70,7 @@ func NewDOKSClient(token, clusterID string) (*DOKSClient, error) {
 		return nil, fmt.Errorf("DOKS cluster ID is required")
 	}
 
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	oauthClient := oauth2.NewClient(context.Background(), tokenSource)
-	client := godo.NewClient(oauthClient)
-
-	return &DOKSClient{Client: client, ClusterID: clusterID}, nil
+	return &DOKSClient{Client: newDOClient(token), ClusterID: clusterID}, nil
 }
 
 // newDOKSCloudClient builds a client for CLUSTER-level work, where there is no
@@ -85,9 +80,13 @@ func newDOKSCloudClient(token string) (*DOKSClient, error) {
 	if token == "" {
 		return nil, fmt.Errorf("DigitalOcean API token is required")
 	}
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	client := godo.NewClient(oauth2.NewClient(context.Background(), tokenSource))
-	return &DOKSClient{Client: client}, nil
+	// Same construction the machine plane uses, so there is one place a DO client
+	// is built and one place its transport can be changed.
+	m, err := newMachineDigitalOceanClient("", token, "")
+	if err != nil {
+		return nil, err
+	}
+	return &DOKSClient{Client: m.Client}, nil
 }
 
 // Provider satisfies KubernetesClientInterface.
@@ -255,6 +254,22 @@ func clusterFromGodo(c *godo.KubernetesCluster) *KubernetesCluster {
 		kc.Status = string(c.Status.State)
 	}
 	return kc
+}
+
+// liveNodes is how many nodes a pool ACTUALLY has, which is the number that
+// bills. Every one of them is a droplet Hanzo is paying the upstream for, so the
+// count that charges is the count that exists — not the count anybody asked for.
+//
+// The node list is preferred over the declared Count because an autoscaling pool
+// grows and shrinks without a request reaching visor: nothing writes the new
+// number down anywhere visor controls, and the nodes are the only ground truth.
+// Count is the fallback for a pool the provider returned without node detail, so
+// a missing list is never read as "free".
+func liveNodes(p *NodePool) int {
+	if n := len(p.Nodes); n > 0 {
+		return n
+	}
+	return p.Count
 }
 
 // poolsFromGodo maps DO node pools to visor NodePools via the ONE pool mapper, so
@@ -470,25 +485,38 @@ func buildClusterCreateRequest(spec *CreateClusterSpec, tags []string) *godo.Kub
 	if version == "" {
 		version = "latest"
 	}
-	poolName := strings.TrimSpace(spec.NodePool.Name)
-	if poolName == "" {
-		poolName = spec.Name + "-pool"
-	}
-	count := spec.NodePool.Count
-	if count < 1 {
-		count = 1
-	}
 	return &godo.KubernetesClusterCreateRequest{
 		Name:        spec.Name,
 		RegionSlug:  spec.Region,
 		VersionSlug: version,
 		Tags:        tags,
 		NodePools: []*godo.KubernetesNodePoolCreateRequest{{
-			Name:  poolName,
+			Name:  seedPoolName(spec),
 			Size:  spec.NodePool.Size,
-			Count: count,
+			Count: seedPoolCount(spec),
 		}},
 	}
+}
+
+// seedPoolName and seedPoolCount are the ONE answer to "what pool does this
+// cluster get". Three places need them to agree and none may restate them: the
+// upstream create request, the amount the org is authorized and debited for, and
+// the billable row the hourly sweep reads. When the count floor lived separately
+// in the request builder and in the money gate, "the quantity authorized is the
+// quantity provisioned" was a coincidence of two matching literals; now it is one
+// expression.
+func seedPoolName(spec *CreateClusterSpec) string {
+	if name := strings.TrimSpace(spec.NodePool.Name); name != "" {
+		return name
+	}
+	return spec.Name + "-pool"
+}
+
+func seedPoolCount(spec *CreateClusterSpec) int {
+	if spec.NodePool.Count < 1 {
+		return 1 // a cluster must have at least one worker
+	}
+	return spec.NodePool.Count
 }
 
 // CreateCluster provisions a DOKS cluster from spec, tagging it with tags so it

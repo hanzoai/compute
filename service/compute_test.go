@@ -92,11 +92,11 @@ func TestBuildDropletTags_AttributionUnforgeable(t *testing.T) {
 	// Simulates the post-LaunchOrgMachine state: server has set the reserved key,
 	// client tried to smuggle a second attribution token and to override the key.
 	spec := &CreateMachineSpec{Tags: map[string]string{
-		orgTagKey:  "acme",                    // authoritative (LaunchOrgMachine overwrote any client value)
-		"note":     "y,hanzo-org:victim",      // comma-smuggle a 2nd attribution token -> must be DROPPED
-		"role":     "svc:admin",               // colon-smuggle a fake key:value -> must be DROPPED
-		"team":     "platform",                // clean -> kept
-		"env:PORT": "8080",                     // env: prefix -> not a DO tag (cloud-init only)
+		orgTagKey:  "acme",               // authoritative (LaunchOrgMachine overwrote any client value)
+		"note":     "y,hanzo-org:victim", // comma-smuggle a 2nd attribution token -> must be DROPPED
+		"role":     "svc:admin",          // colon-smuggle a fake key:value -> must be DROPPED
+		"team":     "platform",           // clean -> kept
+		"env:PORT": "8080",               // env: prefix -> not a DO tag (cloud-init only)
 	}}
 	tags := buildDropletTags(spec)
 
@@ -176,5 +176,110 @@ func TestOrgIsolationPredicate(t *testing.T) {
 	}
 	if dropletHasOrgTag(&godo.Droplet{Tags: nil}, "maxpower") {
 		t.Fatal("untagged droplet must not match any org")
+	}
+}
+
+// ---- exactly one meter per node ----
+
+// A cluster's worker droplets carry the cluster's tags, hanzo-org among them, so
+// the droplet sweep can see the very same nodes the node-pool sweep bills as part
+// of their pool. Two meters on one node is a double charge every hour, forever,
+// and it is invisible from inside either sweep.
+//
+// The node-pool sweep is the meter of record for a cluster's nodes, so the
+// machine meter must not admit a Kubernetes worker — whether or not DigitalOcean
+// propagates the tag. That is what makes this a property of visor.
+func TestBillableHouseDroplet_KubernetesWorkersAreNotOnTheMachineMeter(t *testing.T) {
+	for name, tc := range map[string]struct {
+		droplet godo.Droplet
+		want    bool
+	}{
+		"a running resell droplet is billed": {
+			godo.Droplet{Status: "active", Tags: []string{"managed-by:hanzo-visor", "hanzo-org:acme"}}, true},
+		"a DOKS worker carrying the cluster's org tag is NOT": {
+			godo.Droplet{Status: "active", Tags: []string{"k8s", "k8s-worker", "k8s:cl-1", "hanzo-org:acme"}}, false},
+		"the bare k8s tag alone is enough to exclude it": {
+			godo.Droplet{Status: "active", Tags: []string{"k8s", "hanzo-org:acme"}}, false},
+		"so is k8s-worker alone": {
+			godo.Droplet{Status: "active", Tags: []string{"k8s-worker", "hanzo-org:acme"}}, false},
+		"a stopped resell droplet is not billed": {
+			godo.Droplet{Status: "off", Tags: []string{"hanzo-org:acme"}}, false},
+		"an untagged house droplet is never billed to a tenant": {
+			godo.Droplet{Status: "active", Tags: []string{"managed-by:hanzo-visor"}}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := billableHouseDroplet(tc.droplet); got != tc.want {
+				t.Fatalf("billableHouseDroplet(%v) = %v, want %v", tc.droplet.Tags, got, tc.want)
+			}
+		})
+	}
+}
+
+// The exclusion must not become an opt-out. A tenant who could put the bare `k8s`
+// tag on its own droplet would run it free forever — the guard would do the
+// hiding for them.
+//
+// It cannot: every client tag reaches DigitalOcean as "key:value", so a customer
+// asking for `k8s` gets `k8s:<something>`, which is not one of the bare automatic
+// tags DigitalOcean applies. This is why the guard matches exactly and never on a
+// prefix.
+func TestBuildDropletTags_ACustomerCannotForgeTheKubernetesExclusion(t *testing.T) {
+	spec := &CreateMachineSpec{Tags: map[string]string{
+		orgTagKey:    "acme",
+		"k8s":        "",    // bare-tag attempt
+		"k8s-worker": "",    // bare-tag attempt
+		"k8s2":       "k8s", // value-side attempt
+	}}
+	tags := buildDropletTags(spec)
+
+	for _, tg := range tags {
+		if kubernetesAutoTags[tg] {
+			t.Fatalf("a client produced the bare exclusion tag %q — its droplet would run free: %v", tg, tags)
+		}
+	}
+	// And the droplet those tags describe is still on the meter.
+	if !billableHouseDroplet(godo.Droplet{Status: "active", Tags: tags}) {
+		t.Fatalf("a customer escaped the machine meter with launch tags: %v", tags)
+	}
+}
+
+// A DigitalOcean call with no timeout does not fail — it waits for as long as the
+// socket stays open. That matters here more than usual because a provision waits
+// UNDER the org's provisioning hold, so one hung api.digitalocean.com wedges that
+// org's every subsequent provision behind a mutex nobody will release.
+//
+// Every DO surface builds through the one constructor, so the bound is one
+// statement rather than four that have to agree.
+func TestEveryDigitalOceanClientIsBounded(t *testing.T) {
+	machine, err := newMachineDigitalOceanClient("", "tok", "nyc3")
+	if err != nil {
+		t.Fatalf("machine client: %v", err)
+	}
+	volume, err := newVolumeDigitalOceanClient("", "tok", "nyc3")
+	if err != nil {
+		t.Fatalf("volume client: %v", err)
+	}
+	doks, err := NewDOKSClient("tok", "cl-1")
+	if err != nil {
+		t.Fatalf("doks client: %v", err)
+	}
+	cost, err := newDOCostReader("", "tok")
+	if err != nil {
+		t.Fatalf("cost reader: %v", err)
+	}
+
+	for name, c := range map[string]*godo.Client{
+		"droplets":   machine.Client,
+		"volumes":    volume.Client,
+		"kubernetes": doks.Client,
+		"cost":       cost.(*doCostReader).client,
+	} {
+		if c.HTTPClient == nil {
+			t.Fatalf("%s: no HTTP client at all", name)
+		}
+		if c.HTTPClient.Timeout != doAPITimeout {
+			t.Fatalf("%s: DigitalOcean calls are unbounded (timeout=%v), so a hung upstream holds the org's provisioning lease forever",
+				name, c.HTTPClient.Timeout)
+		}
 	}
 }
