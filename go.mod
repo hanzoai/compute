@@ -32,6 +32,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.65.3
 	github.com/fasthttp/websocket v1.5.12
 	github.com/hanzoai/commerce/metering v0.1.6
+	github.com/hanzoai/egress/spend v0.1.0
 	github.com/hanzoai/ha v0.1.1
 	github.com/hanzoai/money v0.2.2
 	github.com/hanzoai/orm v0.6.20
@@ -73,7 +74,6 @@ require (
 	github.com/hanzoai/builder v0.3.13 // indirect
 	github.com/hanzoai/csqlite v0.1.0 // indirect
 	github.com/hanzoai/decimal v0.1.2 // indirect
-	github.com/hanzoai/egress/spend v0.1.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/hanzoai/xorm v1.4.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
