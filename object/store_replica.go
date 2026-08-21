@@ -132,7 +132,7 @@ func (r *replicator) mergeSharedLeases(owner string, coord *relational.Engine) e
 	if err := replica.RestoreFile(tmp, data); err != nil {
 		return err
 	}
-	remote, err := relational.NewEngine("sqlite", tmp+sqlitePragmas)
+	remote, err := relational.NewEngine("sqlite", dsn(tmp))
 	if err != nil {
 		return err
 	}

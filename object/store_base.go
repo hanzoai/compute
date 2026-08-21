@@ -26,14 +26,18 @@ import (
 	// hanzoai/base uses, so visor and base share one SQLite engine under
 	// CGO_ENABLED=0.
 	"github.com/hanzoai/orm/relational"
-	_ "github.com/hanzoai/sqlite"
+	"github.com/hanzoai/sqlite"
 )
 
-// sqlitePragmas mirrors the durability profile hanzoai/base applies to its
-// per-tenant SQLite files: a generous busy timeout, WAL, NORMAL sync, and
-// foreign keys on. hanzoai/sqlite reads these from the DSN query string; xorm
-// passes the full DSN through to the driver.
-const sqlitePragmas = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
+// dsn addresses a per-tenant file with the durability profile hanzoai/base
+// applies: a generous busy timeout, WAL, NORMAL sync, and foreign keys on.
+//
+// The driver builds it, because the two backends spell a pragma differently in
+// a DSN and each silently ignores the other's spelling. Written by hand in
+// modernc's `_pragma=NAME(VALUE)` form, a cgo build took none of them: measured,
+// journal_mode came back `delete` and foreign_keys `0` while the DSN asked for
+// WAL and ON.
+func dsn(path string) string { return sqlite.PragmaDSN(path, sqlite.DefaultPragmas) }
 
 // baseStore serves each owner's per-tenant tables from its own SQLite file under
 // a data root -- one *relational.Engine per org, opened lazily and cached for the
@@ -82,7 +86,7 @@ func newBaseStore(root string) (*baseStore, error) {
 	if err := repl.hydrate("_global", coordPath); err != nil {
 		return nil, fmt.Errorf("visor: base store hydrate coord: %w", err)
 	}
-	coord, err := relational.NewEngine("sqlite", coordPath+sqlitePragmas)
+	coord, err := relational.NewEngine("sqlite", dsn(coordPath))
 	if err != nil {
 		return nil, fmt.Errorf("visor: base store open coord %s: %w", coordPath, err)
 	}
@@ -120,7 +124,7 @@ func (s *baseStore) EngineFor(owner string) (*relational.Engine, error) {
 		return nil, fmt.Errorf("visor: base store hydrate %s: %w", owner, err)
 	}
 
-	engine, err := relational.NewEngine("sqlite", path+sqlitePragmas)
+	engine, err := relational.NewEngine("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("visor: base store open %s: %w", path, err)
 	}
