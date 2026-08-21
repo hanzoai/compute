@@ -22,9 +22,9 @@ import (
 	"testing"
 )
 
-// houseToken points the house-token resolver at a value for one test. It sets the
-// env var houseDOToken reads first, so it wins over app.conf without touching it.
-func houseToken(t *testing.T, token string) {
+// providerToken points the platform-token resolver at a value for one test. It sets the
+// env var digitalOceanToken reads first, so it wins over app.conf without touching it.
+func providerToken(t *testing.T, token string) {
 	t.Helper()
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", token)
 }
@@ -42,7 +42,7 @@ func houseToken(t *testing.T, token string) {
 // was actually ATTEMPTED, which is exactly the property under test — a presence
 // check would sail through it, which is the point.
 func TestARevokedTokenIsStillANonEmptyString(t *testing.T) {
-	houseToken(t, "dop_v1_a_revoked_token_is_still_a_string")
+	providerToken(t, "dop_v1_a_revoked_token_is_still_a_string")
 
 	if !ComputeConfigured() {
 		t.Fatal("a non-empty token must read as configured — that is the premise: presence cannot see a revocation")
@@ -57,21 +57,21 @@ func TestARevokedTokenIsStillANonEmptyString(t *testing.T) {
 }
 
 // TestNothingToAskIsNotAFailure keeps the two negative cases apart. An UNCONFIGURED
-// house account is not an unreachable one: it means there are no house resources at
+// configured cloud account is not an unreachable one: it means there are no platform resources at
 // all, so an empty answer is the TRUE answer and the hour must still be claimed —
-// otherwise a deployment with no house token stops billing its tenants' own
+// otherwise a deployment with no provider token stops billing its tenants' own
 // resources forever, which trades one revenue outage for another.
 func TestNothingToAskIsNotAFailure(t *testing.T) {
-	houseToken(t, "")
+	providerToken(t, "")
 
 	if ComputeConfigured() {
-		t.Skip("app.conf supplies a house token in this environment; the unconfigured case cannot be isolated here")
+		t.Skip("app.conf supplies a provider token in this environment; the unconfigured case cannot be isolated here")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // even cancelled: with nothing to ask, nothing is asked.
 	if err := ComputeReachable(ctx); err != nil {
-		t.Fatalf("an unconfigured house account reported unreachable (%v) — "+
+		t.Fatalf("an unconfigured configured cloud account reported unreachable (%v) — "+
 			"'there is nothing to ask' and 'the answer did not come back' are different facts", err)
 	}
 }

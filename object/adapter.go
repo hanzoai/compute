@@ -35,7 +35,7 @@ func InitConfig() {
 }
 
 func InitAdapter() {
-	// SQLite/Base is the default substrate (house rule: SQLite for everything; no
+	// SQLite/Base is the default substrate (platform rule: SQLite for everything; no
 	// Postgres unless a multi-instance deployment opts in with storageBackend=postgres).
 	// In Base mode NOTHING dials Postgres — the per-org + `_global` SQLite DBs are the
 	// whole store, so a cluster with no SQL service boots clean.

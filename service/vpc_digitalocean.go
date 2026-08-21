@@ -31,7 +31,7 @@ func newVpcDigitalOceanClient(accessKeyId string, accessKeySecret string, region
 	if token == "" {
 		token = accessKeyId
 	}
-	return &VpcDigitalOceanClient{Client: newDOClient(token), region: region}, nil
+	return &VpcDigitalOceanClient{Client: newDOClient(token, nil), region: region}, nil
 }
 
 // vpcStateActive — a DigitalOcean VPC has no lifecycle field. It is created

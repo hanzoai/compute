@@ -168,18 +168,18 @@ func TestResolveComputeScope(t *testing.T) {
 	}
 }
 
-// unionMachines merges the two DOKS node sources (house hanzo-org tag + BYOC
+// unionMachines merges the two DOKS node sources (platform hanzo-org tag + BYOC
 // Provider.ClusterID) into ONE deduped fleet list. A DOKS-only node surfaces; a
 // node whose droplet is ALSO in the droplet list dedups by droplet id; a
 // same-name collision dedups by name; the FIRST source wins so its row is kept.
 func TestUnionMachinesDedup(t *testing.T) {
-	// Source 1 (house): the authoritative rows — a DOKS node and a droplet already
+	// Source 1 (platform): the authoritative rows — a DOKS node and a droplet already
 	// on the fleet.
-	house := []*service.Machine{
+	platform := []*service.Machine{
 		{Id: "111", Name: "prod-default-aaa", Provider: "DigitalOcean", Tag: "doks-cluster:prod"},
 		{Id: "999", Name: "web-1", Provider: "DigitalOcean"},
 	}
-	// Source 2 (BYOC): the SAME droplet 111 again (must dedup by id, house wins),
+	// Source 2 (BYOC): the SAME droplet 111 again (must dedup by id, platform wins),
 	// a row that collides by NAME only (web-1, no id overlap → dedup by name), and a
 	// genuinely new BYOC-only node 222.
 	byoc := []*service.Machine{
@@ -188,7 +188,7 @@ func TestUnionMachinesDedup(t *testing.T) {
 		{Id: "222", Name: "byoc-default-zzz", Provider: "DigitalOcean", Tag: "doks-cluster:byoc"},
 	}
 
-	got := unionMachines(house, byoc)
+	got := unionMachines(platform, byoc)
 	if len(got) != 3 {
 		t.Fatalf("union want 3 deduped machines (111, 999/web-1, 222), got %d: %+v", len(got), got)
 	}
@@ -203,7 +203,7 @@ func TestUnionMachinesDedup(t *testing.T) {
 		t.Errorf("BYOC-only node 222 missing from union")
 	}
 	if _, ok := seen["999"]; !ok {
-		t.Errorf("droplet 999/web-1 missing; name-collision dedup must not drop the house row")
+		t.Errorf("droplet 999/web-1 missing; name-collision dedup must not drop the platform row")
 	}
 
 	// Empty sources are honest empties, never nil (JSON encodes []).
@@ -233,7 +233,7 @@ func TestNodesIsAlwaysAnArray(t *testing.T) {
 
 // launchCommerce stands up a fake commerce and reports what the launch path
 // asked it. Counting balance READS is what tells "the gate looked and refused"
-// apart from "the gate is not there" — with no house DigitalOcean token both
+// apart from "the gate is not there" — with no platform DigitalOcean token both
 // end in an error, and only the reads distinguish them.
 type launchCommerce struct {
 	mu     sync.Mutex
@@ -262,7 +262,7 @@ func launchCommerceOf(t *testing.T, availableCents int64) *launchCommerce {
 	t.Cleanup(srv.Close)
 	t.Setenv("COMMERCE_URL", srv.URL)
 	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
-	// No house token: LaunchOrgMachine cannot reach DigitalOcean, so if the
+	// No provider token: LaunchOrgMachine cannot reach DigitalOcean, so if the
 	// launch ever gets that far it fails for a DIFFERENT reason — which is
 	// exactly what the read count is here to detect.
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")

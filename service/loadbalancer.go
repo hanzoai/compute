@@ -57,8 +57,16 @@ type LoadBalancerClientInterface interface {
 }
 
 func NewLoadBalancerClient(providerType string, accessKeyId string, accessKeySecret string, region string) (LoadBalancerClientInterface, error) {
-	if providerType == "DigitalOcean" {
-		return newLoadBalancerDigitalOceanClient(accessKeyId, accessKeySecret, region)
+	// ONE registry. NewMachineClient is the only place a cloud name is matched;
+	// loadbalancer support is a capability of the client it returns, so a cloud
+	// is never listed twice and the two lists can never disagree.
+	c, err := NewMachineClient(Credential{Provider: providerType, KeyID: accessKeyId, Secret: accessKeySecret, Region: region})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("load balancer support not available for provider type: %s", providerType)
+	p, ok := c.(LoadBalancerCapable)
+	if !ok {
+		return nil, fmt.Errorf("loadbalancer support not available for provider type: %s", providerType)
+	}
+	return p.LoadBalancers(), nil
 }

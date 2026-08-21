@@ -31,7 +31,7 @@ func newLoadBalancerDigitalOceanClient(accessKeyId string, accessKeySecret strin
 	if token == "" {
 		token = accessKeyId
 	}
-	return &LoadBalancerDigitalOceanClient{Client: newDOClient(token), region: region}, nil
+	return &LoadBalancerDigitalOceanClient{Client: newDOClient(token, nil), region: region}, nil
 }
 
 func getLoadBalancerFromDOLoadBalancer(lb *godo.LoadBalancer) *LoadBalancer {

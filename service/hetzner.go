@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -27,14 +28,29 @@ type MachineHetznerClient struct {
 	region string
 }
 
-func newMachineHetznerClient(accessKeyId string, accessKeySecret string, region string) (MachineHetznerClient, error) {
+// Volumes is Hetzner's volume noun over the same hcloud client. Hetzner sells no
+// managed Kubernetes, VPC or load balancer through this service, so it implements
+// none of those capabilities and the factories say so without a list.
+func (c MachineHetznerClient) Volumes() VolumeClientInterface {
+	return &VolumeHetznerClient{Client: c.Client, region: c.region}
+}
+
+func newMachineHetznerClient(accessKeySecret string, accessKeyId string, region string, hc *http.Client) (MachineHetznerClient, error) {
 	token := accessKeySecret
 	if token == "" {
 		token = accessKeyId
 	}
 
-	client := hcloud.NewClient(hcloud.WithToken(token))
-	return MachineHetznerClient{Client: client, region: region}, nil
+	// Options in order: the carried transport, then the token only if we hold
+	// one. Under a carrier the token is empty and egress attaches it.
+	opts := []hcloud.ClientOption{}
+	if hc != nil {
+		opts = append(opts, hcloud.WithHTTPClient(hc))
+	}
+	if token != "" {
+		opts = append(opts, hcloud.WithToken(token))
+	}
+	return MachineHetznerClient{Client: hcloud.NewClient(opts...), region: region}, nil
 }
 
 func getMachineFromHetznerServer(server *hcloud.Server) *Machine {

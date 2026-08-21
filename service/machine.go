@@ -35,36 +35,53 @@ type MachineClientInterface interface {
 	CreateMachine(spec *CreateMachineSpec) (*Machine, error)
 }
 
-func NewMachineClient(providerType string, accessKeyId string, accessKeySecret string, region string) (MachineClientInterface, error) {
-	var res MachineClientInterface
-	var err error
-	if providerType == "Aliyun" {
-		res, err = newMachineAliyunClient(accessKeyId, accessKeySecret, region)
-	} else if providerType == "Azure" {
-		res, err = newMachineAzureClient(accessKeyId, accessKeySecret)
-	} else if providerType == "VMware" {
-		res, err = newMachineVmwareClient(accessKeyId, accessKeySecret)
-	} else if providerType == "KVM" {
-		res, err = newMachineKvmClient(accessKeyId, accessKeySecret)
-	} else if providerType == "PVE" {
-		res, err = newMachinePveClient(accessKeyId, accessKeySecret)
-	} else if providerType == "Google Cloud" {
-		res, err = newMachineGcpClient(accessKeyId, accessKeySecret, region)
-	} else if providerType == "AWS" {
-		res, err = newMachineAwsClient(accessKeyId, accessKeySecret, region)
-	} else if providerType == "DigitalOcean" {
-		res, err = newMachineDigitalOceanClient(accessKeyId, accessKeySecret, region)
-	} else if providerType == "AWS Lightsail" {
-		res, err = newMachineLightsailClient(accessKeyId, accessKeySecret, region)
-	} else if providerType == "Hetzner" {
-		res, err = newMachineHetznerClient(accessKeyId, accessKeySecret, region)
-	} else {
-		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
-	}
-
+func NewMachineClient(c Credential) (MachineClientInterface, error) {
+	hc, err := httpFor(c)
 	if err != nil {
 		return nil, err
 	}
+	id, secret, region := c.KeyID, c.Secret, c.Region
 
+	switch c.Provider {
+	// Clouds whose SDK takes our http.Client, so the call can be carried by
+	// egress and this process need never hold the key.
+	case "DigitalOcean":
+		return newMachineDigitalOceanClient(secret, id, region, hc)
+	case "Hetzner":
+		return newMachineHetznerClient(secret, id, region, hc)
+	}
+
+	// Every other cloud builds its own transport, so it would authenticate from
+	// a token held HERE. Under a carrier that is exactly the thing being removed,
+	// so it is refused rather than quietly bypassing egress — a credential that
+	// escapes the door is worse than a cloud that is briefly unavailable.
+	if carrierRegistered() {
+		return nil, fmt.Errorf("provider %s cannot route through the carrier yet: it would hold the credential directly", c.Provider)
+	}
+
+	var res MachineClientInterface
+	switch c.Provider {
+	case "Aliyun":
+		res, err = newMachineAliyunClient(id, secret, region)
+	case "Azure":
+		res, err = newMachineAzureClient(id, secret)
+	case "VMware":
+		res, err = newMachineVmwareClient(id, secret)
+	case "KVM":
+		res, err = newMachineKvmClient(id, secret)
+	case "PVE":
+		res, err = newMachinePveClient(id, secret)
+	case "Google Cloud":
+		res, err = newMachineGcpClient(id, secret, region)
+	case "AWS":
+		res, err = newMachineAwsClient(id, secret, region)
+	case "AWS Lightsail":
+		res, err = newMachineLightsailClient(id, secret, region)
+	default:
+		return nil, fmt.Errorf("unsupported provider type: %s", c.Provider)
+	}
+	if err != nil {
+		return nil, err
+	}
 	return res, nil
 }

@@ -78,7 +78,7 @@ func TestLaunchMachineUsesTheSignedOrgNotTheQuery(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := tenantWire(t)
 
-	body := post(t, app, "/v1/launch-machine?owner=victimlaunch&provider=housedo",
+	body := post(t, app, "/v1/launch-machine?owner=victimlaunch&provider=platformdo",
 		mint("attackerlaunch"), `{"owner":"attackerlaunch","name":"m1","instanceType":"s-1vcpu-1gb"}`)
 
 	if !strings.Contains(body, "attackerlaunch") {
@@ -97,11 +97,11 @@ func TestVolumeWritesUseTheSignedOrgNotTheQuery(t *testing.T) {
 	app := tenantWire(t)
 
 	for name, path := range map[string]string{
-		"create": "/v1/create-volume?owner=victimvol&provider=housedo",
-		"delete": "/v1/delete-volume?owner=victimvol&provider=housedo&name=vol-1",
-		"attach": "/v1/attach-volume?owner=victimvol&provider=housedo&volume=vol-1&machine=m-1",
-		"detach": "/v1/detach-volume?owner=victimvol&provider=housedo&volume=vol-1",
-		"resize": "/v1/resize-volume?owner=victimvol&provider=housedo&volume=vol-1&size=200",
+		"create": "/v1/create-volume?owner=victimvol&provider=platformdo",
+		"delete": "/v1/delete-volume?owner=victimvol&provider=platformdo&name=vol-1",
+		"attach": "/v1/attach-volume?owner=victimvol&provider=platformdo&volume=vol-1&machine=m-1",
+		"detach": "/v1/detach-volume?owner=victimvol&provider=platformdo&volume=vol-1",
+		"resize": "/v1/resize-volume?owner=victimvol&provider=platformdo&volume=vol-1&size=200",
 	} {
 		t.Run(name, func(t *testing.T) {
 			body := post(t, app, path, mint("attackervol"), `{"owner":"attackervol","name":"vol-1","sizeGb":100}`)
@@ -139,7 +139,7 @@ func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 }
 
 // No bearer and no service credential means no tenant, and a tenant-less
-// provision is a house account waiting to happen.
+// provision is a configured cloud account waiting to happen.
 func TestMachineAndVolumeWritesFailClosedWithoutAnOrg(t *testing.T) {
 	app := tenantWire(t)
 	for name, tc := range map[string]struct{ path, body string }{

@@ -171,7 +171,7 @@ func TestDeleteNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 }
 
 // Every write refuses outright when there is no org context: no bearer and no
-// service credential means no tenant, and a tenant-less provision is a house
+// service credential means no tenant, and a tenant-less provision is a platform
 // account waiting to happen.
 func TestNodePoolWritesFailClosedWithoutAnOrg(t *testing.T) {
 	app := poolWire(t)
@@ -199,8 +199,8 @@ func TestProvisionUsesTheSignedOrgNotTheQuery(t *testing.T) {
 	app := poolWire(t)
 
 	for name, path := range map[string]string{
-		"create": "/v1/create-node-pool?owner=hanzo&provider=housedo",
-		"scale":  "/v1/scale-node-pool?owner=hanzo&provider=housedo&poolId=p-1&count=8",
+		"create": "/v1/create-node-pool?owner=hanzo&provider=platformdo",
+		"scale":  "/v1/scale-node-pool?owner=hanzo&provider=platformdo&poolId=p-1&count=8",
 	} {
 		t.Run(name, func(t *testing.T) {
 			body := post(t, app, path, mint("acmeprov"), `{"owner":"hanzo","size":"gpu-h100x8-640gb","count":8}`)

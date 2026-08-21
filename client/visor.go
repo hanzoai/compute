@@ -90,38 +90,38 @@ type Provider struct {
 
 // CreateMachineRequest is the VM-create payload.
 type CreateMachineRequest struct {
-	Provider  string
-	Region    string
+	Provider string
+	Region   string
 	// PlanID names the size-class from the billing plan catalog
 	// (e.g. hetzner-cx22, lightsail-medium-2gb).
-	PlanID    string
+	PlanID string
 	// Image is the OS image identifier (provider-specific).
-	Image     string
-	Hostname  string
+	Image    string
+	Hostname string
 	// SSHKeys are public keys to install on the new machine.
-	SSHKeys   []string
+	SSHKeys []string
 	// UserData is cloud-init / startup-script content.
-	UserData  string
+	UserData string
 	// Tags carry org + label metadata for billing + filtering.
-	Tags      map[string]string
+	Tags map[string]string
 }
 
 // Machine is the canonical VM record.
 type Machine struct {
-	ID            string
-	OrgID         string
-	Provider      string
-	Region        string
-	PlanID        string
-	Image         string
-	Hostname      string
-	Status        string // provisioning | running | stopping | stopped | deleting | failed
-	IPv4          string
-	IPv6          string
-	PrivateIPv4   string
-	Tags          map[string]string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID          string
+	OrgID       string
+	Provider    string
+	Region      string
+	PlanID      string
+	Image       string
+	Hostname    string
+	Status      string // provisioning | running | stopping | stopped | deleting | failed
+	IPv4        string
+	IPv6        string
+	PrivateIPv4 string
+	Tags        map[string]string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	// LastError populated when Status=failed.
 	LastError string
 }
@@ -138,9 +138,9 @@ type MachineFilter struct {
 
 // CreateVolumeRequest is the block-volume payload.
 type CreateVolumeRequest struct {
-	Provider  string
-	Region    string
-	SizeGB    int
+	Provider string
+	Region   string
+	SizeGB   int
 	// Type is the provider-specific tier (ssd | hdd | nvme).
 	Type      string
 	Encrypted bool
@@ -163,17 +163,17 @@ type Volume struct {
 
 // CostEstimateRequest names the spec to price.
 type CostEstimateRequest struct {
-	Provider  string
-	Region    string
-	PlanID    string
-	VolumeGB  int    // total attached storage; 0 disables volume pricing
+	Provider   string
+	Region     string
+	PlanID     string
+	VolumeGB   int // total attached storage; 0 disables volume pricing
 	VolumeType string
 }
 
 // CostEstimate is the response.
 type CostEstimate struct {
-	Currency     string
-	PerHourUSD   float64
-	PerMonthUSD  float64
-	BreakdownBy  map[string]float64 // compute | storage | bandwidth | ipv4 | ...
+	Currency    string
+	PerHourUSD  float64
+	PerMonthUSD float64
+	BreakdownBy map[string]float64 // compute | storage | bandwidth | ipv4 | ...
 }

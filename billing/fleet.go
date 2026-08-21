@@ -38,9 +38,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/commerce/metering"
 	"github.com/hanzoai/visor/chain"
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/telemetry"

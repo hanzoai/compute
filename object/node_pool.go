@@ -214,7 +214,7 @@ func UpdateNodePool(id string, pool *NodePool) (bool, error) {
 // row anybody could bill.
 //
 // The refusal is safe precisely because the row is no longer the meter of record
-// for a house cluster: the hourly sweep bills the provider's live pools, so the
+// for a platform cluster: the hourly sweep bills the provider's live pools, so the
 // second cluster is billed whether or not this row lands. What the refusal buys is
 // that the FIRST cluster's row — its rate, its project, its create hour — is not
 // silently overwritten by the second.
@@ -676,15 +676,15 @@ func confirmCloudPoolDeleted(client cloudNodePoolDeleter, poolID string) error {
 }
 
 // poolCloudClient builds the cloud client that can delete a STORED pool: the
-// per-org Provider named on the row, or Hanzo's house account when the row names
-// none (a cluster's seed pool is recorded by the house cluster create, which has
+// per-org Provider named on the row, or the configured cloud account when the row names
+// none (a cluster's seed pool is recorded by the platform cluster create, which has
 // no Provider row to name).
 //
 // A Provider the row names but the store does not have is an ERROR, never a skip.
 // Skipping is how a row gets dropped while its pool keeps running.
 func poolCloudClient(stored *NodePool) (cloudNodePoolDeleter, error) {
 	if stored.Provider == "" {
-		return service.NewHouseDOKSClient(stored.ClusterID)
+		return service.NewDOKSClientFromConfig(stored.ClusterID)
 	}
 	provider, err := getProvider(stored.Owner, stored.Provider)
 	if err != nil {
@@ -716,7 +716,7 @@ func poolCloudClient(stored *NodePool) (cloudNodePoolDeleter, error) {
 // It used to gate the whole upstream round-trip on the BODY's PoolID and Provider
 // being non-empty. Omit either — send `{"name":"gpu"}` and nothing else — and
 // visor skipped the provider entirely and deleted the row: the cluster kept
-// running on Hanzo's house account and the row that billed it was gone. The body
+// running on the configured cloud account and the row that billed it was gone. The body
 // is the customer's, so opting out of the upstream check was one absent JSON field
 // away. It also resolved the Provider from the body, and treated a Provider it
 // could not find as permission to drop the row.

@@ -41,8 +41,16 @@ type VpcClientInterface interface {
 }
 
 func NewVpcClient(providerType string, accessKeyId string, accessKeySecret string, region string) (VpcClientInterface, error) {
-	if providerType == "DigitalOcean" {
-		return newVpcDigitalOceanClient(accessKeyId, accessKeySecret, region)
+	// ONE registry. NewMachineClient is the only place a cloud name is matched;
+	// vpc support is a capability of the client it returns, so a cloud
+	// is never listed twice and the two lists can never disagree.
+	c, err := NewMachineClient(Credential{Provider: providerType, KeyID: accessKeyId, Secret: accessKeySecret, Region: region})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("vpc support not available for provider type: %s", providerType)
+	p, ok := c.(VpcCapable)
+	if !ok {
+		return nil, fmt.Errorf("vpc support not available for provider type: %s", providerType)
+	}
+	return p.Vpcs(), nil
 }

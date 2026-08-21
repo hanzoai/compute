@@ -22,7 +22,7 @@
 // `acme` cleared authorization against acme and then provisioned against hanzo's
 // cloud credentials, hanzo's balance and hanzo's invoice. A tenant read from a
 // different field than the one authorization judged is not a second opinion, it
-// is a house account.
+// is a configured cloud account.
 package controllers
 
 import (

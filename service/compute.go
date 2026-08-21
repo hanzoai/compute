@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package service — compute.go is Hanzo's resell compute surface over a single
-// HOUSE DigitalOcean account. It is distinct from the per-owner "bring your own
+// PLATFORM DigitalOcean account. It is distinct from the per-owner "bring your own
 // cloud" Provider path (machine_cloud.go): here ONE Hanzo DO token (from KMS)
 // backs every tenant, and droplets are namespaced by an org tag so list/get/
 // delete are scoped to the caller's org at the DigitalOcean layer — never the
@@ -49,37 +49,37 @@ func orgTag(org string) string { return orgTagKey + ":" + org }
 // (empty) project writes no project tag.
 func projectTag(project string) string { return projectTagKey + ":" + project }
 
-// houseDOToken resolves Hanzo's DigitalOcean API token. KMS is the only source:
+// digitalOceanToken resolves Hanzo's DigitalOcean API token. KMS is the only source:
 // the operator wires it from KMS into DIGITALOCEAN_ACCESS_TOKEN (or the app.conf
 // digitalOceanToken key, itself KMS-synced via the visor-kms-sync KMSSecret).
-// Never hard-coded. Empty means "compute not configured" and every house
+// Never hard-coded. Empty means "compute not configured" and every platform
 // endpoint fails closed.
-func houseDOToken() string {
+func digitalOceanToken() string {
 	if t := strings.TrimSpace(os.Getenv("DIGITALOCEAN_ACCESS_TOKEN")); t != "" {
 		return t
 	}
 	return strings.TrimSpace(conf.GetConfigString("digitalOceanToken"))
 }
 
-// newHouseDOClient builds a DigitalOcean client bound to Hanzo's house token.
-func newHouseDOClient() (MachineDigitalOceanClient, error) {
-	token := houseDOToken()
+// newDigitalOceanClient builds a DigitalOcean client bound to Hanzo's provider token.
+func newDigitalOceanClient() (MachineDigitalOceanClient, error) {
+	token := digitalOceanToken()
 	if token == "" {
 		return MachineDigitalOceanClient{}, fmt.Errorf("hanzo compute is not configured: DigitalOcean token unset (resolve from KMS)")
 	}
-	return newMachineDigitalOceanClient("", token, "")
+	return newMachineDigitalOceanClient(token, "", "", nil)
 }
 
-// ComputeConfigured reports whether the house DO token is present, so callers
+// ComputeConfigured reports whether the platform DO token is present, so callers
 // can return a clean 503 instead of a cryptic client error.
 //
 // It answers "is a credential SET", which is a different question from "does the
 // credential WORK" — see ComputeReachable. A revoked token is still a non-empty
 // string, so this stays true through a revocation and every fallback written for
 // the unconfigured case is dead code exactly when it is needed.
-func ComputeConfigured() bool { return houseDOToken() != "" }
+func ComputeConfigured() bool { return digitalOceanToken() != "" }
 
-// ComputeReachable proves the house credential actually works, by spending one
+// ComputeReachable proves the provider credential actually works, by spending one
 // authenticated round trip on it rather than inspecting its length.
 //
 // It exists because presence is not reachability. `token != ""` cannot tell a
@@ -90,13 +90,13 @@ func ComputeConfigured() bool { return houseDOToken() != "" }
 //
 // The two answers a caller must tell apart:
 //
-//	nil   — either the house account has nothing to ask (no token configured, so
-//	        there are no house resources at all and an empty answer is the TRUE
+//	nil   — either the configured cloud account has nothing to ask (no token configured, so
+//	        there are no platform resources at all and an empty answer is the TRUE
 //	        one), or the provider answered. Both mean: proceed.
-//	error — a credential IS configured and did not work. Nothing about the house
+//	error — a credential IS configured and did not work. Nothing about the platform
 //	        account can be known this hour.
 //
-// That distinction is the whole point and it is the same one housePools already
+// That distinction is the whole point and it is the same one livePools already
 // draws one level down: "there is nothing to ask" and "the answer did not come
 // back" are different facts, and only the second is an error.
 //
@@ -108,12 +108,12 @@ func ComputeReachable(ctx context.Context) error {
 	if !ComputeConfigured() {
 		return nil // nothing to ask
 	}
-	client, err := newHouseDOClient()
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return err
 	}
 	if _, _, err := client.Client.Account.Get(ctx); err != nil {
-		return fmt.Errorf("house DigitalOcean account unreachable: %w", err)
+		return fmt.Errorf("configured cloud account unreachable: %w", err)
 	}
 	return nil
 }
@@ -206,7 +206,7 @@ type catalogCache struct {
 var catalog catalogCache
 
 func (c *catalogCache) refresh() error {
-	client, err := newHouseDOClient()
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func SizeBySlug(slug string) (*SizeInfo, error) {
 	return nil, nil
 }
 
-// ---- Org-scoped machine operations (house account) ----
+// ---- Org-scoped machine operations (configured cloud account) ----
 
 // ListOrgMachines returns the droplets tagged for org — per-org isolation enforced
 // at the DigitalOcean layer via an exact tag query — optionally narrowed to a
@@ -339,7 +339,7 @@ func ListOrgMachines(org, project string) ([]*Machine, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOClient()
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +369,7 @@ func ListOrgMachines(org, project string) ([]*Machine, error) {
 }
 
 // ListOrgKubernetesNodes returns one Machine per DOKS worker node for every
-// cluster in Hanzo's HOUSE DigitalOcean account tagged for org — the house
+// cluster in Hanzo's PLATFORM DigitalOcean account tagged for org — the platform
 // analogue of ListOrgMachines, but for managed-Kubernetes nodes. DOKS worker
 // droplets carry k8s tags, not a hanzo-org DROPLET tag, so they never surface
 // through ListOrgMachines; this lists them via the managed-Kubernetes API and maps
@@ -379,36 +379,36 @@ func ListOrgKubernetesNodes(org string) ([]*Machine, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newHouseDOClient()
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}
 	return kubernetesNodeMachinesByTag(context.Background(), client.Client, orgTag(org))
 }
 
-// NewHouseDOKSClient builds a DOKS client on Hanzo's house token. It is the
-// cluster analogue of newHouseDOClient; per-org isolation is enforced by the
+// NewDOKSClientFromConfig builds a DOKS client on Hanzo's provider token. It is the
+// cluster analogue of newDigitalOceanClient; per-org isolation is enforced by the
 // callers via the hanzo-org tag, never by this client.
 //
 // clusterID is empty for ACCOUNT-level operations (list/get/create/delete), which
 // address a cluster by id, and set for the pool operations bound to one cluster.
-func NewHouseDOKSClient(clusterID string) (*DOKSClient, error) {
-	client, err := newHouseDOClient()
+func NewDOKSClientFromConfig(clusterID string) (*DOKSClient, error) {
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}
 	return &DOKSClient{Client: client.Client, ClusterID: clusterID}, nil
 }
 
-// HousePool is ONE node pool in Hanzo's house account as the PROVIDER reports it
+// LivePool is ONE node pool in the configured cloud account as the PROVIDER reports it
 // right now — which cluster it belongs to, which org owns that cluster, its node
 // slug, and how many nodes it is ACTUALLY running.
 //
-// This is the billable unit of a house cluster, and the provider is its author.
+// This is the billable unit of a platform cluster, and the provider is its author.
 // The stored row is a cache of it: useful for the rate the org was authorized at
 // and the project it belongs to, and authoritative for neither existence nor
 // count.
-type HousePool struct {
+type LivePool struct {
 	// Org owns the cluster, recovered from its hanzo-org tag. Empty means the
 	// cluster is unattributable and nothing may be billed for it.
 	Org string
@@ -427,19 +427,19 @@ type HousePool struct {
 	Created string
 }
 
-// ListHousePools returns every node pool of every cluster in Hanzo's house
+// ListLivePools returns every node pool of every cluster in Hanzo's platform
 // account, with the org that owns it and its LIVE node count — the authoritative
 // answer to "what is this account running, for whom, and how much of it".
 //
-// It is the node-pool analogue of ListRunningHouseMachines and shares the ONE
+// It is the node-pool analogue of ListMeteredMachines and shares the ONE
 // cluster enumeration (listClustersFull) with the cluster and node listers, so a
 // pool's identity is sourced identically wherever it surfaces.
 //
 // A cluster with no hanzo-org tag yields pools with an empty Org: they are
 // returned rather than dropped, so the sweep can report them as unattributable
 // instead of silently running an untagged cluster for free.
-func ListHousePools(ctx context.Context) ([]HousePool, error) {
-	client, err := newHouseDOClient()
+func ListLivePools(ctx context.Context) ([]LivePool, error) {
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +447,7 @@ func ListHousePools(ctx context.Context) ([]HousePool, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []HousePool
+	var out []LivePool
 	for _, gc := range clusters {
 		org := orgFromClusterTags(gc.Tags)
 		created := ""
@@ -455,7 +455,7 @@ func ListHousePools(ctx context.Context) ([]HousePool, error) {
 			created = gc.CreatedAt.UTC().Format(time.RFC3339)
 		}
 		for _, p := range poolsFromGodo(gc.NodePools) {
-			out = append(out, HousePool{
+			out = append(out, LivePool{
 				Org: org, ClusterID: gc.ID, PoolID: p.ID, Name: p.Name,
 				Size: p.Size, Nodes: liveNodes(p), Created: created,
 			})
@@ -472,22 +472,34 @@ func orgFromClusterTags(tags []string) string {
 	return orgFromTag(strings.Join(tags, ","))
 }
 
-// ListOrgKubernetesClusters returns every DOKS cluster in Hanzo's HOUSE account
-// tagged for org — the house analogue of ListOrgMachines for whole clusters. Per-org
+// ListOrgKubernetesClusters returns every DOKS cluster in the configured cloud account
+// tagged for org — the platform analogue of ListOrgMachines for whole clusters. Per-org
 // isolation is by the cluster's hanzo-org tag: a tenant only ever sees its own
 // clusters, never another org's.
 func ListOrgKubernetesClusters(org string) ([]*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := NewHouseDOKSClient("")
+	all, failed, err := listClustersAcross(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	return clustersByTag(context.Background(), client.Client, orgTag(org))
+	tag := orgTag(org)
+	out := make([]*KubernetesCluster, 0, len(all))
+	for _, k := range all {
+		if clusterHasTag(k.Tags, tag) {
+			out = append(out, k)
+		}
+	}
+	// A cloud that did not answer costs its own rows, never the fleet. The list
+	// cannot carry that (callers decode an array), so it is on GET /v1/k8s/providers.
+	if len(failed) > 0 {
+		logs.Warning("cloud providers degraded for org %s: %s", org, strings.Join(failed, "; "))
+	}
+	return out, nil
 }
 
-// GetOrgKubernetesCluster returns one house cluster's detail (pools + worker nodes),
+// GetOrgKubernetesCluster returns one platform cluster's detail (pools + worker nodes),
 // but ONLY if it carries the caller org's hanzo-org tag. A cluster owned by another
 // org — or a missing cluster — resolves to (nil, nil): the controller renders it as
 // "not found", so a tenant can never read another tenant's cluster by guessing an id.
@@ -495,16 +507,12 @@ func GetOrgKubernetesCluster(org, id string) (*KubernetesClusterDetail, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := NewHouseDOKSClient("")
+	_, detail, err := findCluster(context.Background(), id)
 	if err != nil {
 		return nil, err
 	}
-	detail, err := client.GetCluster(context.Background(), id)
-	if err != nil {
-		if IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
+	if detail == nil {
+		return nil, nil
 	}
 	if !clusterHasTag(detail.Tags, orgTag(org)) {
 		return nil, nil // isolation: not this org's cluster
@@ -545,23 +553,33 @@ type recordSeed func(SeedPool) error
 
 type forgetCluster func(org, clusterID string) error
 
-// CreateOrgKubernetesCluster provisions a DOKS cluster in Hanzo's house account for
+// CreateOrgKubernetesCluster provisions a DOKS cluster in the configured cloud account for
 // org, stamping it managed-by + hanzo-org:<org> so it associates to the tenant
 // exactly like a droplet — which is what makes it visible to that org's cluster and
 // node listers (and invisible to every other org).
 //
-// HOUSE ACCOUNT means Hanzo pays the upstream bill for every node in the seed
+// PLATFORM ACCOUNT means Hanzo pays the upstream bill for every node in the seed
 // pool, so this goes through the money gate exactly like a droplet launch — and
 // records the pool it provisioned, so the sweep keeps billing it.
 func CreateOrgKubernetesCluster(org, project string, spec *CreateClusterSpec, record recordSeed) (*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := NewHouseDOKSClient("")
+	if spec == nil {
+		return nil, fmt.Errorf("spec is required")
+	}
+	client, err := backendFor(spec.Provider)
 	if err != nil {
 		return nil, err
 	}
-	return createClusterMetered(context.Background(), client, record, org, project, spec)
+	kc, err := createClusterMetered(context.Background(), client, record, org, project, spec)
+	if err != nil {
+		return nil, err
+	}
+	if kc != nil && kc.Provider == "" {
+		kc.Provider = client.Provider()
+	}
+	return kc, nil
 }
 
 // createClusterMetered is the ONE metered cluster provision: price the seed pool
@@ -613,7 +631,7 @@ func createClusterMetered(ctx context.Context, client clusterCreator, record rec
 	return cluster, nil
 }
 
-// DeleteOrgKubernetesCluster destroys a house cluster by id, but ONLY if it carries
+// DeleteOrgKubernetesCluster destroys a platform cluster by id, but ONLY if it carries
 // the caller org's hanzo-org tag — the same isolation as GetOrgKubernetesCluster, so
 // a tenant can never delete another tenant's cluster. An already-absent cluster is a
 // no-op success (idempotent delete).
@@ -626,11 +644,18 @@ func DeleteOrgKubernetesCluster(org, id string, forget forgetCluster) error {
 	if org == "" {
 		return fmt.Errorf("org is required")
 	}
-	client, err := NewHouseDOKSClient("")
+	ctx := context.Background()
+	client, detail, err := findCluster(ctx, id)
 	if err != nil {
 		return err
 	}
-	return deleteClusterMetered(context.Background(), client, forget, org, id)
+	if detail == nil {
+		// Gone on every backend. Stop billing it, same as the metered path does
+		// for an upstream 404 — a cluster that no cloud has must not keep metering.
+		stopClusterMeter(forget, org, id)
+		return nil
+	}
+	return deleteClusterMetered(ctx, client, forget, org, id)
 }
 
 // clusterDestroyer is the minimal cloud surface a metered cluster teardown needs
@@ -712,7 +737,7 @@ func dropletHasAnyOrgTag(d godo.Droplet) bool {
 	return false
 }
 
-// billableHouseDroplet reports whether a droplet in Hanzo's house account is on
+// billableDroplet reports whether a droplet in the configured cloud account is on
 // the hourly MACHINE meter. It is the ONE answer to that question, kept pure and
 // separate from the DigitalOcean enumeration so "exactly one meter per node" is a
 // property a test can check rather than a claim about a loop.
@@ -736,9 +761,9 @@ func dropletHasAnyOrgTag(d godo.Droplet) bool {
 //     used to rest on the unverified belief that worker droplets carry no
 //     hanzo-org tag, which is a claim about somebody else's product.
 //
-//   - carries a hanzo-org tag. An untagged house droplet is not a resell machine
+//   - carries a hanzo-org tag. An untagged platform droplet is not a resell machine
 //     and is never billed to a tenant.
-func billableHouseDroplet(d godo.Droplet) bool {
+func billableDroplet(d godo.Droplet) bool {
 	if d.Status != "active" { // godo "active" == running
 		return false
 	}
@@ -748,12 +773,12 @@ func billableHouseDroplet(d godo.Droplet) bool {
 	return dropletHasAnyOrgTag(d)
 }
 
-// ListRunningHouseMachines returns every droplet in Hanzo's house account that
-// billableHouseDroplet admits — the set the recurring hourly meter debits. It
+// ListMeteredMachines returns every droplet in the configured cloud account that
+// billableDroplet admits — the set the recurring hourly meter debits. It
 // lists across ALL orgs (no per-org tag filter): the org is recovered per machine
 // from its own tag, so ONE sweep meters every tenant's running machines.
-func ListRunningHouseMachines() ([]*Machine, error) {
-	client, err := newHouseDOClient()
+func ListMeteredMachines() ([]*Machine, error) {
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}
@@ -762,10 +787,10 @@ func ListRunningHouseMachines() ([]*Machine, error) {
 	for {
 		droplets, resp, err := client.Client.Droplets.List(context.Background(), opt)
 		if err != nil {
-			return nil, fmt.Errorf("list house droplets: %w", err)
+			return nil, fmt.Errorf("list platform droplets: %w", err)
 		}
 		for _, d := range droplets {
-			if !billableHouseDroplet(d) {
+			if !billableDroplet(d) {
 				continue
 			}
 			machines = append(machines, getMachineFromDroplet(d))
@@ -804,7 +829,7 @@ func GetOrgMachine(org, id string) (*Machine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid machine id: %s", id)
 	}
-	client, err := newHouseDOClient()
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}
@@ -827,7 +852,7 @@ func DeleteOrgMachine(org, id string) error {
 	if m == nil {
 		return fmt.Errorf("machine %q not found for this org", id)
 	}
-	client, err := newHouseDOClient()
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return err
 	}
@@ -842,7 +867,7 @@ func DeleteOrgMachine(org, id string) error {
 	return nil
 }
 
-// LaunchOrgMachine provisions a droplet in Hanzo's house account, tagged so it
+// LaunchOrgMachine provisions a droplet in the configured cloud account, tagged so it
 // is owned by org and attributed to project. Both attribution tags are injected
 // here (never trusted from the client body) so the machine is always attributable
 // to the right tenant AND project.
@@ -861,7 +886,7 @@ func LaunchOrgMachine(org, project string, spec *CreateMachineSpec) (*Machine, e
 	if !validProjectSlug(project) {
 		return nil, fmt.Errorf("invalid project slug %q", project)
 	}
-	client, err := newHouseDOClient()
+	client, err := newDigitalOceanClient()
 	if err != nil {
 		return nil, err
 	}

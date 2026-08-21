@@ -14,7 +14,7 @@
 
 // compute.go is the canonical /v1 resell compute surface: the cached
 // DigitalOcean catalog (regions/sizes/GPUs, resale-priced) and per-org machine
-// operations backed by Hanzo's house DO account. Every machine endpoint is
+// operations backed by the configured cloud account. Every machine endpoint is
 // scoped to the caller's org, which is derived from the authenticated IAM
 // identity (never trusted from a client-supplied field). Beneath org, an OPTIONAL
 // app > project scope (from the gateway-threaded tenant context, or the launch
@@ -146,7 +146,7 @@ func (c *ApiController) GetComputeGPUs() {
 	c.ResponseOk(gpus)
 }
 
-// ---- Machines (per-org, house account) ----
+// ---- Machines (per-org, configured cloud account) ----
 
 // filterMachines narrows a machine list by an optional kind (exact, matched on
 // the machine's canonical kind), an optional name prefix (matched on the droplet
@@ -256,12 +256,12 @@ type Nodes struct {
 }
 
 // ListNodes lists the caller org's DOKS worker nodes as machines: the deduped
-// union of the house account (clusters carrying the hanzo-org tag) and BYOC
+// union of the configured cloud account (clusters carrying the hanzo-org tag) and BYOC
 // providers (clusters named by Provider.ClusterID). A DOKS node's droplet carries
 // k8s tags rather than a hanzo-org droplet tag, so it appears on no other list —
 // this op is how a cluster's workers are visible as machines at all.
 //
-// The two sources are independent, and the house one needs the house DO token: an
+// The two sources are independent, and the platform one needs the platform DO token: an
 // unconfigured compute deployment skips it rather than failing the whole read and
 // hiding the BYOC nodes behind an error.
 func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
@@ -269,10 +269,10 @@ func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
 	if org == "" {
 		return nil, zip.ErrForbidden("no org context")
 	}
-	var house []*service.Machine
+	var platform []*service.Machine
 	if service.ComputeConfigured() {
 		var err error
-		house, err = service.ListOrgKubernetesNodes(org)
+		platform, err = service.ListOrgKubernetesNodes(org)
 		if err != nil {
 			return nil, zip.Errorf(http.StatusBadGateway, "%s", err.Error())
 		}
@@ -281,10 +281,10 @@ func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
 	if err != nil {
 		return nil, zip.Errorf(http.StatusBadGateway, "%s", err.Error())
 	}
-	return &Nodes{Nodes: unionMachines(house, byoc)}, nil
+	return &Nodes{Nodes: unionMachines(platform, byoc)}, nil
 }
 
-// ---- k8s clusters (house-account DOKS lifecycle, org-scoped) ----
+// ---- k8s clusters (platform-account DOKS lifecycle, org-scoped) ----
 //
 // The unified /v1/k8s noun: list clusters, one cluster's detail (pools + worker
 // nodes) and DEPLOY (create) / delete DOKS clusters. Every handler is org-scoped by
@@ -295,7 +295,7 @@ func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
 // ListComputeKubernetesClusters
 // @Title ListComputeKubernetesClusters
 // @Tag Compute API
-// @Description list the caller org's DOKS clusters (house account, hanzo-org tag)
+// @Description list the caller org's DOKS clusters (configured cloud account, hanzo-org tag)
 // @Success 200 {object} controllers.Response
 // @router /k8s/clusters [get]
 func (c *ApiController) ListComputeKubernetesClusters() {
@@ -304,8 +304,8 @@ func (c *ApiController) ListComputeKubernetesClusters() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no cloud provider is configured")
 		return
 	}
 	clusters, err := service.ListOrgKubernetesClusters(org)
@@ -327,8 +327,8 @@ func (c *ApiController) GetComputeKubernetesCluster() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no cloud provider is configured")
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -355,8 +355,8 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no cloud provider is configured")
 		return
 	}
 	// The request body IS the service spec (one shape, no re-mapping).
@@ -403,8 +403,8 @@ func (c *ApiController) DeleteComputeKubernetesCluster() {
 		c.ResponseError("unauthorized: no org context")
 		return
 	}
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+	if !service.KubernetesConfigured() {
+		c.ResponseError("no cloud provider is configured")
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -688,4 +688,17 @@ func (c *ApiController) LaunchComputeMachine() {
 		return
 	}
 	c.ResponseOk(map[string]interface{}{"machine": machine, "quote": quote})
+}
+
+// ListComputeKubernetesProviders
+// @Title ListComputeKubernetesProviders
+// @Tag Compute API
+// @Description every configured kubernetes cloud and whether it answers right now
+// @router /k8s/providers [get]
+func (c *ApiController) ListComputeKubernetesProviders() {
+	if c.resolveComputeOrg() == "" {
+		c.ResponseError("unauthorized: no org context")
+		return
+	}
+	c.ResponseOk(service.KubernetesProviderStatus(context.Background()))
 }

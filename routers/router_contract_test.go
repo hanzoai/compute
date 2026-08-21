@@ -95,6 +95,7 @@ var apiContract = []route{
 	{"DELETE", "/v1/machines/:id/agent", "UnbindAgent"},
 	{"GET", "/v1/machines/:id", "GetComputeMachine"},
 	{"DELETE", "/v1/machines/:id", "DeleteComputeMachine"},
+	{"GET", "/v1/k8s/providers", "ListComputeKubernetesProviders"},
 	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
 	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},
@@ -201,7 +202,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 73
+	const wantRoutes = 74
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -213,7 +214,7 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 32, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

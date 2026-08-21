@@ -32,7 +32,7 @@ func newVolumeDigitalOceanClient(accessKeyId string, accessKeySecret string, reg
 	if token == "" {
 		token = accessKeyId
 	}
-	return &VolumeDigitalOceanClient{Client: newDOClient(token), region: region}, nil
+	return &VolumeDigitalOceanClient{Client: newDOClient(token, nil), region: region}, nil
 }
 
 func getVolumeFromDOVolume(vol *godo.Volume) *Volume {

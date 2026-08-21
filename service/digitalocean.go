@@ -17,9 +17,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/digitalocean/godo"
 	"golang.org/x/oauth2"
@@ -28,6 +28,28 @@ import (
 type MachineDigitalOceanClient struct {
 	Client *godo.Client
 	region string
+}
+
+// Kubernetes is DigitalOcean's managed-cluster face, over the SAME godo client
+// this machine client already holds. One credential, one transport, two nouns —
+// which is what keeps there from being a second way to reach DigitalOcean.
+func (c MachineDigitalOceanClient) Kubernetes() KubernetesClientInterface {
+	return &DOKSClient{Client: c.Client}
+}
+
+// Volumes, Vpcs and LoadBalancers are DigitalOcean's other nouns over the SAME
+// godo client and region. Each was a separate factory with its own list of cloud
+// names; a capability on the one client is the same fact with nothing to drift.
+func (c MachineDigitalOceanClient) Volumes() VolumeClientInterface {
+	return &VolumeDigitalOceanClient{Client: c.Client, region: c.region}
+}
+
+func (c MachineDigitalOceanClient) Vpcs() VpcClientInterface {
+	return &VpcDigitalOceanClient{Client: c.Client, region: c.region}
+}
+
+func (c MachineDigitalOceanClient) LoadBalancers() LoadBalancerClientInterface {
+	return &LoadBalancerDigitalOceanClient{Client: c.Client, region: c.region}
 }
 
 // doAPITimeout bounds every call visor makes to DigitalOcean.
@@ -39,29 +61,34 @@ type MachineDigitalOceanClient struct {
 // no log and no recovery short of a restart. Bounding the call is what bounds the
 // hold.
 //
-// Thirty seconds is generous for a single DO API call and short enough that a
-// stuck one surfaces as an error a caller can see and a retry can clear.
-const doAPITimeout = 30 * time.Second
-
 // newDOClient is the ONE DigitalOcean client constructor: token auth, bounded.
 // Every DO surface visor drives — droplets, volumes, managed Kubernetes, cost —
 // builds through it, so "a DigitalOcean call cannot hang forever" is one
 // statement in one place rather than four that have to agree.
-func newDOClient(token string) *godo.Client {
-	httpClient := oauth2.NewClient(context.Background(),
+// newDOClient builds the godo client over the carried transport. When the token
+// is empty the carrier is attaching it, so no oauth2 source is layered on — that
+// is the whole point: this process has no key to layer.
+func newDOClient(token string, hc *http.Client) *godo.Client {
+	if hc == nil {
+		hc = directHTTP()
+	}
+	if token == "" {
+		return godo.NewClient(hc)
+	}
+	oc := oauth2.NewClient(context.WithValue(context.Background(), oauth2.HTTPClient, hc),
 		oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
-	httpClient.Timeout = doAPITimeout
-	return godo.NewClient(httpClient)
+	oc.Timeout = providerTimeout
+	return godo.NewClient(oc)
 }
 
-func newMachineDigitalOceanClient(accessKeyId string, accessKeySecret string, region string) (MachineDigitalOceanClient, error) {
+func newMachineDigitalOceanClient(accessKeySecret string, accessKeyId string, region string, hc *http.Client) (MachineDigitalOceanClient, error) {
 	// DigitalOcean uses a single API token (passed as accessKeySecret).
 	token := accessKeySecret
 	if token == "" {
 		token = accessKeyId
 	}
 
-	return MachineDigitalOceanClient{Client: newDOClient(token), region: region}, nil
+	return MachineDigitalOceanClient{Client: newDOClient(token, hc), region: region}, nil
 }
 
 func getMachineFromDroplet(droplet godo.Droplet) *Machine {
@@ -70,12 +97,23 @@ func getMachineFromDroplet(droplet godo.Droplet) *Machine {
 		Id:          strconv.Itoa(droplet.ID),
 		DisplayName: droplet.Name,
 		CreatedTime: droplet.Created, // DO's RFC3339 create time — the launch-hour boundary the meter must not re-bill.
-		Region:      droplet.Region.Slug,
-		Size:        droplet.Size.Slug,
-		Image:       droplet.Image.Slug,
-		Os:          fmt.Sprintf("%s %s", droplet.Image.Distribution, droplet.Image.Name),
 		CpuSize:     strconv.Itoa(droplet.Vcpus),
 		MemSize:     strconv.Itoa(droplet.Memory),
+	}
+	// godo makes these three pointers, and reading one that is not there takes
+	// down a process serving every tenant. A droplet arrives without them more
+	// readily than it sounds: a cloud answering mid-incident, a page returned
+	// with a partial body. A machine missing its region is worth listing; a
+	// panic is not.
+	if droplet.Region != nil {
+		machine.Region = droplet.Region.Slug
+	}
+	if droplet.Size != nil {
+		machine.Size = droplet.Size.Slug
+	}
+	if droplet.Image != nil {
+		machine.Image = droplet.Image.Slug
+		machine.Os = fmt.Sprintf("%s %s", droplet.Image.Distribution, droplet.Image.Name)
 	}
 
 	switch droplet.Status {
@@ -89,8 +127,8 @@ func getMachineFromDroplet(droplet godo.Droplet) *Machine {
 		machine.State = droplet.Status
 	}
 
-	if v4 := droplet.Networks.V4; len(v4) > 0 {
-		for _, net := range v4 {
+	if droplet.Networks != nil {
+		for _, net := range droplet.Networks.V4 {
 			if net.Type == "public" {
 				machine.PublicIp = net.IPAddress
 			} else if net.Type == "private" {
@@ -117,7 +155,9 @@ func (client MachineDigitalOceanClient) GetMachines() ([]*Machine, error) {
 		}
 
 		for _, d := range droplets {
-			if client.region != "" && d.Region.Slug != client.region {
+			// A droplet with no region cannot match one, so it is filtered out
+			// rather than dereferenced.
+			if client.region != "" && (d.Region == nil || d.Region.Slug != client.region) {
 				continue
 			}
 			allMachines = append(allMachines, getMachineFromDroplet(d))

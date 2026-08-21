@@ -25,12 +25,12 @@ func TestKindTab_OpensIsAThresholdNotASet(t *testing.T) {
 		kind string
 		want bool
 	}{
-		{KindTab, true},   // the reason the kind exists
-		{KindBot, true},   // a bot is a tab that also runs the agent
+		{KindTab, true},      // the reason the kind exists
+		{KindBot, true},      // a bot is a tab that also runs the agent
 		{KindMachine, false}, // bare compute publishes nothing
 		{KindCluster, false},
 		{KindFunction, false},
-		{"", false},          // unknown falls back to machine
+		{"", false}, // unknown falls back to machine
 		{"garbage", false},
 	} {
 		if got := Opens(tc.kind); got != tc.want {

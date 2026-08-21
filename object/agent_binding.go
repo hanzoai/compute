@@ -18,9 +18,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hanzoai/orm/relational/schemas"
 	"github.com/hanzoai/visor/service"
 	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/orm/relational/schemas"
 )
 
 // Agent binding lifecycle states. Honest — each reflects a real, observable
@@ -127,7 +127,7 @@ func machineHasBotRuntimeTag(machine *Machine, agentName string) bool {
 }
 
 // resolveBoundMachine resolves the machine a binding targets from the RESELL
-// compute surface — the Hanzo house DigitalOcean account, where a machine is a
+// compute surface — the Hanzo configured cloud account, where a machine is a
 // droplet identified by its integer id and owned by an org via the
 // `hanzo-org:<org>` tag. This is the SAME source the bind routes are scoped to
 // (`service.GetOrgMachine` verifies the droplet carries the caller org's tag),
@@ -152,7 +152,7 @@ func resolveBoundMachine(owner string, name string) (*Machine, error) {
 		return nil, nil
 	}
 	// Convert the service view to the object view. Resell machines are always in
-	// the house DigitalOcean account, so Provider is fixed here (getMachineFromDroplet
+	// the configured cloud account, so Provider is fixed here (getMachineFromDroplet
 	// leaves it empty). Only the fields reconcile + the denormalized snapshot need
 	// are carried.
 	return &Machine{

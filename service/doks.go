@@ -70,8 +70,27 @@ func NewDOKSClient(token, clusterID string) (*DOKSClient, error) {
 		return nil, fmt.Errorf("DOKS cluster ID is required")
 	}
 
-	return &DOKSClient{Client: newDOClient(token), ClusterID: clusterID}, nil
+	return &DOKSClient{Client: newDOClient(token, nil), ClusterID: clusterID}, nil
 }
+
+// newDOKSCloudClient builds a client for CLUSTER-level work, where there is no
+// cluster id yet. NewDOKSClient requires one because its node-pool methods are
+// scoped to a cluster; the cluster list/create/delete are not.
+func newDOKSCloudClient(token string) (*DOKSClient, error) {
+	if token == "" {
+		return nil, fmt.Errorf("DigitalOcean API token is required")
+	}
+	// Same construction the machine plane uses, so there is one place a DO client
+	// is built and one place its transport can be changed.
+	m, err := newMachineDigitalOceanClient(token, "", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	return &DOKSClient{Client: m.Client}, nil
+}
+
+// Provider satisfies KubernetesClientInterface.
+func (c *DOKSClient) Provider() string { return providerDigitalOcean }
 
 func nodePoolFromGodo(pool *godo.KubernetesNodePool) *NodePool {
 	np := &NodePool{
@@ -212,13 +231,16 @@ func IsNotFound(err error) bool {
 
 // KubernetesCluster is a DOKS cluster in the shape visor surfaces: identity,
 // region, status and tags. Tags carry ownership (hanzo-org:<org>) used to scope a
-// house-account cluster to the org that owns it.
+// platform-account cluster to the org that owns it.
 type KubernetesCluster struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
 	RegionSlug string   `json:"regionSlug"`
 	Status     string   `json:"status"`
 	Tags       []string `json:"tags"`
+	// Provider names the cloud this cluster is on. Additive and omitted when
+	// unset, so a single-cloud response is byte-identical to what it was.
+	Provider string `json:"provider,omitempty"`
 }
 
 func clusterFromGodo(c *godo.KubernetesCluster) *KubernetesCluster {
@@ -263,7 +285,7 @@ func poolsFromGodo(gpools []*godo.KubernetesNodePool) []*NodePool {
 // listClustersFull pages Kubernetes.List and re-Gets each cluster so RegionSlug,
 // Status and the node pools (with their nodes) reflect authoritative per-cluster
 // detail — List alone can return a lighter cluster. It is the ONE cluster
-// enumeration, shared by ListClusters and the house-account node lister.
+// enumeration, shared by ListClusters and the platform-account node lister.
 func listClustersFull(ctx context.Context, client *godo.Client) ([]*godo.KubernetesCluster, error) {
 	opt := &godo.ListOptions{Page: 1, PerPage: 200}
 	var out []*godo.KubernetesCluster
@@ -345,7 +367,7 @@ func nodePoolMachines(cluster *KubernetesCluster, pools []*NodePool) []*Machine 
 }
 
 // clusterHasTag reports whether a cluster carries an exact tag — the membership
-// check that scopes a house-account cluster to its owning org.
+// check that scopes a platform-account cluster to its owning org.
 func clusterHasTag(tags []string, want string) bool {
 	for _, t := range tags {
 		if t == want {
@@ -401,6 +423,10 @@ type CreateClusterSpec struct {
 	Region   string                `json:"region"`
 	Version  string                `json:"version"`
 	NodePool CreateClusterNodePool `json:"nodePool"`
+	// Provider picks the cloud. Optional while exactly one is configured;
+	// required once there are several, because guessing puts a customer's
+	// cluster on a cloud they did not choose.
+	Provider string `json:"provider,omitempty"`
 }
 
 // CreateClusterNodePool is the initial worker pool of a new cluster: its instance
