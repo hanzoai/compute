@@ -407,13 +407,22 @@ func (p *Provider) launchCredentialNamed(account string) (LaunchCredential, bool
 }
 
 // credential builds the cloud credential for one of this provider's accounts.
-// The account's KeyID/Secret/Region carry the authentication; Name stays the
-// provider row so descriptive uses (cost lens, cluster label) are unchanged —
-// the account a machine lives on is tracked on the machine, not here.
+//
+// Name is the account's egress label — the carrier passes it as the spend
+// Account, which selects the credential KMS holds, so each account MUST carry a
+// distinct label or a carried launch resolves them all to one KMS key and the
+// cycling has no effect. The row's own account keeps the provider's own label
+// (unchanged from the single-account past); an additional key uses its own name.
+// KeyID/Secret are consulted only on the carrier-less path, where visor holds
+// the token itself; under the carrier they are empty and egress attaches the key.
 func (p *Provider) credential(c LaunchCredential) service.Credential {
+	label := c.KeyName
+	if label == "" {
+		label = p.Name
+	}
 	return service.Credential{
 		Provider: p.Type,
-		Name:     p.Name,
+		Name:     label,
 		KeyID:    c.KeyID,
 		Secret:   c.Secret,
 		Region:   c.Region,

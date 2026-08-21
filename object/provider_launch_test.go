@@ -183,3 +183,29 @@ func TestGetMaskedProviderMasksKeys(t *testing.T) {
 var providerSeq int
 
 func testProviderSeq() int { providerSeq++; return providerSeq }
+
+// TestCredentialLabelSelectsAccount pins the egress label mapping: the row's own
+// account carries the provider's own label (unchanged single-account behavior),
+// and each additional key carries its own name, so a carried launch resolves a
+// DISTINCT KMS credential per account instead of collapsing them to one.
+func TestCredentialLabelSelectsAccount(t *testing.T) {
+	p := &Provider{Type: "DigitalOcean", Name: "do-prod", Region: "sfo3"}
+	creds := []LaunchCredential{
+		{KeyName: "", Secret: "row-token", Region: "sfo3"},
+		{KeyName: "do-2", Secret: "tok-2", Region: "nyc1"},
+	}
+	labels := map[string]string{}
+	for _, c := range creds {
+		cred := p.credential(c)
+		labels[c.KeyName] = cred.Name
+	}
+	if labels[""] != "do-prod" {
+		t.Errorf(`row account label = %q, want the provider's own name "do-prod"`, labels[""])
+	}
+	if labels["do-2"] != "do-2" {
+		t.Errorf(`key account label = %q, want its own name "do-2"`, labels["do-2"])
+	}
+	if labels[""] == labels["do-2"] {
+		t.Errorf("two accounts share label %q — a carried launch would collapse them to one KMS key", labels[""])
+	}
+}
