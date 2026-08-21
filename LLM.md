@@ -568,15 +568,17 @@ failed`. The value is `Yb5GFGDBEwcLsv2O8qWjS`. Watch it with
 `kubectl logs -n hanzo-build job/build-visor-<id>`. This is how v1.108.17 was
 built; it runs BuildKit in-cluster, so it never builds on anyone's laptop.
 
-### Preferred future: registry.hanzo.ai + platform.hanzo.ai (off GitHub)
-Directive: build on our own platform, images in our own registry, not GitHub.
-- `registry.hanzo.ai` = Docker registry with IAM-backed token auth
-  (`realm=https://iam.hanzo.ai/v1/iam/registry/token`). Push needs an IAM admin
-  user OR the `hanzo-registry` IAM **application** client_id:client_secret
-  (the machine/CI path, distributed via KMS — see
-  `iam/controllers/registry_token.go`). No anonymous pull today.
+### Images live on oci.hanzo.ai, built on platform.hanzo.ai
+Builds run on our own platform and images land in our own registry, not GitHub.
+- `oci.hanzo.ai` is the image and Helm-chart host, org-namespaced
+  `oci.hanzo.ai/<org>/<app>`. Auth is Hanzo IAM: `/v2/` answers
+  `401 Bearer realm="https://hanzo.id/v1/iam/registry/token", service="oci.hanzo.ai"`.
+  Push needs an IAM admin user OR the `hanzo-registry` IAM **application**
+  client_id:client_secret (the machine/CI path, distributed via KMS — see
+  `iam/controllers/registry_token.go`). Pull authenticates too.
 - `platform.hanzo.ai` (dokploy fork) has docker-file/nixpacks/paketo builders
-  and can build vm from its Dockerfile → push registry.hanzo.ai → deploy DOKS,
-  removing GitHub Actions from the loop.
-- To wire this: provide the `hanzo-registry` app credential (or a KMS service
-  token), then register vm as a platform app. Blocked on that credential.
+  and builds visor from its Dockerfile → push `oci.hanzo.ai` → deploy DOKS.
+- `hanzoai/ci` mirrors each published tag with a server-side crane copy:
+  `ghcr.io/<org>/<name>` → `oci.hanzo.ai/<org>/<name>`, where the GHCR org
+  `hanzoai` maps to the registry org `hanzo`. That copy is best-effort, so a
+  registry outage leaves the tag on GHCR only.
