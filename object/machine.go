@@ -31,6 +31,13 @@ type Machine struct {
 	Project     string `xorm:"varchar(100)" json:"project"`
 	Id          string `xorm:"varchar(100)" json:"id"`
 	Provider    string `xorm:"varchar(100)" json:"provider"`
+	// Account is which credential within the provider this machine launched on,
+	// carrying the provider's ProviderKey.Name; "" is the provider's own account.
+	// A launch cycles across a provider's accounts, and on most clouds a resource
+	// created under one account's key is invisible to another's, so the machine
+	// records its account to be listed and managed on the same one. Additive and
+	// Sync2-safe: "" is a machine on the provider's own credential, as before.
+	Account     string `xorm:"varchar(100)" json:"account"`
 	CreatedTime string `xorm:"varchar(100)" json:"createdTime"`
 	UpdatedTime string `xorm:"varchar(100)" json:"updatedTime"`
 	ExpireTime  string `xorm:"varchar(100)" json:"expireTime"`

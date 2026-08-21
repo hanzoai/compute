@@ -16,6 +16,7 @@ package object
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/hanzoai/orm/relational/schemas"
 	"github.com/hanzoai/visor/service"
@@ -58,6 +59,33 @@ type Provider struct {
 	// Empty means "cost-read not configured": the collector honestly skips this
 	// provider (no fee) rather than fabricating spend.
 	CostReadScope string `xorm:"varchar(300)" json:"costReadScope"`
+
+	// Keys holds ADDITIONAL credentials for the same cloud account family under
+	// one provider row, so a launch can cycle across accounts without a row per
+	// key. The row's own (ClientId, ClientSecret) is key index 0; these are 1..n.
+	// A key carries its own liveness so one rate-limited or revoked account is
+	// skipped without disabling the provider. Additive and Sync2-safe: an empty
+	// slice is a single-key provider, exactly as before.
+	Keys []ProviderKey `xorm:"mediumtext" json:"keys"`
+}
+
+// ProviderKey is one credential in a provider's rotation.
+type ProviderKey struct {
+	// Name distinguishes keys within a provider for attribution and logs; it is
+	// not the cloud account id.
+	Name string `json:"name"`
+	// KeyID/Secret are the account's credential. For DO, Secret is the token and
+	// KeyID is left empty, matching how the row's own ClientId/ClientSecret map.
+	KeyID  string `json:"keyId"`
+	Secret string `json:"secret"`
+	// Region overrides the provider row's Region for launches on this key; empty
+	// inherits the row's Region.
+	Region string `json:"region"`
+	// State is the key's own liveness. Empty or "active" means usable; anything
+	// else (e.g. "error", "rate-limited", "revoked") takes it out of rotation
+	// until an operator clears it, so one bad account never fails a launch that
+	// another account could serve.
+	State string `json:"state"`
 }
 
 func GetProviderCount(owner, field, value string) (int64, error) {
@@ -128,6 +156,15 @@ func GetMaskedProvider(provider *Provider, errs ...error) (*Provider, error) {
 
 	if provider.ClientSecret != "" {
 		provider.ClientSecret = "***"
+	}
+	// The rotation keys are credentials too, so they mask the same way the row's
+	// own secret does — otherwise adding a key would leak it through every API
+	// read that masks the primary one. A masked key still shows its name and
+	// region so an operator can see the rotation without seeing the secrets.
+	for i := range provider.Keys {
+		if provider.Keys[i].Secret != "" {
+			provider.Keys[i].Secret = "***"
+		}
 	}
 	return provider, nil
 }
@@ -244,5 +281,141 @@ func (provider *Provider) clusterEvent(event string) service.ComputeEvent {
 		Event:     event,
 		MachineID: provider.ClusterID,
 		Size:      provider.Region,
+	}
+}
+
+// LaunchCredential is one usable (account, region) a launch can run on. It flattens
+// a provider's own credential and its rotation Keys into the uniform shape the
+// selector cycles over, so the caller never reaches into either representation.
+type LaunchCredential struct {
+	KeyName string // the ProviderKey.Name, or "" for the provider's own credential
+	KeyID   string
+	Secret  string
+	Region  string
+}
+
+// keyIsActive reports whether a rotation key's state permits use. Empty and
+// "active" are both usable; anything else ("error", "rate-limited", "revoked")
+// is out of rotation until an operator clears it. The default is USABLE so an
+// operator who sets no state gets a working key rather than a silently-skipped
+// one. This governs ProviderKey liveness only — the provider row's own lifecycle
+// State is a separate vocabulary owned by isActiveCloudProvider.
+func keyIsActive(state string) bool {
+	return state == "" || state == "active"
+}
+
+// LaunchCredentials returns every usable credential on a provider, in a stable
+// order: the provider's own (ClientId, ClientSecret) first, then each active key
+// in declared order. A revoked or rate-limited key is omitted, so the caller
+// cycles only over accounts that can actually serve a launch.
+//
+// The provider's own credential leads because it is the one that already ran the
+// fleet; adding Keys must never demote it. A provider with no usable credential
+// at all returns an empty slice, and the caller must treat that as "cannot
+// launch here" rather than launching on a zero-value credential.
+func (p *Provider) LaunchCredentials() []LaunchCredential {
+	if p == nil {
+		return nil
+	}
+	out := make([]LaunchCredential, 0, len(p.Keys)+1)
+	// The row's own credential is key 0 whenever the row carries one. Its
+	// lifecycle is the provider-level State, enforced where providers are
+	// selected (isActiveCloudProvider) — this does not re-judge it in the key
+	// vocabulary. A multi-account provider that wants every account independently
+	// skippable leaves the row credential empty and lists all accounts as Keys.
+	if p.ClientSecret != "" || p.ClientId != "" {
+		out = append(out, LaunchCredential{
+			KeyName: "",
+			KeyID:   p.ClientId,
+			Secret:  p.ClientSecret,
+			Region:  p.Region,
+		})
+	}
+	for _, k := range p.Keys {
+		if !keyIsActive(k.State) {
+			continue
+		}
+		if k.Secret == "" && k.KeyID == "" {
+			continue
+		}
+		region := k.Region
+		if region == "" {
+			region = p.Region
+		}
+		out = append(out, LaunchCredential{
+			KeyName: k.Name,
+			KeyID:   k.KeyID,
+			Secret:  k.Secret,
+			Region:  region,
+		})
+	}
+	return out
+}
+
+// Launch account selection.
+//
+// A provider's usable accounts (LaunchCredentials) are cycled round-robin so a
+// burst of launches spreads across them instead of hammering one account into
+// its rate limit. The cursor is per-provider: interleaved launches on different
+// providers must not stride one provider's cursor by the count of the others, or
+// a shared factor would pin it to a single account forever.
+var (
+	launchCursorMu sync.Mutex
+	launchCursors  = map[string]uint64{}
+)
+
+func nextLaunchCursor(providerID string) uint64 {
+	launchCursorMu.Lock()
+	defer launchCursorMu.Unlock()
+	c := launchCursors[providerID]
+	launchCursors[providerID] = c + 1
+	return c
+}
+
+// pickLaunchCredential chooses one usable credential for a launch by stepping a
+// cursor over the account set. Any monotonically advancing cursor gives
+// round-robin; an empty set has no launchable account and returns ok=false so
+// the caller refuses the launch rather than running on a zero credential.
+func pickLaunchCredential(creds []LaunchCredential, cursor uint64) (LaunchCredential, bool) {
+	if len(creds) == 0 {
+		return LaunchCredential{}, false
+	}
+	return creds[cursor%uint64(len(creds))], true
+}
+
+// LaunchCredentialFor picks the next account a launch should run on, cycling
+// across this provider's usable accounts. ok=false means the provider has no
+// usable account and the caller must not launch.
+func (p *Provider) LaunchCredentialFor() (LaunchCredential, bool) {
+	creds := p.LaunchCredentials()
+	return pickLaunchCredential(creds, nextLaunchCursor(p.getId()))
+}
+
+// launchCredentialNamed resolves the account a launched machine recorded (its
+// key name; "" is the provider's own account) back to a usable credential. A
+// machine must be managed on the same account it launched on — on most clouds a
+// resource created under one account's key is invisible to another's. ok=false
+// means that account is gone or disabled and the machine can no longer be
+// reached through it.
+func (p *Provider) launchCredentialNamed(account string) (LaunchCredential, bool) {
+	for _, c := range p.LaunchCredentials() {
+		if c.KeyName == account {
+			return c, true
+		}
+	}
+	return LaunchCredential{}, false
+}
+
+// credential builds the cloud credential for one of this provider's accounts.
+// The account's KeyID/Secret/Region carry the authentication; Name stays the
+// provider row so descriptive uses (cost lens, cluster label) are unchanged —
+// the account a machine lives on is tracked on the machine, not here.
+func (p *Provider) credential(c LaunchCredential) service.Credential {
+	return service.Credential{
+		Provider: p.Type,
+		Name:     p.Name,
+		KeyID:    c.KeyID,
+		Secret:   c.Secret,
+		Region:   c.Region,
 	}
 }

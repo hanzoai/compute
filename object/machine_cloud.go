@@ -90,21 +90,28 @@ func getMachinesCloud(owner string) ([]*Machine, error) {
 	}
 
 	for _, provider := range providers {
-		client, err2 := service.NewMachineClient(service.Credential{Provider: provider.Type, Name: provider.Name, KeyID: provider.ClientId, Secret: provider.ClientSecret, Region: provider.Region})
-		if err2 != nil {
-			return nil, err2
-		}
-
-		clientMachines, err2 := client.GetMachines()
-		if err2 != nil {
-			if provider.Type != "VMware" {
+		// A launch cycles across a provider's accounts, so a machine can live on
+		// any one of them. List every account — on most clouds a resource under
+		// one account's key is invisible to another's, so listing only the
+		// provider's own account would silently drop the rest from tracking.
+		for _, cred := range provider.LaunchCredentials() {
+			client, err2 := service.NewMachineClient(provider.credential(cred))
+			if err2 != nil {
 				return nil, err2
 			}
-		}
 
-		for _, clientMachine := range clientMachines {
-			machine := getMachineFromService(owner, provider.Name, clientMachine)
-			machines = append(machines, machine)
+			clientMachines, err2 := client.GetMachines()
+			if err2 != nil {
+				if provider.Type != "VMware" {
+					return nil, err2
+				}
+			}
+
+			for _, clientMachine := range clientMachines {
+				machine := getMachineFromService(owner, provider.Name, clientMachine)
+				machine.Account = cred.KeyName
+				machines = append(machines, machine)
+			}
 		}
 	}
 
@@ -159,7 +166,12 @@ func CreateMachineCloud(owner string, providerName string, spec *service.CreateM
 		return nil, fmt.Errorf("provider %q not found for owner %q", providerName, owner)
 	}
 
-	client, err := service.NewMachineClient(service.Credential{Provider: provider.Type, Name: provider.Name, KeyID: provider.ClientId, Secret: provider.ClientSecret, Region: provider.Region})
+	cred, ok := provider.LaunchCredentialFor()
+	if !ok {
+		return nil, fmt.Errorf("provider %q for owner %q has no usable account to launch on", providerName, owner)
+	}
+
+	client, err := service.NewMachineClient(provider.credential(cred))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create machine client: %w", err)
 	}
@@ -170,6 +182,7 @@ func CreateMachineCloud(owner string, providerName string, spec *service.CreateM
 	}
 
 	machine := getMachineFromService(owner, providerName, clientMachine)
+	machine.Account = cred.KeyName
 	machine.Os = spec.OS
 
 	// Set remote access defaults based on OS
@@ -203,7 +216,12 @@ func updateMachineCloud(oldMachine *Machine, machine *Machine) (bool, error) {
 		return false, fmt.Errorf("The provider: %s does not exist", machine.Provider)
 	}
 
-	client, err := service.NewMachineClient(service.Credential{Provider: provider.Type, Name: provider.Name, KeyID: provider.ClientId, Secret: provider.ClientSecret, Region: provider.Region})
+	cred, ok := provider.launchCredentialNamed(oldMachine.Account)
+	if !ok {
+		return false, fmt.Errorf("provider %q account %q for machine %q is no longer usable", oldMachine.Provider, oldMachine.Account, oldMachine.Name)
+	}
+
+	client, err := service.NewMachineClient(provider.credential(cred))
 	if err != nil {
 		return false, err
 	}
