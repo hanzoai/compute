@@ -1,0 +1,33 @@
+# Hanzo Visor — the one file that says how this repo builds, gates and ships.
+#
+# It replaces a caller of hanzoai/.github's docker-build.yml, which built and
+# pushed to ghcr and stopped there. hanzoai/ci's build.yml does the same push and
+# then copies the exact tag set to oci.hanzo.ai — server-side, no rebuild — so the
+# image exists at both addresses. ghcr stays: it is the public mirror, the same
+# arrangement source already has, where the forge is canonical and GitHub mirrors
+# it. What changed is that ours gets a copy at all.
+#
+# The version is DERIVED, never typed. This repo carries no package.json,
+# Cargo.toml, VERSION or pyproject.toml, so imgver reads the registry floor —
+# the highest semver already published for this image — and publishes the next
+# patch. ghcr.io/hanzoai/visor is at 1.108.30, so the next build is 1.108.31 and
+# the series this repo has been on since 1.108.x continues unbroken. Adding a
+# VERSION file later would take precedence; there is no reason to.
+
+test:
+  - name: build-and-vet
+    run: |
+      set -e
+      go build ./...
+      go vet ./...
+
+images:
+  - name: visor
+    context: .
+    dockerfile: Dockerfile
+    repo: ghcr.io/hanzoai/visor
+    # amd64-only, carried over from the previous caller and still true: DOKS has
+    # no arm64 droplets, so there is no arm64 deploy target, and a queued arm64
+    # job would block the manifest step behind a runner that never claims it.
+    platforms:
+      - linux/amd64
