@@ -19,7 +19,7 @@ func openTestOrgDB(t *testing.T, path string) *relational.Engine {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
 	}
-	e, err := relational.NewEngine("sqlite", path+sqlitePragmas)
+	e, err := relational.NewEngine("sqlite", dsn(path))
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
