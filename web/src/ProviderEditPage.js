@@ -37,14 +37,11 @@ class ProviderEditPage extends React.Component {
 
   getProvider() {
     ProviderBackend.getProvider(this.props.account.owner, this.state.providerName)
-      .then((res) => {
-        if (res.status === "ok") {
-          this.setState({
-            provider: res.data,
-          });
-        } else {
-          Setting.showMessage("error", `Failed to get provider: ${res.msg}`);
-        }
+      .then((provider) => {
+        this.setState({provider: provider});
+      })
+      .catch(error => {
+        Setting.showMessage("error", `Failed to get provider: ${error.message}`);
       });
   }
 
@@ -225,43 +222,30 @@ class ProviderEditPage extends React.Component {
   submitProviderEdit(willExist) {
     const provider = Setting.deepCopy(this.state.provider);
     ProviderBackend.updateProvider(this.state.provider.owner, this.state.providerName, provider)
-      .then((res) => {
-        if (res.status === "ok") {
-          if (res.data) {
-            Setting.showMessage("success", "Successfully saved");
-            this.setState({
-              providerName: this.state.provider.name,
-            });
-            if (willExist) {
-              this.props.history.push("/providers");
-            } else {
-              this.props.history.push(`/providers/${this.state.provider.owner}/${encodeURIComponent(this.state.provider.name)}`);
-            }
-            // this.getProvider(true);
-          } else {
-            Setting.showMessage("error", "failed to save: server side failure");
-            this.updateProviderField("name", this.state.providerName);
-          }
+      .then(() => {
+        Setting.showMessage("success", "Successfully saved");
+        this.setState({
+          providerName: this.state.provider.name,
+        });
+        if (willExist) {
+          this.props.history.push("/providers");
         } else {
-          Setting.showMessage("error", `failed to save: ${res.msg}`);
+          this.props.history.push(`/providers/${this.state.provider.owner}/${encodeURIComponent(this.state.provider.name)}`);
         }
       })
       .catch(error => {
-        Setting.showMessage("error", `failed to save: ${error}`);
+        Setting.showMessage("error", `failed to save: ${error.message}`);
+        this.updateProviderField("name", this.state.providerName);
       });
   }
 
   deleteProvider() {
     ProviderBackend.deleteProvider(this.state.provider)
-      .then((res) => {
-        if (res.status === "ok") {
-          this.props.history.push("/providers");
-        } else {
-          Setting.showMessage("error", `${i18next.t("general:Failed to delete")}: ${res.msg}`);
-        }
+      .then(() => {
+        this.props.history.push("/providers");
       })
       .catch(error => {
-        Setting.showMessage("error", `${i18next.t("general:Failed to connect to server")}: ${error}`);
+        Setting.showMessage("error", `${i18next.t("general:Failed to delete")}: ${error.message}`);
       });
   }
 

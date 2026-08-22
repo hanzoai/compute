@@ -38,18 +38,17 @@ class RecordListPage extends BaseListPage {
 
   getProviders() {
     ProviderBackend.getProviders(this.props.account.owner)
-      .then((res) => {
-        if (res.status === "ok") {
-          const providerMap = {};
-          for (const provider of res.data) {
-            providerMap[provider.name] = provider;
-          }
-          this.setState({
-            providerMap: providerMap,
-          });
-        } else {
-          Setting.showMessage("error", res.msg);
+      .then((page) => {
+        const providerMap = {};
+        for (const provider of page.providers) {
+          providerMap[provider.name] = provider;
         }
+        this.setState({
+          providerMap: providerMap,
+        });
+      })
+      .catch(error => {
+        Setting.showMessage("error", error.message);
       });
   }
 

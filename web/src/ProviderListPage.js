@@ -46,37 +46,29 @@ class ProviderListPage extends BaseListPage {
   addProvider() {
     const newProvider = this.newProvider();
     ProviderBackend.addProvider(newProvider)
-      .then((res) => {
-        if (res.status === "ok") {
-          this.props.history.push({pathname: `/providers/${newProvider.owner}/${newProvider.name}`, mode: "add"});
-          Setting.showMessage("success", "Provider added successfully");
-        } else {
-          Setting.showMessage("error", `Failed to add Provider: ${res.msg}`);
-        }
+      .then(() => {
+        this.props.history.push({pathname: `/providers/${newProvider.owner}/${newProvider.name}`, mode: "add"});
+        Setting.showMessage("success", "Provider added successfully");
       })
       .catch(error => {
-        Setting.showMessage("error", `Provider failed to add: ${error}`);
+        Setting.showMessage("error", `Failed to add Provider: ${error.message}`);
       });
   }
 
   deleteProvider(i) {
     ProviderBackend.deleteProvider(this.state.data[i])
-      .then((res) => {
-        if (res.status === "ok") {
-          Setting.showMessage("success", "Provider deleted successfully");
-          this.setState({
-            data: Setting.deleteRow(this.state.data, i),
-            pagination: {
-              ...this.state.pagination,
-              total: this.state.pagination.total - 1,
-            },
-          });
-        } else {
-          Setting.showMessage("error", `Failed to delete Provider: ${res.msg}`);
-        }
+      .then(() => {
+        Setting.showMessage("success", "Provider deleted successfully");
+        this.setState({
+          data: Setting.deleteRow(this.state.data, i),
+          pagination: {
+            ...this.state.pagination,
+            total: this.state.pagination.total - 1,
+          },
+        });
       })
       .catch(error => {
-        Setting.showMessage("error", `Provider failed to delete: ${error}`);
+        Setting.showMessage("error", `Failed to delete Provider: ${error.message}`);
       });
   }
 
@@ -240,29 +232,28 @@ class ProviderListPage extends BaseListPage {
     }
     this.setState({loading: true});
     ProviderBackend.getProviders(Setting.getRequestOrganization(this.props.account), params.pagination.current, params.pagination.pageSize, field, value, sortField, sortOrder)
-      .then((res) => {
+      .then((page) => {
         this.setState({
-          loading: false,
+          data: page.providers,
+          pagination: {
+            ...params.pagination,
+            total: page.total,
+          },
+          searchText: params.searchText,
+          searchedColumn: params.searchedColumn,
         });
-        if (res.status === "ok") {
-          this.setState({
-            data: res.data,
-            pagination: {
-              ...params.pagination,
-              total: res.data2,
-            },
-            searchText: params.searchText,
-            searchedColumn: params.searchedColumn,
-          });
+      })
+      .catch(error => {
+        // A denial is the STATUS, not a phrase in the body: the authz seam
+        // answers 403, and matching on its message only worked in one language.
+        if (error.status === 403) {
+          this.setState({isAuthorized: false});
         } else {
-          if (Setting.isResponseDenied(res)) {
-            this.setState({
-              isAuthorized: false,
-            });
-          } else {
-            Setting.showMessage("error", res.msg);
-          }
+          Setting.showMessage("error", error.message);
         }
+      })
+      .finally(() => {
+        this.setState({loading: false});
       });
   };
 }

@@ -63,7 +63,7 @@ which is what puts visor in the op registry every projection reads: OpenAPI,
 MCP, CLI, SDK, and the by-name call plane. `zip.Here` reaches it in-process with
 no wire. A machine's AGENT is the second noun to land typed (4 ops,
 `controllers/agent_binding.go`, registered by `routers.registerAgent`). The
-remaining 68 routes are still untyped controller methods, so they project
+remaining 63 routes are still untyped controller methods, so they project
 nowhere — see "Typed ops: what is left".
 
 Two defects it fixed, both silent:
@@ -99,11 +99,11 @@ breaks the schema mapping. The migration is done; the tag name is just the
 tag name.
 
 ### Typed ops: what is left (IN PROGRESS, noun by noun)
-68 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
+63 of visor's 74 routes are still untyped `func (c *ApiController) X()` methods
 registered through `h()`. They serve fine and project NOWHERE — no OpenAPI
 schema, no MCP tool, no CLI verb, no `zip.Here`.
 
-Two nouns have landed: `/v1/health`, and a machine's AGENT — four ops in
+The first two to land were `/v1/health` and a machine's AGENT — four ops in
 `controllers/agent_binding.go`, registered by `routers.registerAgent`, at ONE
 address with the method carrying the verb:
 
@@ -121,6 +121,52 @@ in the same change (`hanzoai/cloud` `apps/visor/{client,bots,visor}.go`), which
 is what makes the break safe. `controllers/agent_wire_test.go` pins those
 answers; the fake vm in cloud's `apps/visor/bots_http_test.go` is written to
 match it.
+
+A cloud PROVIDER is the third noun, and the first whose ADDRESS moved rather than
+only its wire — five ops in `controllers/provider.go`, registered by
+`routers.registerProvider`:
+
+| Method | Path | Was |
+|--------|------|-----|
+| GET | `/v1/providers` | `GET /v1/get-providers` |
+| POST | `/v1/providers` | `POST /v1/add-provider` |
+| GET | `/v1/providers/:owner/:name` | `GET /v1/get-provider?id=owner/name` |
+| PUT | `/v1/providers/:owner/:name` | `POST /v1/update-provider?id=owner/name` |
+| DELETE | `/v1/providers/:owner/:name` | `POST /v1/delete-provider` (owner/name in the body) |
+
+A provider's identity is its primary key, the pair `(Owner, Name)`, so the pair
+IS the address — `built-in/do` is the string the old `?id` carried, in the part
+of the URL that addresses things. Two consequences worth knowing:
+
+- **The authorization seam reads the address.** `authz.IsAllowed` admits a
+  subject to its own org's objects (`subOwner == objOwner`) and
+  `routers.getObject` supplies the object half; it now reads `:owner`/`:name`
+  from the route before falling back to the query and body, so the decision is
+  the same one the old address got. It reads only those two names, never `:id` —
+  an `:id` here is a cloud's own machine identifier, not an org.
+- **A replace NESTS its record** (`{"provider": {…}}`). zip binds the URL over
+  the top level only, which keeps the path's name (which provider is being
+  written) and the record's name (what it is called afterwards) two values. Flat,
+  the path would overwrite the record and a rename would silently do nothing —
+  and renaming is how a provider gets its name at all, since the console creates
+  one under a generated `provider_<random>`. The OWNER is not like that: the
+  handler writes into the org the address names, so a body cannot move a
+  credential into another tenant.
+
+`controllers/provider_wire_test.go` pins the answers against a real store, and
+`routers/provider_test.go` pins what the seam resolves for each address.
+
+**The retired addresses answer 410 Gone** and name their successor in a `Link`
+header (`rel="successor-version"`, RFC 5829) beside `Deprecation` (RFC 9745) and
+`Sunset` (RFC 8594), with the same successor in the body so the two cannot
+disagree. One table per family (`routers/gone_providers.go`), one handler
+(`routers/gone.go`), registered on `zip.Undeclared` so they SERVE without
+entering `App.Declaration` — and so without entering the OpenAPI document, the
+MCP tool list, the CLI or the SDKs, which a 410-on-every-method address would
+otherwise fill with one dead operation per method. They are registered ahead of
+the filter chain, beside health: a retirement notice behind the authz seam
+answers 403, and a caller that gets 403 learns nothing about where its address
+went.
 
 An op declares the identity it reads — `header:"Authorization"` plus
 `url:"owner"` on the embedded `caller` — because a typed handler is given a
@@ -144,7 +190,7 @@ Order to do it in:
    name) — the socket it needs now exists. No visor change required. NOT DONE.
 2. Convert visor's routes to typed ops noun by noun (machines, k8s, node-pools,
    volumes, plans), each with its cloud caller, dropping the envelope as each
-   lands. Started: agent DONE.
+   lands. Started: agent DONE, provider DONE (address moved too).
 3. `pkg/visor/embed.go`'s fiber→`http.Handler` adaptor goes when step 1 lands.
 
 Step 2 before step 1 costs one thing, and it is paid: while the migration runs,
@@ -153,10 +199,12 @@ the enveloped legacy ops (23 call sites) and `cl.op` for the typed ones (9).
 They share one request half, and `call` disappears when the last noun lands.
 
 Route/contract bookkeeping: `routers/router_contract_test.go` pins the surface
-at 73 (GET 32, POST 37, DELETE 3, PUT 1) and reads the LIVE fiber router, so a
+at 74 (GET 33, POST 35, DELETE 4, PUT 2) and reads the LIVE fiber router, so a
 typed op swapped in for an untyped route keeps the same contract line and the
 test keeps holding. The typed rows name package functions rather than
-`ApiController` methods.
+`ApiController` methods. It counts the routes the app DECLARES (`zip.Declares`),
+which is what leaves the retired 410 addresses out: they serve, on every method,
+and are not part of the contract.
 
 One piece of folklore worth not repeating: registering a literal ahead of a
 `:param` sibling does NOT decide the match. Fiber prefers the static segment
@@ -398,7 +446,9 @@ pins it; egress refuses the same providers for the same reason.
 org's provisioning lease until the socket closes.
 
 ### Key Dependencies
-- Go 1.26, `zap-proto/zip` v1.27.0 (the ONE framework), `hanzoai/orm` (the ONE
+- Go 1.26, `zap-proto/zip` v1.33.3 (the ONE framework) — v1.33.1 is the floor,
+  for `zip.Undeclared`, which is what lets a retired address serve without
+  entering the contract; `hanzoai/orm` (the ONE
   ORM); `github.com/hanzoai/commerce/metering` v0.1.4
 - `hcloud-go/v2` v2.37, `godo` v1.197, `aws-sdk-go-v2/lightsail`
 - `github.com/hanzoai/egress/spend` v0.1.0 — the cloud-call contract and its

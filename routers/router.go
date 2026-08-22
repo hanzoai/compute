@@ -68,6 +68,13 @@ func Route(app *zip.App) {
 	// probe measured the file server rather than the service.
 	registerHealth(app)
 
+	// The retired addresses answer here for the same reason, and one more of
+	// their own: a retirement notice behind the authz seam answers 403, and a
+	// caller that gets 403 learns nothing about where its address went — which is
+	// the whole reason these entries exist. They read nothing and reach no store,
+	// so there is nothing for the seam to protect (routers/gone.go).
+	retire(app, goneProviders)
+
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
 	app.Use(zip.H(ApiFilter))
@@ -129,6 +136,44 @@ func registerAgent(app *zip.App) {
 	)
 }
 
+// registerProvider declares a cloud PROVIDER — the credential and configuration
+// one org holds for one cloud (controllers/provider.go). Five TYPED ops.
+//
+// ONE noun, ONE address, and the METHOD carries the verb. A provider's identity
+// is its primary key, the pair (owner, name), so the pair IS the address:
+// /v1/providers/built-in/do carries the same string the retired ?id=built-in/do
+// carried, in the part of the URL that addresses things.
+//
+// PUT rather than POST on the item, because a replace is idempotent — sending
+// the same provider twice is the state the caller asked for, not two providers.
+func registerProvider(app *zip.App) {
+	zip.Get(app, "/v1/providers", controllers.ListProviders,
+		zip.WithSummary("List an org's cloud providers"),
+		zip.WithOperationID("listProviders"),
+		zip.WithTags("Provider"),
+	)
+	zip.Post(app, "/v1/providers", controllers.AddProvider,
+		zip.WithSummary("Register a cloud provider for an org"),
+		zip.WithOperationID("addProvider"),
+		zip.WithTags("Provider"),
+	)
+	zip.Get(app, "/v1/providers/:owner/:name", controllers.GetProvider,
+		zip.WithSummary("Read one cloud provider"),
+		zip.WithOperationID("getProvider"),
+		zip.WithTags("Provider"),
+	)
+	zip.Put(app, "/v1/providers/:owner/:name", controllers.ReplaceProvider,
+		zip.WithSummary("Replace one cloud provider"),
+		zip.WithOperationID("replaceProvider"),
+		zip.WithTags("Provider"),
+	)
+	zip.Delete(app, "/v1/providers/:owner/:name", controllers.RemoveProvider,
+		zip.WithSummary("Remove one cloud provider"),
+		zip.WithOperationID("removeProvider"),
+		zip.WithTags("Provider"),
+	)
+}
+
 // registerAPI registers the /v1 surface, one verb per line. The table is pinned
 // by router_contract_test.go: a route added here without a contract line fails,
 // and so does a contract line with no route.
@@ -152,11 +197,7 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/add-asset", h((*controllers.ApiController).AddAsset))
 	app.Post("/v1/delete-asset", h((*controllers.ApiController).DeleteAsset))
 
-	app.Get("/v1/get-providers", h((*controllers.ApiController).GetProviders))
-	app.Get("/v1/get-provider", h((*controllers.ApiController).GetProvider))
-	app.Post("/v1/update-provider", h((*controllers.ApiController).UpdateProvider))
-	app.Post("/v1/add-provider", h((*controllers.ApiController).AddProvider))
-	app.Post("/v1/delete-provider", h((*controllers.ApiController).DeleteProvider))
+	registerProvider(app)
 
 	app.Get("/v1/get-machines", h((*controllers.ApiController).GetMachines))
 	app.Get("/v1/get-machine", h((*controllers.ApiController).GetMachine))

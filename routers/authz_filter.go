@@ -42,7 +42,24 @@ func getSubject(c *zip.Ctx) (string, string) {
 	return util.GetOwnerAndNameFromId(username)
 }
 
+// getObject resolves WHICH object a request acts on, which is half of the
+// authorization decision (authz.IsAllowed admits a subject to its OWN org's
+// objects — subOwner == objOwner).
+//
+// An address that CARRIES the object names it in the ROUTE:
+// /v1/providers/:owner/:name is the same (owner, name) pair the retired
+// ?id=owner/name carried, moved out of the query string. Reading it here is what
+// keeps the decision identical across that move — the seam resolves the object
+// from wherever the address puts it, and the rule it feeds is untouched.
+//
+// Only those two names are read, and deliberately not `:id`: an `:id` elsewhere
+// on this surface is a cloud's own machine or cluster identifier, which is not
+// an org and must not be compared to one.
 func getObject(c *zip.Ctx) (string, string) {
+	if owner := c.Fiber().Params("owner"); owner != "" {
+		return owner, c.Fiber().Params("name")
+	}
+
 	method := c.Method()
 
 	if method == http.MethodGet {

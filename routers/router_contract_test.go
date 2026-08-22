@@ -69,11 +69,14 @@ var apiContract = []route{
 	{"POST", "/v1/update-asset", "UpdateAsset"},
 	{"POST", "/v1/add-asset", "AddAsset"},
 	{"POST", "/v1/delete-asset", "DeleteAsset"},
-	{"GET", "/v1/get-providers", "GetProviders"},
-	{"GET", "/v1/get-provider", "GetProvider"},
-	{"POST", "/v1/update-provider", "UpdateProvider"},
-	{"POST", "/v1/add-provider", "AddProvider"},
-	{"POST", "/v1/delete-provider", "DeleteProvider"},
+	// A cloud PROVIDER — five TYPED ops (see registerProvider), so these rows name
+	// package functions rather than ApiController methods. The item is addressed
+	// by the pair that is its primary key.
+	{"GET", "/v1/providers", "ListProviders"},
+	{"POST", "/v1/providers", "AddProvider"},
+	{"GET", "/v1/providers/:owner/:name", "GetProvider"},
+	{"PUT", "/v1/providers/:owner/:name", "ReplaceProvider"},
+	{"DELETE", "/v1/providers/:owner/:name", "RemoveProvider"},
 	{"GET", "/v1/get-machines", "GetMachines"},
 	{"GET", "/v1/get-machine", "GetMachine"},
 	{"POST", "/v1/update-machine", "UpdateMachine"},
@@ -135,26 +138,41 @@ var apiContract = []route{
 // key renders a route as "METHOD path" for set comparison.
 func (r route) key() string { return r.method + " " + r.path }
 
-// registeredRoutes returns the verb+path set visor actually installs on a fresh
-// app, read back off the live fiber router (not re-parsed from source), so the
-// assertion covers what the server will really serve.
-//
-// Both registration functions run, because the contract is the whole surface and
-// health is registered separately — ahead of the filter chain, deliberately (see
-// Route). Calling only registerAPI here would leave a served route outside the
-// contract, which is the exact gap this test exists to close. The filter chain
-// itself is omitted: Use-handlers are not routes.
-func registeredRoutes(t *testing.T) map[string]bool {
-	t.Helper()
+// surface builds a fresh app carrying everything Route installs on the wire:
+// health (registered ahead of the filter chain, deliberately — see Route), the
+// retired addresses, and the /v1 API. Calling only registerAPI would leave a
+// served route outside the contract, which is the exact gap this test exists to
+// close. The filter chain itself is omitted: Use-handlers are not routes.
+func surface() *zip.App {
 	app := zip.New(zip.Config{})
 	registerHealth(app)
+	retire(app, goneProviders)
 	registerAPI(app)
+	return app
+}
+
+// registeredRoutes returns the verb+path set visor DECLARES, read back off the
+// live fiber router (not re-parsed from source), so the assertion covers what the
+// server will really serve.
+//
+// A retired address is served and NOT declared: it answers every method with a
+// 410 naming its successor, so publishing it would be one operation per method
+// per address, most of them calls that never existed. zip.Declares is what tells
+// the two apart — the router is a strict superset of the contract — so the
+// contract table stays a list of what visor OFFERS. That the retired addresses
+// serve, and that they stay out of the contract, is pinned by TestGoneIsServedAndUndeclared.
+func registeredRoutes(t *testing.T) map[string]bool {
+	t.Helper()
+	app := surface()
 
 	got := make(map[string]bool)
 	for _, r := range app.Fiber().GetRoutes(true) {
 		// fiber auto-generates a HEAD twin for every GET; it is not part of the
 		// declared contract, so it is not counted against it.
 		if r.Method == "HEAD" {
+			continue
+		}
+		if !app.Declares(r.Method, r.Path) {
 			continue
 		}
 		got[r.Method+" "+r.Path] = true
@@ -212,9 +230,9 @@ func TestAPIContractCount(t *testing.T) {
 }
 
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
-// as POST keeps the total at 72 while breaking every caller.
+// as POST keeps the total at 74 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 35, "DELETE": 4, "PUT": 2}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

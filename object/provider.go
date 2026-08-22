@@ -88,6 +88,12 @@ type ProviderKey struct {
 	State string `json:"state"`
 }
 
+// masked is what a secret reads as on the way out, and what a save of that read
+// sends back in. It is ONE value because the mask and the restore have to agree:
+// written twice, one of them drifts and the drift is a credential overwritten
+// with the mask.
+const masked = "***"
+
 func GetProviderCount(owner, field, value string) (int64, error) {
 	session := GetSession(owner, -1, -1, field, value, "", "")
 	return session.Count(&Provider{})
@@ -155,7 +161,7 @@ func GetMaskedProvider(provider *Provider, errs ...error) (*Provider, error) {
 	}
 
 	if provider.ClientSecret != "" {
-		provider.ClientSecret = "***"
+		provider.ClientSecret = masked
 	}
 	// The rotation keys are credentials too, so they mask the same way the row's
 	// own secret does — otherwise adding a key would leak it through every API
@@ -163,7 +169,7 @@ func GetMaskedProvider(provider *Provider, errs ...error) (*Provider, error) {
 	// region so an operator can see the rotation without seeing the secrets.
 	for i := range provider.Keys {
 		if provider.Keys[i].Secret != "" {
-			provider.Keys[i].Secret = "***"
+			provider.Keys[i].Secret = masked
 		}
 	}
 	return provider, nil
@@ -194,8 +200,26 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 		return false, nil
 	}
 
-	if provider.ClientSecret == "***" {
+	// A read masks EVERY secret this provider holds, so a save of what was read
+	// has to restore every one of them or the write is what destroys the
+	// credential. The row's own secret was already restored here; a rotation key's
+	// was not, so a provider with a second cloud account lost that account on the
+	// next console edit and every launch that cycled onto it failed to
+	// authenticate. A key is matched by Name — its identity within the provider.
+	// A name that is not stored keeps no secret rather than the mask, because a
+	// literal "***" is not a credential and failing to authenticate is better than
+	// pretending to hold one.
+	if provider.ClientSecret == masked {
 		provider.ClientSecret = p.ClientSecret
+	}
+	held := make(map[string]string, len(p.Keys))
+	for _, k := range p.Keys {
+		held[k.Name] = k.Secret
+	}
+	for i, k := range provider.Keys {
+		if k.Secret == masked {
+			provider.Keys[i].Secret = held[k.Name]
+		}
 	}
 
 	engine, err := EngineFor(owner)
