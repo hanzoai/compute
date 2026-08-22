@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/zap-proto/zip"
 
@@ -42,8 +43,55 @@ func getSubject(c *zip.Ctx) (string, string) {
 	return util.GetOwnerAndNameFromId(username)
 }
 
+// addressedNouns are the /v1 nouns that name their object in the ADDRESS:
+// /v1/<noun> is a collection scoped by ?owner, /v1/<noun>/<owner>/<name> is one
+// item, and anything below that item belongs to it. One entry per family that
+// has moved off the verb addresses.
+var addressedNouns = map[string]bool{
+	"records": true,
+}
+
+// addressedObject reads the object a moved noun's address names, and it is the
+// ONE resolution for those addresses — the item from its two segments, the
+// collection from the ?owner its handler lists by.
+//
+// Being one resolution is the point. The fallbacks below try `?id`, then
+// `?owner`, then the body, and a request may carry more than one: `?owner=b&id=
+// a/x` authorized against org a while the listing handler returned org b's rows.
+// Naming the object once, from the same place the handler reads it, is what
+// makes that impossible rather than merely unlikely.
+//
+// It reads the raw path rather than c.Param because this runs as MIDDLEWARE,
+// where the matched route is the middleware's own and every route param answers
+// "" — measured by TestRouteParamsAreInvisibleToMiddleware. An address whose
+// owner segment the authorizer cannot see is an address with no tenant check:
+// objOwner falls to "", the subOwner == objOwner clause cannot hold, and the
+// request lands on the static policy, which names no such route.
+//
+// Keyed on the NOUN and not on segment count: /v1/k8s/clusters/<id> is four
+// segments too and names no owner in the third, so a blanket rule would read a
+// cluster id as an org.
+func addressedObject(path, queryOwner string) (string, string, bool) {
+	seg := strings.Split(strings.Trim(path, "/"), "/")
+	if len(seg) < 2 || seg[0] != "v1" || !addressedNouns[seg[1]] {
+		return "", "", false
+	}
+	if len(seg) < 4 || seg[2] == "" || seg[3] == "" {
+		return queryOwner, "", true
+	}
+	return seg[2], seg[3], true
+}
+
 func getObject(c *zip.Ctx) (string, string) {
 	method := c.Method()
+
+	// The ADDRESS is the first place a request names its object, and the best:
+	// the handler resolves the same segments, so the authorizer judges what the
+	// handler will act on. A query parameter or a body field can name a different
+	// object than the one the URL does.
+	if owner, name, ok := addressedObject(c.Path(), c.Query("owner")); ok {
+		return owner, name
+	}
 
 	if method == http.MethodGet {
 		// query == "?id=built-in/admin"

@@ -68,6 +68,13 @@ func Route(app *zip.App) {
 	// probe measured the file server rather than the service.
 	registerHealth(app)
 
+	// The retired addresses answer here, ahead of the chain, for the same reason
+	// health does: 410 is a fact about the address and carries no tenant data, so
+	// it needs no credential and belongs in no audit row. Behind the authorizer
+	// the same URL would answer 410 to a signed-in caller and 403 to everyone
+	// else, which reads as "forbidden" where the truth is "moved".
+	registerGone(app, goneRecords)
+
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
 	app.Use(zip.H(ApiFilter))
@@ -137,14 +144,22 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/signout", h((*controllers.ApiController).Signout))
 	app.Get("/v1/get-account", h((*controllers.ApiController).GetAccount))
 
-	app.Get("/v1/get-records", h((*controllers.ApiController).GetRecords))
-	app.Get("/v1/get-record", h((*controllers.ApiController).GetRecord))
-	app.Post("/v1/update-record", h((*controllers.ApiController).UpdateRecord))
-	app.Post("/v1/add-record", h((*controllers.ApiController).AddRecord))
-	app.Post("/v1/delete-record", h((*controllers.ApiController).DeleteRecord))
-
-	app.Post("/v1/commit-record", h((*controllers.ApiController).CommitRecord))
-	app.Get("/v1/query-record", h((*controllers.ApiController).QueryRecord))
+	// RECORDS — the audit trail. One address per resource, the method carrying
+	// the verb. A record's id is `owner/name`, so the item address spells both:
+	// the handler resolves the object from those two segments and so does the
+	// authorizer (getObject), which is what keeps them judging the same row.
+	//
+	// BLOCK is the record's copy on the chain, the one sub-resource `commit` and
+	// `query` were both about. PUT writes the stored record into a block and
+	// records the block and transaction ids on the row; GET reads that block back
+	// and reports whether the chain still holds what the store does.
+	app.Get("/v1/records", h((*controllers.ApiController).GetRecords))
+	app.Post("/v1/records", h((*controllers.ApiController).AddRecord))
+	app.Get("/v1/records/:owner/:name", h((*controllers.ApiController).GetRecord))
+	app.Put("/v1/records/:owner/:name", h((*controllers.ApiController).UpdateRecord))
+	app.Delete("/v1/records/:owner/:name", h((*controllers.ApiController).DeleteRecord))
+	app.Put("/v1/records/:owner/:name/block", h((*controllers.ApiController).CommitRecord))
+	app.Get("/v1/records/:owner/:name/block", h((*controllers.ApiController).QueryRecord))
 
 	app.Get("/v1/get-assets", h((*controllers.ApiController).GetAssets))
 	app.Get("/v1/get-asset", h((*controllers.ApiController).GetAsset))

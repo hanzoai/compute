@@ -14,15 +14,22 @@
 
 import * as Setting from "../Setting";
 
+// One address per resource, the method carrying the verb. A record's id is
+// `owner/name`, so the item address spells both segments and the record no
+// longer has to be posted back just to say which row it is.
+function recordUrl(owner, name) {
+  return `${Setting.ServerUrl}/v1/records/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+}
+
 export function getRecords(owner, page = "", pageSize = "", field = "", value = "", sortField = "", sortOrder = "") {
-  return fetch(`${Setting.ServerUrl}/v1/get-records?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}`, {
+  return fetch(`${Setting.ServerUrl}/v1/records?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
 }
 
 export function getRecord(owner, name) {
-  return fetch(`${Setting.ServerUrl}/v1/get-record?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(recordUrl(owner, name), {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
@@ -30,8 +37,8 @@ export function getRecord(owner, name) {
 
 export function updateRecord(owner, name, record) {
   const newRecord = Setting.deepCopy(record);
-  return fetch(`${Setting.ServerUrl}/v1/update-record?id=${owner}/${encodeURIComponent(name)}`, {
-    method: "POST",
+  return fetch(recordUrl(owner, name), {
+    method: "PUT",
     credentials: "include",
     body: JSON.stringify(newRecord),
   }).then(res => res.json());
@@ -39,7 +46,7 @@ export function updateRecord(owner, name, record) {
 
 export function addRecord(record) {
   const newRecord = Setting.deepCopy(record);
-  return fetch(`${Setting.ServerUrl}/v1/add-record`, {
+  return fetch(`${Setting.ServerUrl}/v1/records`, {
     method: "POST",
     credentials: "include",
     body: JSON.stringify(newRecord),
@@ -47,25 +54,24 @@ export function addRecord(record) {
 }
 
 export function deleteRecord(record) {
-  const newRecord = Setting.deepCopy(record);
-  return fetch(`${Setting.ServerUrl}/v1/delete-record`, {
-    method: "POST",
+  return fetch(recordUrl(record.owner, record.name), {
+    method: "DELETE",
     credentials: "include",
-    body: JSON.stringify(newRecord),
   }).then(res => res.json());
 }
 
+// A record's BLOCK is its copy on the chain: PUT writes the stored record into
+// one, GET reads that block back and reports whether the chain still holds what
+// we do.
 export function commitRecord(record) {
-  const newRecord = Setting.deepCopy(record);
-  return fetch(`${Setting.ServerUrl}/v1/commit-record`, {
-    method: "POST",
+  return fetch(`${recordUrl(record.owner, record.name)}/block`, {
+    method: "PUT",
     credentials: "include",
-    body: JSON.stringify(newRecord),
   }).then(res => res.json());
 }
 
 export function queryRecord(owner, name) {
-  return fetch(`${Setting.ServerUrl}/v1/query-record?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${recordUrl(owner, name)}/block`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());

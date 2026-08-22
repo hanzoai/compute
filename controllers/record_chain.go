@@ -15,41 +15,53 @@
 package controllers
 
 import (
-	"encoding/json"
+	"fmt"
 
 	"github.com/hanzoai/visor/object"
 )
 
+// A record's BLOCK is its copy on the chain: the block and transaction ids that
+// object.CommitRecord writes back onto the row, and the chain's own answer when
+// that block is read again. `commit` and `query` were two verbs for that one
+// sub-resource, so it is one address and the method carries the verb.
+
 // CommitRecord
 // @Title CommitRecord
 // @Tag Record API
-// @Description commit a record
-// @Param   body    body   object.Record  true        "The details of the record"
+// @Description write a record into a chain block
+// @Param   owner     path    string  true        "The org that owns the record"
+// @Param   name     path    string  true        "The record's name"
 // @Success 200 {object} controllers.Response The Response object
-// @router /commit-record [post]
+// @router /records/{owner}/{name}/block [put]
 func (c *ApiController) CommitRecord() {
-	var record object.Record
-	err := json.Unmarshal(c.Ctx.Body(), &record)
+	// The STORED record is what goes on the chain. It used to be whatever record
+	// the caller put in the body, which anchored client-supplied content under a
+	// stored row's id — the opposite of what anchoring an audit record is for.
+	id := c.recordId()
+	record, err := object.GetRecord(id)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	if record == nil {
+		c.ResponseError(fmt.Sprintf("the record: %s does not exist", id))
+		return
+	}
 
-	c.Data["json"] = wrapActionResponse(object.CommitRecord(&record))
+	c.Data["json"] = wrapActionResponse(object.CommitRecord(record))
 	c.ServeJSON()
 }
 
 // QueryRecord
 // @Title QueryRecord
 // @Tag Record API
-// @Description query record
-// @Param   id     query    string  true        "The id ( owner/name ) of the record"
+// @Description read a record's chain block back
+// @Param   owner     path    string  true        "The org that owns the record"
+// @Param   name     path    string  true        "The record's name"
 // @Success 200 {object} object.Record The Response object
-// @router /query-record [get]
+// @router /records/{owner}/{name}/block [get]
 func (c *ApiController) QueryRecord() {
-	id := c.Ctx.Query("id")
-
-	res, err := object.QueryRecord(id)
+	res, err := object.QueryRecord(c.recordId())
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

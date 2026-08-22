@@ -57,13 +57,17 @@ var apiContract = []route{
 	{"POST", "/v1/signin", "Signin"},
 	{"POST", "/v1/signout", "Signout"},
 	{"GET", "/v1/get-account", "GetAccount"},
-	{"GET", "/v1/get-records", "GetRecords"},
-	{"GET", "/v1/get-record", "GetRecord"},
-	{"POST", "/v1/update-record", "UpdateRecord"},
-	{"POST", "/v1/add-record", "AddRecord"},
-	{"POST", "/v1/delete-record", "DeleteRecord"},
-	{"POST", "/v1/commit-record", "CommitRecord"},
-	{"GET", "/v1/query-record", "QueryRecord"},
+	// RECORDS — one address per resource, the method carrying the verb. The
+	// seven verb addresses these replaced are RETIRED rather than listed here:
+	// they answer 410 from zip.Undeclared (goneRecords), which is what keeps a
+	// dead endpoint out of the contract and out of every projection of it.
+	{"GET", "/v1/records", "GetRecords"},
+	{"POST", "/v1/records", "AddRecord"},
+	{"GET", "/v1/records/:owner/:name", "GetRecord"},
+	{"PUT", "/v1/records/:owner/:name", "UpdateRecord"},
+	{"DELETE", "/v1/records/:owner/:name", "DeleteRecord"},
+	{"PUT", "/v1/records/:owner/:name/block", "CommitRecord"},
+	{"GET", "/v1/records/:owner/:name/block", "QueryRecord"},
 	{"GET", "/v1/get-assets", "GetAssets"},
 	{"GET", "/v1/get-asset", "GetAsset"},
 	{"POST", "/v1/update-asset", "UpdateAsset"},
@@ -214,7 +218,7 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 34, "DELETE": 4, "PUT": 3}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

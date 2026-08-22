@@ -204,7 +204,13 @@ func AddRecord(record *Record) bool {
 		}
 	}
 
-	if strings.HasSuffix(record.Action, "-record") {
+	// The trail does not record requests to itself. The records UI reads and
+	// edits this table, and auditing those calls fills the trail with its own
+	// traffic — a row per poll, describing the poll. The rule is the NOUN, so it
+	// covers the item, the collection and the block sub-resource alike; it used
+	// to be the "-record" suffix of the verb addresses, which by an accident of
+	// the plural exempted every address except the list.
+	if record.Action == "records" || strings.HasPrefix(record.Action, "records/") {
 		return false
 	}
 

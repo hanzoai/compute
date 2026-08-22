@@ -21,14 +21,38 @@ import (
 	"github.com/hanzoai/visor/util"
 )
 
+// RECORDS — the audit trail, one address per resource:
+//
+//	GET    /v1/records                       list (?owner, paging, filter)
+//	POST   /v1/records                       create
+//	GET    /v1/records/:owner/:name          read
+//	PUT    /v1/records/:owner/:name          replace
+//	DELETE /v1/records/:owner/:name          remove
+//	PUT    /v1/records/:owner/:name/block    write the record into a chain block
+//	GET    /v1/records/:owner/:name/block    read that block back
+//
+// A record's id is `owner/name`, so the item address spells both segments and
+// nothing else needs to. `?id=owner/name` and the record-shaped request bodies
+// are gone: they let the URL, the query and the body each name a different row,
+// and the authorizer read one while the store wrote another.
+
+// recordId is the record the item address names: /v1/records/<owner>/<name>.
+// The id IS the address, so the handler and the authorizer (routers.getObject)
+// resolve the same two segments — a query parameter and a body field can name
+// two different rows, and then one of them is the one that gets written.
+func (c *ApiController) recordId() string {
+	return util.GetIdFromOwnerAndName(c.Ctx.Param("owner"), c.Ctx.Param("name"))
+}
+
 // GetRecords
 // @Title GetRecords
 // @Tag Record API
-// @Description get all records
+// @Description list records
+// @Param   owner     query    string  false       "The org whose records to list"
 // @Param   pageSize     query    string  true        "The size of each page"
 // @Param   p     query    string  true        "The number of the page"
 // @Success 200 {object} object.Record The Response object
-// @router /get-records [get]
+// @router /records [get]
 func (c *ApiController) GetRecords() {
 	owner := c.Ctx.Query("owner")
 	limit := c.Ctx.Query("pageSize")
@@ -69,14 +93,13 @@ func (c *ApiController) GetRecords() {
 // GetRecord
 // @Title GetRecord
 // @Tag Record API
-// @Description get record
-// @Param   id     query    string  true        "The id ( owner/name ) of the record"
+// @Description read one record
+// @Param   owner     path    string  true        "The org that owns the record"
+// @Param   name     path    string  true        "The record's name"
 // @Success 200 {object} object.Record The Response object
-// @router /get-record [get]
+// @router /records/{owner}/{name} [get]
 func (c *ApiController) GetRecord() {
-	id := c.Ctx.Query("id")
-
-	record, err := object.GetRecord(id)
+	record, err := object.GetRecord(c.recordId())
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -88,13 +111,14 @@ func (c *ApiController) GetRecord() {
 // UpdateRecord
 // @Title UpdateRecord
 // @Tag Record API
-// @Description update record
-// @Param   id     query    string  true        "The id ( owner/name ) of the record"
+// @Description replace a record
+// @Param   owner     path    string  true        "The org that owns the record"
+// @Param   name     path    string  true        "The record's name"
 // @Param   body    body   object.Record  true        "The details of the record"
 // @Success 200 {object} controllers.Response The Response object
-// @router /update-record [post]
+// @router /records/{owner}/{name} [put]
 func (c *ApiController) UpdateRecord() {
-	id := c.Ctx.Query("id")
+	id := c.recordId()
 
 	var record object.Record
 	err := json.Unmarshal(c.Ctx.Body(), &record)
@@ -113,7 +137,7 @@ func (c *ApiController) UpdateRecord() {
 // @Description add a record
 // @Param   body    body   object.Record  true        "The details of the record"
 // @Success 200 {object} controllers.Response The Response object
-// @router /add-record [post]
+// @router /records [post]
 func (c *ApiController) AddRecord() {
 	var record object.Record
 	err := json.Unmarshal(c.Ctx.Body(), &record)
@@ -136,18 +160,16 @@ func (c *ApiController) AddRecord() {
 // DeleteRecord
 // @Title DeleteRecord
 // @Tag Record API
-// @Description delete a record
-// @Param   body    body   object.Record  true        "The details of the record"
+// @Description remove a record
+// @Param   owner     path    string  true        "The org that owns the record"
+// @Param   name     path    string  true        "The record's name"
 // @Success 200 {object} controllers.Response The Response object
-// @router /delete-record [post]
+// @router /records/{owner}/{name} [delete]
 func (c *ApiController) DeleteRecord() {
-	var record object.Record
-	err := json.Unmarshal(c.Ctx.Body(), &record)
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-
-	c.Data["json"] = wrapActionResponse(object.DeleteRecord(&record))
+	// The address names the row, so nothing is read from the body. It used to be
+	// the only place the row was named, which meant the caller could hand the
+	// authorizer one owner and the store another.
+	owner, name := c.Ctx.Param("owner"), c.Ctx.Param("name")
+	c.Data["json"] = wrapActionResponse(object.DeleteRecord(&object.Record{Owner: owner, Name: name}))
 	c.ServeJSON()
 }
