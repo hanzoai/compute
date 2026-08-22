@@ -371,15 +371,20 @@ swap and not an SDK rewrite.
 - **Unregistered** (`RegisterCarrier` never called): `directHTTP()` — visor's own
   bounded client, and the SDK attaches the token it was handed. What a local or
   single-binary run wants, and what visor always did.
-- **Registered** (`egressAddress` + `egressToken` in conf, wired by `carry()` in
-  `egress.go`): the request is described to **hanzoai/egress**, which holds the
-  key and attaches it. Reading this pod's env, config or memory yields nothing
-  that spends. Visor still holds its OWN token — that is the trade, not an
-  oversight: a stolen caller token buys metered calls through our meter rather
-  than a vendor key that spends without limit, off our network.
-  - `egressAddress` without `egressToken` **refuses to start**. Booting anyway
+- **Registered** (`egressAddress` in conf, wired by `carry()` in `egress.go`):
+  the request is described to **hanzoai/egress**, which holds the key and
+  attaches it. Reading this pod's env, config or memory yields nothing that
+  spends. Visor identifies itself with its OWN IAM identity — the `clientId` /
+  `clientSecret` it already signs in with, exchanged for an access token at
+  `iamEndpoint` (`egress_identity.go`) and scoped to egress by RFC 8707
+  `resource`. There is no second credential to paste or rotate, and it expires
+  on its own; egress verifies it against the issuer, audience and JWKS the way
+  every service verifies a caller.
+  - `egressAddress` without an IAM identity **refuses to start**. Booting anyway
     would 401 every cloud call, and the obvious repair for that is to unset the
     address and put the keys back.
+  - `egressAudience` names the `aud` egress requires. It is a name, not a
+    secret.
   - The address is one value: `host:port`, `tcp://host:port`, or
     `unix:///path.sock`.
   - Nothing else to configure: egress knows where each cloud it can pay for

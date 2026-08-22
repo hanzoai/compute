@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hanzoai/egress/spend"
 
@@ -43,16 +44,34 @@ func carry() error {
 	if address == "" {
 		return nil
 	}
-	token := strings.TrimSpace(conf.GetConfigString("egressToken"))
-	if token == "" {
-		// Refusing to start is the point. An operator who set an address means
-		// the cloud keys to be gone from here; starting without a token would
-		// serve every cloud call as a 401, and the obvious repair for that is to
-		// unset the address and put the keys back.
-		return fmt.Errorf("egressAddress is set but egressToken is not: visor cannot identify itself to egress")
+	// WHO IS CALLING IS ASKED OF IAM, not of a config value. visor already signs
+	// in with a clientId and clientSecret; egress verifies what those buy the
+	// same way every service verifies a caller — issuer, audience, JWKS. So
+	// there is no second credential to mint, paste or rotate, and the token
+	// expires on its own.
+	//
+	// Refusing to start is the point. An operator who set an address means the
+	// cloud keys to be gone from here, and coming up without an identity would
+	// serve every cloud call as a 401 whose obvious repair is to put the keys
+	// back.
+	id := strings.TrimSpace(conf.GetConfigString("clientId"))
+	secret := strings.TrimSpace(conf.GetConfigString("clientSecret"))
+	iam := strings.TrimSpace(conf.GetConfigString("iamEndpoint"))
+	if id == "" || secret == "" || iam == "" {
+		return fmt.Errorf("egressAddress is set but visor has no IAM identity "+
+			"(clientId=%q iamEndpoint=%q): it cannot say who it is to egress", id, iam)
+	}
+	who := &identity{
+		endpoint: iam, id: id, secret: secret,
+		audience: strings.TrimSpace(conf.GetConfigString("egressAudience")),
+		client:   &http.Client{Timeout: 30 * time.Second},
 	}
 	network, address := dial(address)
 	service.RegisterCarrier(func(c service.Credential) (*http.Client, error) {
+		token, err := who.token()
+		if err != nil {
+			return nil, err
+		}
 		return spend.Client(spend.Config{
 			Network:  network,
 			Address:  address,

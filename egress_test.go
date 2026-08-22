@@ -153,7 +153,6 @@ func TestDial(t *testing.T) {
 func TestCarry(t *testing.T) {
 	t.Run("unset, visor calls clouds itself", func(t *testing.T) {
 		t.Setenv("egressAddress", "")
-		t.Setenv("egressToken", "")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 		service.RegisterCarrier(nil)
 
@@ -169,23 +168,27 @@ func TestCarry(t *testing.T) {
 		}
 	})
 
-	t.Run("an address with no token refuses to start", func(t *testing.T) {
+	t.Run("an address with no IAM identity refuses to start", func(t *testing.T) {
 		t.Setenv("egressAddress", "egress.hanzo.ai:9653")
-		t.Setenv("egressToken", "")
+		t.Setenv("clientId", "")
+		t.Setenv("clientSecret", "")
+		t.Setenv("iamEndpoint", "")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 
 		err := carry()
 		if err == nil {
-			t.Fatal("visor started with an address and no token — every cloud call would be a 401")
+			t.Fatal("visor started with an address and no identity — every cloud call would be a 401")
 		}
-		if !strings.Contains(err.Error(), "egressToken") {
+		if !strings.Contains(err.Error(), "IAM identity") {
 			t.Errorf("the refusal does not name what is missing: %v", err)
 		}
 	})
 
 	t.Run("both, and the cloud keys are egress's", func(t *testing.T) {
 		t.Setenv("egressAddress", "tcp://egress.hanzo.ai:9653")
-		t.Setenv("egressToken", "visor-own-token")
+		t.Setenv("clientId", "visor")
+		t.Setenv("clientSecret", "shh")
+		t.Setenv("iamEndpoint", "https://hanzo.id")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 		service.RegisterCarrier(nil)
 
