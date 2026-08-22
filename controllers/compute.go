@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,9 +112,20 @@ func (c *ApiController) GetComputeRegions() {
 // GetComputeSizes
 // @Title GetComputeSizes
 // @Tag Compute API
-// @Description list resale-priced sizes (cached)
+// @Description list resale-priced sizes (cached), optionally narrowed by ?gpu
 // @Success 200 {object} controllers.Response
 // @router /sizes [get]
+//
+// The GPU catalog is this collection with ?gpu=true, not an address of its own.
+// It had one — /v1/gpus — and it answered service.ListGPUSizes, which was
+// ListSizes with a predicate applied: same element type, strict subset, so one
+// collection had two doors and a client had to learn which. The predicate is now
+// SizeInfo.HasGPU and the door is the filter.
+//
+// The filter is tri-state and stated as a value, never as a bare flag: absent is
+// the whole catalog, true is the GPU sizes, false is everything else. A value
+// that cannot be parsed is refused rather than read as one of the three — a
+// caller that spells it wrong must not be handed a different catalog and a 200.
 func (c *ApiController) GetComputeSizes() {
 	if !service.ComputeConfigured() {
 		c.ResponseError("hanzo compute is not configured")
@@ -124,26 +136,21 @@ func (c *ApiController) GetComputeSizes() {
 		c.ResponseError(err.Error())
 		return
 	}
+	if q := strings.TrimSpace(c.Ctx.Query("gpu")); q != "" {
+		want, err := strconv.ParseBool(q)
+		if err != nil {
+			c.ResponseError("gpu must be true or false")
+			return
+		}
+		kept := make([]service.SizeInfo, 0, len(sizes))
+		for _, s := range sizes {
+			if s.HasGPU() == want {
+				kept = append(kept, s)
+			}
+		}
+		sizes = kept
+	}
 	c.ResponseOk(sizes)
-}
-
-// GetComputeGPUs
-// @Title GetComputeGPUs
-// @Tag Compute API
-// @Description list resale-priced GPU sizes (cached)
-// @Success 200 {object} controllers.Response
-// @router /gpus [get]
-func (c *ApiController) GetComputeGPUs() {
-	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
-		return
-	}
-	gpus, err := service.ListGPUSizes()
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-	c.ResponseOk(gpus)
 }
 
 // ---- Machines (per-org, configured cloud account) ----

@@ -90,8 +90,7 @@ class App extends Component {
 
   getAccount() {
     AccountBackend.getAccount()
-      .then((res) => {
-        const account = res.data;
+      .then((account) => {
         if (account !== null) {
           this.setLanguage(account);
         }

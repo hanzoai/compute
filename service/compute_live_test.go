@@ -52,16 +52,17 @@ func TestLiveDOCatalog(t *testing.T) {
 		break
 	}
 
-	gpus, err := ListGPUSizes()
-	if err != nil {
-		t.Fatalf("ListGPUSizes: %v", err)
-	}
-	t.Logf("gpu sizes: %d", len(gpus))
-	for _, g := range gpus {
+	gpus := 0
+	for _, g := range sizes {
+		if !g.HasGPU() {
+			continue
+		}
+		gpus++
 		model := ""
 		if g.GPU != nil {
 			model = g.GPU.Model
 		}
 		t.Logf("gpu: %s model=%s $%.4f/hr $%.2f/mo", g.Slug, model, g.PriceHourly, g.PriceMonthly)
 	}
+	t.Logf("gpu sizes: %d", gpus)
 }

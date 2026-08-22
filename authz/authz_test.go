@@ -27,7 +27,10 @@ func TestIsResellComputePath(t *testing.T) {
 	allow := []struct{ method, path string }{
 		{"GET", "/v1/regions"},
 		{"GET", "/v1/sizes"},
-		{"GET", "/v1/gpus"},
+		// The image catalog: read what this org may launch, register a custom
+		// image into it. Org-scoped in the controller, like the rest.
+		{"GET", "/v1/images"},
+		{"POST", "/v1/images"},
 		{"GET", "/v1/machines"},
 		{"POST", "/v1/machines/launch"},
 		{"GET", "/v1/machines/abc-123"},
@@ -45,12 +48,14 @@ func TestIsResellComputePath(t *testing.T) {
 	}
 
 	deny := []struct{ method, path string }{
-		{"POST", "/v1/regions"},           // catalog is read-only
-		{"POST", "/v1/machines"},          // no bulk create on the collection
-		{"DELETE", "/v1/machines/launch"}, // launch is POST-only
-		{"GET", "/v1/plans"},              // not a resell-compute route
-		{"POST", "/v1/start-session"},     // legacy surface, gated separately
-		{"GET", "/v1/get-account"},
+		{"POST", "/v1/regions"},                     // catalog is read-only
+		{"GET", "/v1/gpus"},                         // retired: the GPU sizes are /v1/sizes?gpu=true
+		{"DELETE", "/v1/images"},                    // the catalog is not deleted wholesale
+		{"POST", "/v1/machines"},                    // no bulk create on the collection
+		{"DELETE", "/v1/machines/launch"},           // launch is POST-only
+		{"GET", "/v1/plans"},                        // not a resell-compute route
+		{"POST", "/v1/start-session"},               // legacy surface, gated separately
+		{"GET", "/v1/account"},                      // admitted by the static policy, not by this rule
 		{"PUT", "/v1/machines/abc-123"},             // only GET/DELETE by id
 		{"POST", "/v1/machines/abc-123"},            // no blanket POST by id
 		{"POST", "/v1/machines/abc-123/agent"},      // the bind is PUT, and only PUT

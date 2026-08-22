@@ -15,6 +15,8 @@
 package routers
 
 import (
+	"net/http"
+
 	"github.com/zap-proto/zip"
 	"github.com/zap-proto/zip/middleware"
 
@@ -67,6 +69,12 @@ func Route(app *zip.App) {
 	// path outside /v1/ falls to the SPA fallback and comes back 200, so the
 	// probe measured the file server rather than the service.
 	registerHealth(app)
+
+	// Retired addresses answer ahead of the chain for a related reason: a 410
+	// carries no data, so there is nothing to authorize, and an authz gate in
+	// front of one answers 403 to the caller who most needs to be told where the
+	// resource went. One call per family (routers/gone_<family>.go).
+	retireCatalog(app)
 
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
@@ -135,7 +143,14 @@ func registerAgent(app *zip.App) {
 func registerAPI(app *zip.App) {
 	app.Post("/v1/signin", h((*controllers.ApiController).Signin))
 	app.Post("/v1/signout", h((*controllers.ApiController).Signout))
-	app.Get("/v1/get-account", h((*controllers.ApiController).GetAccount))
+	// The ACCOUNT the caller's credential names. A TYPED op: it declares the
+	// Bearer it reads and the identity it answers with, so the shape a client
+	// sees is the shape the code states.
+	zip.Get(app, "/v1/account", controllers.GetAccount,
+		zip.WithSummary("Read the account the caller's credential names"),
+		zip.WithOperationID("account"),
+		zip.WithTags("Account"),
+	)
 
 	app.Get("/v1/get-records", h((*controllers.ApiController).GetRecords))
 	app.Get("/v1/get-record", h((*controllers.ApiController).GetRecord))
@@ -168,8 +183,10 @@ func registerAPI(app *zip.App) {
 	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
 	// per-org machines over the configured cloud account (controllers/compute.go).
 	app.Get("/v1/regions", h((*controllers.ApiController).GetComputeRegions))
+	// The GPU catalog is this collection with ?gpu=true. It had an address of
+	// its own, /v1/gpus, and that address answered a filtered ListSizes — one
+	// collection, two doors (retired in gone_catalog.go).
 	app.Get("/v1/sizes", h((*controllers.ApiController).GetComputeSizes))
-	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
 	app.Get("/v1/machines", h((*controllers.ApiController).ListComputeMachines))
 	app.Post("/v1/machines/launch", h((*controllers.ApiController).LaunchComputeMachine))
 	registerAgent(app)
@@ -193,8 +210,19 @@ func registerAPI(app *zip.App) {
 		zip.WithOperationID("nodes"),
 		zip.WithTags("Compute"),
 	)
-	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
-	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
+	// The image catalog: one noun, one address, the method carrying the verb, and
+	// both ops TYPED.
+	zip.Get(app, "/v1/images", controllers.ListImages,
+		zip.WithSummary("List the images the caller org may launch"),
+		zip.WithOperationID("listImages"),
+		zip.WithTags("Compute"),
+	)
+	zip.Post(app, "/v1/images", controllers.CreateImage,
+		zip.WithSummary("Register a custom image from a URL"),
+		zip.WithOperationID("createImage"),
+		zip.WithStatus(http.StatusCreated),
+		zip.WithTags("Compute"),
+	)
 
 	app.Get("/v1/get-sessions", h((*controllers.ApiController).GetSessions))
 	app.Get("/v1/get-session", h((*controllers.ApiController).GetConnSession))

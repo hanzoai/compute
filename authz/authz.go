@@ -67,14 +67,13 @@ p, built-in, *, *, *, *, *
 p, app, *, *, *, *, *
 p, *, *, POST, /v1/signin, *, *
 p, *, *, POST, /v1/signout, *, *
-p, *, *, GET, /v1/get-account, *, *
+p, *, *, GET, /v1/account, *, *
 p, *, *, GET, /v1/get-asset-tunnel, *, *
 p, *, *, POST, /v1/add-asset-tunnel, *, *
 p, *, *, POST, /v1/start-session, *, *
 p, *, *, GET, /v1/get-whitelabel, *, *
 p, *, *, GET, /v1/regions, *, *
 p, *, *, GET, /v1/sizes, *, *
-p, *, *, GET, /v1/gpus, *, *
 `
 
 		sa := stringadapter.NewAdapter(ruleText)
@@ -138,7 +137,9 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 // (resolveComputeOrg). These are safe to admit for any authenticated user of the
 // brand:
 //
-//	GET    /v1/regions|/v1/sizes|/v1/gpus     catalog (also public-read)
+//	GET    /v1/regions|/v1/sizes              catalog (also public-read)
+//	GET    /v1/images                         the caller org's launchable images
+//	POST   /v1/images                         register a custom image into that org
 //	GET    /v1/machines                       list the caller org's machines
 //	POST   /v1/machines/launch                quote (dryRun) or metered launch
 //	GET    /v1/machines/<id>                  get one of the caller org's machines
@@ -149,8 +150,18 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 //	PUT    /v1/machines/<id>/agent            bind a cloud Agent to a machine
 func isResellComputePath(method string, urlPath string) bool {
 	switch urlPath {
-	case "/v1/regions", "/v1/sizes", "/v1/gpus", "/v1/machines":
+	case "/v1/regions", "/v1/sizes", "/v1/machines":
 		return method == "GET"
+	// The image catalog is org-scoped in the controller (resolveComputeOrg, which
+	// pins org = the caller's own) and by the org tag the service filters on, so
+	// it belongs here with the rest of the resell surface. It was absent, which
+	// is not the same as denied: a customer asking for the images they may launch
+	// fell through to the subOwner == objOwner rule, and a read that names no
+	// object has no objOwner — so the answer was 403 for every authenticated
+	// customer, on the surface written for them. Registering a route is not
+	// admitting it; a noun and its policy move together.
+	case "/v1/images":
+		return method == "GET" || method == "POST"
 	case "/v1/machines/launch":
 		return method == "POST"
 	}

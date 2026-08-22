@@ -160,8 +160,21 @@ type RegionInfo struct {
 	Sizes     []string `json:"sizes"`
 }
 
+// gpuSized is the ONE rule for "this is a GPU size", stated over the two facts
+// that carry it: whether the catalog supplied GPU detail, and whether the slug
+// says so. Neither half is redundant — a size arrives with detail only when the
+// upstream catalog has it, and the naming convention identifies the rest.
+//
+// It is asked twice because the same question is asked of two types: of the
+// upstream row when PRICING it (GPU sizes carry their own markup), and of the
+// resale row when FILTERING the catalog. Two spellings of it would mean a size
+// priced as a GPU that the GPU catalog does not list.
+func gpuSized(detail bool, slug string) bool {
+	return detail || strings.HasPrefix(slug, "gpu-")
+}
+
 func isGPUSize(s godo.Size) bool {
-	return s.GPUInfo != nil || strings.HasPrefix(s.Slug, "gpu-")
+	return gpuSized(s.GPUInfo != nil, s.Slug)
 }
 
 func sizeInfoFromDO(s godo.Size) SizeInfo {
@@ -292,19 +305,14 @@ func ListSizes() ([]SizeInfo, error) {
 	return out, nil
 }
 
-// ListGPUSizes returns only the GPU-backed sizes from the catalog.
-func ListGPUSizes() ([]SizeInfo, error) {
-	sizes, err := ListSizes()
-	if err != nil {
-		return nil, err
-	}
-	gpus := make([]SizeInfo, 0, 8)
-	for _, s := range sizes {
-		if s.GPU != nil || strings.HasPrefix(s.Slug, "gpu-") {
-			gpus = append(gpus, s)
-		}
-	}
-	return gpus, nil
+// HasGPU reports whether a size is GPU-backed — the resale side of gpuSized, and
+// what ?gpu selects on.
+//
+// It is a PROPERTY of the size rather than a second list. The GPU catalog used to
+// be its own function behind its own address, which made a filtered view of
+// ListSizes look like a resource of its own.
+func (s SizeInfo) HasGPU() bool {
+	return gpuSized(s.GPU != nil, s.Slug)
 }
 
 // SizeBySlug returns the resale size for a slug, or nil if unknown. Used to

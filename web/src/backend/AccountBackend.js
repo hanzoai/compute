@@ -14,11 +14,17 @@
 
 import * as Setting from "../Setting";
 
+// The account this browser's credential names, or null when it names nobody.
+//
+// A typed op answers with the value and states the outcome in the status, so
+// there is no envelope to unwrap and no `status` field to branch on: 200 is an
+// account, 401 is nobody. null and not undefined, because App tells "signed out"
+// from "still loading" by exactly that difference.
 export function getAccount() {
-  return fetch(`${Setting.ServerUrl}/v1/get-account`, {
+  return fetch(`${Setting.ServerUrl}/v1/account`, {
     method: "GET",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(res => res.ok ? res.json() : null);
 }
 
 export function signin(code, state) {

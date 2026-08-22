@@ -62,8 +62,9 @@ bound — so a caller dialling in the instant after start can legitimately get
 which is what puts visor in the op registry every projection reads: OpenAPI,
 MCP, CLI, SDK, and the by-name call plane. `zip.Here` reaches it in-process with
 no wire. A machine's AGENT is the second noun to land typed (4 ops,
-`controllers/agent_binding.go`, registered by `routers.registerAgent`). The
-remaining 68 routes are still untyped controller methods, so they project
+`controllers/agent_binding.go`, registered by `routers.registerAgent`); the
+ACCOUNT and the IMAGE catalog followed (`controllers/{account,images}.go`). The
+remaining 64 routes are still untyped controller methods, so they project
 nowhere — see "Typed ops: what is left".
 
 Two defects it fixed, both silent:
@@ -99,11 +100,13 @@ breaks the schema mapping. The migration is done; the tag name is just the
 tag name.
 
 ### Typed ops: what is left (IN PROGRESS, noun by noun)
-68 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
+64 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
 registered through `h()`. They serve fine and project NOWHERE — no OpenAPI
 schema, no MCP tool, no CLI verb, no `zip.Here`.
 
-Two nouns have landed: `/v1/health`, and a machine's AGENT — four ops in
+Nine ops have landed, over five nouns: `/v1/health`, the k8s worker `/v1/k8s/nodes`,
+the caller's own `/v1/account` (`controllers/account.go`), the `/v1/images`
+catalog (`controllers/images.go`), and a machine's AGENT — four ops in
 `controllers/agent_binding.go`, registered by `routers.registerAgent`, at ONE
 address with the method carrying the verb:
 
@@ -157,6 +160,27 @@ at 73 (GET 32, POST 37, DELETE 3, PUT 1) and reads the LIVE fiber router, so a
 typed op swapped in for an untyped route keeps the same contract line and the
 test keeps holding. The typed rows name package functions rather than
 `ApiController` methods.
+
+### A retired address answers 410 and names its successor
+An address that MOVED is not missing, so it is not a 404, and the request cannot
+be repeated elsewhere unchanged, so it is not a 301. It answers **410 Gone** (RFC
+9110 15.5.11) naming its successor twice from ONE table row — a `Link` header
+with `rel="successor-version"` (RFC 5829) and the same string in the body —
+beside `Deprecation` (RFC 9745) and `Sunset` (RFC 8594), both stamped NOW,
+because the address is gone rather than going.
+
+The table lives one file per family (`routers/gone_<family>.go`, a map of old
+address → successor) so families merge without conflict, and each is registered
+on **`zip.Undeclared`**: those routes SERVE and appear in NO projection built
+from `App.Declaration` — the OpenAPI document, the MCP tool list, the CLI, the
+SDKs. A retirement answers every method (410 is about the target resource, and a
+caller who also sent the wrong verb still needs the successor), so publishing one
+would put a dead operation per method per address into the customer contract.
+They are registered AHEAD of the filter chain, beside health: a 410 carries no
+data, so there is nothing to authorize, and a gate in front of one answers 403 to
+the caller who most needs to be told where the resource went.
+`routers/gone_catalog_test.go` drives the whole contract, including that the
+successor an address names is an address visor actually serves.
 
 One piece of folklore worth not repeating: registering a literal ahead of a
 `:param` sibling does NOT decide the match. Fiber prefers the static segment
@@ -321,8 +345,7 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/v1/regions` | Cached DO regions catalog |
-| GET | `/v1/sizes` | Cached sizes, Hanzo resale price only |
-| GET | `/v1/gpus` | GPU sizes (H100/H200/MI300X/L40S/…), resale-priced |
+| GET | `/v1/sizes` | Cached sizes, Hanzo resale price only. `?gpu=true` is the GPU catalog (H100/H200/MI300X/L40S/…), `?gpu=false` everything else, absent the lot |
 | GET | `/v1/machines` | Caller org's machines (DO tag `hanzo-org:<org>`) |
 | POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
 | GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |

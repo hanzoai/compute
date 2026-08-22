@@ -53,10 +53,12 @@ var apiContract = []route{
 	// than only on the wire.
 	{"GET", "/v1/health", "health"},
 	{"GET", "/v1/k8s/nodes", "ListNodes"},
+	{"GET", "/v1/account", "GetAccount"},
+	{"GET", "/v1/images", "ListImages"},
+	{"POST", "/v1/images", "CreateImage"},
 
 	{"POST", "/v1/signin", "Signin"},
 	{"POST", "/v1/signout", "Signout"},
-	{"GET", "/v1/get-account", "GetAccount"},
 	{"GET", "/v1/get-records", "GetRecords"},
 	{"GET", "/v1/get-record", "GetRecord"},
 	{"POST", "/v1/update-record", "UpdateRecord"},
@@ -82,7 +84,6 @@ var apiContract = []route{
 	{"POST", "/v1/launch-machine", "LaunchMachine"},
 	{"GET", "/v1/regions", "GetComputeRegions"},
 	{"GET", "/v1/sizes", "GetComputeSizes"},
-	{"GET", "/v1/gpus", "GetComputeGPUs"},
 	{"GET", "/v1/machines", "ListComputeMachines"},
 	{"POST", "/v1/machines/launch", "LaunchComputeMachine"},
 	// A machine's AGENT — four TYPED ops (see registerAgent), so like health
@@ -100,8 +101,6 @@ var apiContract = []route{
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
 	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},
 	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
-	{"GET", "/v1/images", "ListImages"},
-	{"POST", "/v1/images", "CreateImage"},
 	{"GET", "/v1/get-sessions", "GetSessions"},
 	{"GET", "/v1/get-session", "GetConnSession"},
 	{"POST", "/v1/update-session", "UpdateSession"},
@@ -139,15 +138,21 @@ func (r route) key() string { return r.method + " " + r.path }
 // app, read back off the live fiber router (not re-parsed from source), so the
 // assertion covers what the server will really serve.
 //
-// Both registration functions run, because the contract is the whole surface and
-// health is registered separately — ahead of the filter chain, deliberately (see
-// Route). Calling only registerAPI here would leave a served route outside the
-// contract, which is the exact gap this test exists to close. The filter chain
-// itself is omitted: Use-handlers are not routes.
+// Every registration function runs, because the contract is the whole surface:
+// health and the retirements are registered separately — ahead of the filter
+// chain, deliberately (see Route). Calling only registerAPI here would leave a
+// served route outside the contract, which is the exact gap this test exists to
+// close. The filter chain itself is omitted: Use-handlers are not routes.
+//
+// A RETIRED address is served and deliberately NOT declared, so it is read out
+// here through zip's own predicate rather than a second list of what to skip. It
+// answers 410 for every method, so counting it would put one dead operation per
+// method per address into a table that says what visor offers.
 func registeredRoutes(t *testing.T) map[string]bool {
 	t.Helper()
 	app := zip.New(zip.Config{})
 	registerHealth(app)
+	retireCatalog(app)
 	registerAPI(app)
 
 	got := make(map[string]bool)
@@ -155,6 +160,9 @@ func registeredRoutes(t *testing.T) map[string]bool {
 		// fiber auto-generates a HEAD twin for every GET; it is not part of the
 		// declared contract, so it is not counted against it.
 		if r.Method == "HEAD" {
+			continue
+		}
+		if !app.Declares(r.Method, r.Path) {
 			continue
 		}
 		got[r.Method+" "+r.Path] = true
@@ -202,7 +210,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 74
+	const wantRoutes = 73
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -214,7 +222,7 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 32, "POST": 37, "DELETE": 3, "PUT": 1}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

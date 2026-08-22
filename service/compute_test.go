@@ -55,6 +55,14 @@ func TestIsGPUSize(t *testing.T) {
 		if got := isGPUSize(c.size); got != c.want {
 			t.Fatalf("isGPUSize(%q)=%v want %v", c.size.Slug, got, c.want)
 		}
+		// The pricing side and the catalog side ask ONE question of two types.
+		// They must agree over the mapping between them, or a size priced as a
+		// GPU is missing from the GPU catalog — which is what ?gpu=true selects.
+		// The `gpu-`-slugged case is the one that separates them: the resale row
+		// carries GPU detail only when the upstream row did.
+		if got := sizeInfoFromDO(c.size).HasGPU(); got != c.want {
+			t.Fatalf("SizeInfo(%q).HasGPU()=%v want %v", c.size.Slug, got, c.want)
+		}
 	}
 }
 
