@@ -33,16 +33,16 @@ require (
 	github.com/fasthttp/websocket v1.5.12
 	github.com/hanzoai/commerce/metering v0.1.6
 	github.com/hanzoai/egress/spend v0.1.0
-	github.com/hanzoai/ha v0.1.1
-	github.com/hanzoai/money v0.2.2
-	github.com/hanzoai/orm v0.6.20
-	github.com/hanzoai/sqlite v0.4.0
+	github.com/hanzoai/ha v0.2.0
+	github.com/hanzoai/money v0.2.5
+	github.com/hanzoai/orm v0.6.30
+	github.com/hanzoai/sqlite v0.5.8
 	github.com/hanzoai/vfs v0.6.6
 	github.com/luxfi/trace v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/valyala/fasthttp v1.72.0
 	github.com/zap-proto/fiber/v3 v3.2.1
-	github.com/zap-proto/zip v1.27.0
+	github.com/zap-proto/zip v1.34.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
@@ -72,10 +72,10 @@ require (
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/hanzoai/account v0.2.0 // indirect
 	github.com/hanzoai/builder v0.3.13 // indirect
-	github.com/hanzoai/csqlite v0.1.0 // indirect
+	github.com/hanzoai/csqlite v0.1.2 // indirect
 	github.com/hanzoai/decimal v0.1.2 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
-	github.com/hanzoai/xorm v1.4.4 // indirect
+	github.com/hanzoai/xorm v1.4.5 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/luxfi/accel v1.2.4 // indirect
@@ -137,11 +137,11 @@ require (
 	github.com/djherbis/times v1.6.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
-	github.com/hanzoai/iamsdk/v2 v2.2.2
+	github.com/hanzoai/iamsdk/v2 v2.2.3
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
