@@ -37,7 +37,7 @@ import (
 // Deprecation (RFC 9745) and Sunset (RFC 8594).
 //
 // The four CRUD verbs name the COLLECTION, because that is the noun they
-// collapsed onto and the item address hangs off it — which of the five you
+// collapsed onto and the item address hangs off it — which of the four you
 // wanted is the method. The two connection verbs name the sub-resource itself,
 // written as an RFC 6570 template, because no method on /v1/sessions reaches it:
 // tearing a live tunnel down is not a way of writing the record.

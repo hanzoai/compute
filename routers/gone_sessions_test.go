@@ -112,6 +112,44 @@ func TestARetiredSessionAddressIsNotInTheContract(t *testing.T) {
 	}
 }
 
+// TestARetiredAddressAnswersOnTheWholeService drives the full chain Route
+// installs, and what it pins is what the notice does NOT reach: the
+// authorization filter is registered after the retirements, so it never runs for
+// them. Behind authorization the notice is a 403, and a caller that gets 403
+// learns nothing about where its address went.
+//
+// The control is the second half — an unauthenticated request to a LIVE route on
+// the same app, which the filter refuses. Without it a 410 would only prove that
+// something answered.
+func TestARetiredAddressAnswersOnTheWholeService(t *testing.T) {
+	app := zip.New(zip.Config{})
+	Route(app)
+
+	ask := func(method, path string) *http.Response {
+		t.Helper()
+		res, err := app.Fiber().Test(httptest.NewRequest(method, path, nil))
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		return res
+	}
+
+	res := ask(http.MethodPost, "/v1/stop-session?id=acme/s-1")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusGone {
+		t.Fatalf("POST /v1/stop-session on the whole service = %d, want 410", res.StatusCode)
+	}
+	if link := res.Header.Get("Link"); !strings.Contains(link, "successor-version") {
+		t.Fatalf("Link = %q, want the successor", link)
+	}
+
+	live := ask(http.MethodGet, "/v1/sessions?owner=acme")
+	defer live.Body.Close()
+	if live.StatusCode != http.StatusForbidden {
+		t.Fatalf("the control answered %d: an unauthenticated read of a live route must be refused, or the 410 above proves nothing", live.StatusCode)
+	}
+}
+
 // TestEverySuccessorIsAnAddressVisorServes is what stops the table going stale.
 // A retirement that points at nothing is a 410 that helps nobody, and the
 // successor is written by hand — so it is checked against the live surface,
