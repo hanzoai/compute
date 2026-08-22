@@ -18,6 +18,8 @@
 package controllers
 
 import (
+	"strings"
+
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/service"
 )
@@ -116,7 +118,12 @@ func (c *ApiController) ListMachines() {
 // @Success 200 {object} Response
 // @router /machines/{owner}/{name} [get]
 func (c *ApiController) GetMachine() {
-	org, name := c.Target()
+	// The address names WHICH machine; the token names WHOSE. Reading the owner
+	// straight off the path would let a caller name any org and be answered from
+	// it — resolveComputeOrg runs the same segment through the principal, which
+	// is what every other compute read does and the only reason they are scoped.
+	org := c.resolveComputeOrg()
+	name := strings.TrimSpace(c.Ctx.Param("name"))
 	if org == "" || name == "" {
 		c.ResponseError(refuseNoOrg)
 		return
