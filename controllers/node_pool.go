@@ -64,7 +64,7 @@ func poolId(org, id string) string {
 func (c *ApiController) GetNodePools() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	limit := c.Ctx.Query("pageSize")
@@ -117,7 +117,7 @@ func (c *ApiController) GetNodePools() {
 func (c *ApiController) GetNodePool() {
 	id := poolId(c.resolveComputeOrg(), c.Id())
 	if id == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 
@@ -142,14 +142,14 @@ func (c *ApiController) GetNodePool() {
 func (c *ApiController) CreateNodePool() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	provider := c.Ctx.Query("provider")
 	clusterID := c.Ctx.Query("clusterId")
 
 	if provider == "" {
-		c.ResponseError("provider query parameter is required")
+		c.ResponseError(refuseNoProviderName)
 		return
 	}
 
@@ -180,7 +180,7 @@ func (c *ApiController) CreateNodePool() {
 func (c *ApiController) UpdateNodePool() {
 	id := poolId(c.resolveComputeOrg(), c.Id())
 	if id == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (c *ApiController) UpdateNodePool() {
 func (c *ApiController) DeleteNodePool() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 
@@ -235,7 +235,7 @@ func (c *ApiController) DeleteNodePool() {
 func (c *ApiController) ScaleNodePool() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	provider := c.Ctx.Query("provider")

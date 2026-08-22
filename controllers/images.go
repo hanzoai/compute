@@ -32,11 +32,11 @@ import (
 func (c *ApiController) ListImages() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+		c.ResponseError(refuseNoCompute)
 		return
 	}
 	images, err := service.ListImages(org)
@@ -59,11 +59,11 @@ func (c *ApiController) ListImages() {
 func (c *ApiController) CreateImage() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+		c.ResponseError(refuseNoCompute)
 		return
 	}
 	var req struct {

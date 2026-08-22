@@ -64,7 +64,7 @@ func (c *ApiController) AddAssetTunnel() {
 
 	user := c.GetSessionUser()
 	if user == nil {
-		c.ResponseError("please sign in first")
+		c.ResponseError(refuseNotSignedIn)
 		return
 	}
 

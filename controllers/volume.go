@@ -41,7 +41,7 @@ import (
 func (c *ApiController) GetVolumes() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	volumes, err := object.GetVolumes(owner)
@@ -62,7 +62,7 @@ func (c *ApiController) GetVolumes() {
 func (c *ApiController) GetVolume() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	// The query names WHICH volume; it never names WHOSE.
@@ -87,12 +87,12 @@ func (c *ApiController) GetVolume() {
 func (c *ApiController) CreateVolume() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	providerName := c.Ctx.Query("provider")
 	if providerName == "" {
-		c.ResponseError("provider query parameter is required")
+		c.ResponseError(refuseNoProviderName)
 		return
 	}
 
@@ -123,7 +123,7 @@ func (c *ApiController) CreateVolume() {
 func (c *ApiController) DeleteVolume() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	providerName := c.Ctx.Query("provider")
@@ -147,7 +147,7 @@ func (c *ApiController) DeleteVolume() {
 func (c *ApiController) AttachVolume() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	providerName := c.Ctx.Query("provider")
@@ -172,7 +172,7 @@ func (c *ApiController) AttachVolume() {
 func (c *ApiController) DetachVolume() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	providerName := c.Ctx.Query("provider")
@@ -196,7 +196,7 @@ func (c *ApiController) DetachVolume() {
 func (c *ApiController) ResizeVolume() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	providerName := c.Ctx.Query("provider")

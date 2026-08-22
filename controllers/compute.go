@@ -97,7 +97,7 @@ func (c *ApiController) resolveComputeProject(fallback string) string {
 // @router /regions [get]
 func (c *ApiController) GetComputeRegions() {
 	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+		c.ResponseError(refuseNoCompute)
 		return
 	}
 	regions, err := service.ListRegions()
@@ -116,7 +116,7 @@ func (c *ApiController) GetComputeRegions() {
 // @router /sizes [get]
 func (c *ApiController) GetComputeSizes() {
 	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+		c.ResponseError(refuseNoCompute)
 		return
 	}
 	sizes, err := service.ListSizes()
@@ -135,7 +135,7 @@ func (c *ApiController) GetComputeSizes() {
 // @router /gpus [get]
 func (c *ApiController) GetComputeGPUs() {
 	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+		c.ResponseError(refuseNoCompute)
 		return
 	}
 	gpus, err := service.ListGPUSizes()
@@ -188,11 +188,11 @@ func filterMachines(machines []*service.Machine, kind, namePrefix, project strin
 func (c *ApiController) ListComputeMachines() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	if !service.ComputeConfigured() {
-		c.ResponseError("hanzo compute is not configured")
+		c.ResponseError(refuseNoCompute)
 		return
 	}
 	machines, err := service.ListOrgMachines(org, c.resolveComputeProject(""))
@@ -301,11 +301,11 @@ func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
 func (c *ApiController) ListComputeKubernetesClusters() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	if !service.KubernetesConfigured() {
-		c.ResponseError("no cloud provider is configured")
+		c.ResponseError(refuseNoProvider)
 		return
 	}
 	clusters, err := service.ListOrgKubernetesClusters(org)
@@ -324,11 +324,11 @@ func (c *ApiController) ListComputeKubernetesClusters() {
 func (c *ApiController) GetComputeKubernetesCluster() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	if !service.KubernetesConfigured() {
-		c.ResponseError("no cloud provider is configured")
+		c.ResponseError(refuseNoProvider)
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -352,11 +352,11 @@ func (c *ApiController) GetComputeKubernetesCluster() {
 func (c *ApiController) CreateComputeKubernetesCluster() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	if !service.KubernetesConfigured() {
-		c.ResponseError("no cloud provider is configured")
+		c.ResponseError(refuseNoProvider)
 		return
 	}
 	// The request body IS the service spec (one shape, no re-mapping).
@@ -400,11 +400,11 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 func (c *ApiController) DeleteComputeKubernetesCluster() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	if !service.KubernetesConfigured() {
-		c.ResponseError("no cloud provider is configured")
+		c.ResponseError(refuseNoProvider)
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -423,7 +423,7 @@ func (c *ApiController) DeleteComputeKubernetesCluster() {
 func (c *ApiController) GetComputeMachine() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -447,7 +447,7 @@ func (c *ApiController) GetComputeMachine() {
 func (c *ApiController) DeleteComputeMachine() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	id := c.Ctx.Param("id")
@@ -578,7 +578,7 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 func (c *ApiController) LaunchComputeMachine() {
 	org := c.resolveComputeOrg()
 	if org == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 
@@ -697,7 +697,7 @@ func (c *ApiController) LaunchComputeMachine() {
 // @router /k8s/providers [get]
 func (c *ApiController) ListComputeKubernetesProviders() {
 	if c.resolveComputeOrg() == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	c.ResponseOk(service.KubernetesProviderStatus(context.Background()))

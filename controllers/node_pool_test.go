@@ -183,7 +183,7 @@ func TestNodePoolWritesFailClosedWithoutAnOrg(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			body := post(t, app, tc.path, "", tc.body)
-			if !strings.Contains(body, "no org context") {
+			if !strings.Contains(body, refuseNoOrg) {
 				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
 			}
 		})
@@ -246,7 +246,7 @@ func TestNodePoolReadsFailClosedWithoutAnOrg(t *testing.T) {
 		"get":  "/v1/get-node-pool?id=gpu",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if body := get(t, app, path, ""); !strings.Contains(body, "no org context") {
+			if body := get(t, app, path, ""); !strings.Contains(body, refuseNoOrg) {
 				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
 			}
 		})

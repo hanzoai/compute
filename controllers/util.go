@@ -71,7 +71,7 @@ func (c *ApiController) ResponseError(error string, data ...interface{}) {
 
 func (c *ApiController) RequireSignedIn() bool {
 	if c.GetSessionUser() == nil {
-		c.ResponseError("please sign in first")
+		c.ResponseError(refuseNotSignedIn)
 		return true
 	}
 

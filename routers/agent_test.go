@@ -52,7 +52,7 @@ func TestAgentsIsNotAMachineId(t *testing.T) {
 	}
 	defer res.Body.Close()
 
-	// The typed list op refuses "no org context" with a real status code. The
+	// The typed list op refuses refuseNoOrg with a real status code. The
 	// untyped machine handler would answer 200 and put its failure in the body.
 	if res.StatusCode == http.StatusOK {
 		t.Fatal("GET /v1/machines/agents = 200 — GetComputeMachine answered, so the " +

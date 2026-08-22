@@ -175,12 +175,12 @@ func (c *ApiController) LaunchMachine() {
 	// cloud account got charged.
 	owner := c.resolveComputeOrg()
 	if owner == "" {
-		c.ResponseError("unauthorized: no org context")
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 	provider := c.Ctx.Query("provider")
 	if provider == "" {
-		c.ResponseError("provider query parameter is required")
+		c.ResponseError(refuseNoProviderName)
 		return
 	}
 
