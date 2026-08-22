@@ -42,7 +42,19 @@ func getSubject(c *zip.Ctx) (string, string) {
 	return util.GetOwnerAndNameFromId(username)
 }
 
+// getObject resolves WHICH object a request acts on — the (owner, name) pair
+// the policy judges against the subject's own.
+//
+// An address that names its resource carries that pair in the PATH, and the
+// path is read first because it is the addressing authority: a body cannot then
+// smuggle a second target past the decision made about the first. Everything
+// else still answers from ?id= / ?owner= or the body, which is where a
+// verb-in-path address put it.
 func getObject(c *zip.Ctx) (string, string) {
+	if owner := c.Param("owner"); owner != "" {
+		return owner, c.Param("name")
+	}
+
 	method := c.Method()
 
 	if method == http.MethodGet {

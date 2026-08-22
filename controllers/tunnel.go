@@ -51,15 +51,19 @@ var UpGrader = websocket.FastHTTPUpgrader{
 	Subprotocols: []string{"guacamole"},
 }
 
-// AddAssetTunnel
-// @Title AddAssetTunnel
-// @Tag Session API
-// @Description add session
-// @Param   assetId    query   string  true        "The id of asset"
-// @Success 200 {object} Response
-// @router /add-asset-tunnel [get]
-func (c *ApiController) AddAssetTunnel() {
-	assetId := c.Ctx.Query("assetId")
+// OpenSession opens a remote session ON an asset — POST /v1/assets/:owner/:name/sessions.
+//
+// It was POST /v1/add-asset-tunnel?assetId=, which named neither what it made
+// nor what it addressed: it makes no tunnel, it makes a SESSION, and the asset
+// it makes one on is the parent of that session. The tunnel is what CARRIES the
+// session once it exists, and that is a sub-resource of the session (see
+// Tunnel).
+//
+// It stays UNTYPED. The value it mints is an object.Session, whose own
+// collection is still the enveloped /v1/*-session surface, and one value
+// answered in two shapes is worse than either. It converts with that noun.
+func (c *ApiController) OpenSession() {
+	assetId := util.GetIdFromOwnerAndName(c.Ctx.Param("owner"), c.Ctx.Param("name"))
 	mode := c.Ctx.Query("mode")
 
 	user := c.GetSessionUser()
@@ -86,7 +90,19 @@ func (c *ApiController) AddAssetTunnel() {
 	c.ResponseOk(session)
 }
 
-func (c *ApiController) GetAssetTunnel() {
+// Tunnel carries a session's remote-desktop stream — GET /v1/sessions/:owner/:name/tunnel,
+// a websocket speaking the guacamole protocol.
+//
+// It was GET /v1/get-asset-tunnel?sessionId=, which addressed no asset: it read
+// a SESSION id and has always been the stream of that session. The session is
+// the parent; the tunnel is the sub-resource. Its display geometry
+// (width/height/dpi) and the remote credentials an asset does not itself store
+// stay in the query, because they configure this one connection rather than
+// name a resource.
+//
+// It stays UNTYPED, and structurally must: it hijacks the connection, and a
+// typed handler is given a context.Context and no request to hijack.
+func (c *ApiController) Tunnel() {
 	// Read every request-scoped value BEFORE hijacking: the fiber ctx is pooled
 	// and recycled once this handler returns, so the post-upgrade callback (which
 	// runs on the hijacked connection, after the response) must close over plain
@@ -94,7 +110,7 @@ func (c *ApiController) GetAssetTunnel() {
 	width := c.Ctx.Query("width")
 	height := c.Ctx.Query("height")
 	dpi := c.Ctx.Query("dpi")
-	sessionId := c.Ctx.Query("sessionId")
+	sessionId := util.GetIdFromOwnerAndName(c.Ctx.Param("owner"), c.Ctx.Param("name"))
 	username := c.Ctx.Query("username")
 	password := c.Ctx.Query("password")
 
@@ -104,7 +120,7 @@ func (c *ApiController) GetAssetTunnel() {
 		// process (the per-request recovery Beego gave for free).
 		defer func() {
 			if r := recover(); r != nil {
-				logs.Error(fmt.Sprintf("GetAssetTunnel(): panic recovered: %v", r))
+				logs.Error(fmt.Sprintf("Tunnel(): panic recovered: %v", r))
 			}
 		}()
 
@@ -189,30 +205,30 @@ func (c *ApiController) GetAssetTunnel() {
 		for {
 			_, message, err := ws.ReadMessage()
 			if err != nil {
-				logs.Error(fmt.Sprintf("GetAssetTunnel():ws.ReadMessage() error: %s", err.Error()))
+				logs.Error(fmt.Sprintf("Tunnel():ws.ReadMessage() error: %s", err.Error()))
 
 				_ = tunnel.Close()
 				err2 := object.CloseSession(sessionId, Normal, "Normal user exit")
 				if err2 != nil {
-					logs.Error(fmt.Sprintf("GetAssetTunnel():object.CloseSession() error: %s", err.Error()))
+					logs.Error(fmt.Sprintf("Tunnel():object.CloseSession() error: %s", err.Error()))
 				}
 				return
 			}
 
 			_, err = tunnel.WriteAndFlush(message)
 			if err != nil {
-				logs.Error(fmt.Sprintf("GetAssetTunnel():tunnel.WriteAndFlush() error: %s", err.Error()))
+				logs.Error(fmt.Sprintf("Tunnel():tunnel.WriteAndFlush() error: %s", err.Error()))
 
 				err2 := object.CloseSession(sessionId, Normal, "Normal user exit")
 				if err2 != nil {
-					logs.Error(fmt.Sprintf("GetAssetTunnel():object.CloseSession() (2nd) error: %s", err.Error()))
+					logs.Error(fmt.Sprintf("Tunnel():object.CloseSession() (2nd) error: %s", err.Error()))
 				}
 				return
 			}
 		}
 	})
 	if err != nil {
-		logs.Error(fmt.Sprintf("GetAssetTunnel(): websocket upgrade failed: %s", err.Error()))
+		logs.Error(fmt.Sprintf("Tunnel(): websocket upgrade failed: %s", err.Error()))
 	}
 }
 

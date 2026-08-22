@@ -68,8 +68,6 @@ p, app, *, *, *, *, *
 p, *, *, POST, /v1/signin, *, *
 p, *, *, POST, /v1/signout, *, *
 p, *, *, GET, /v1/get-account, *, *
-p, *, *, GET, /v1/get-asset-tunnel, *, *
-p, *, *, POST, /v1/add-asset-tunnel, *, *
 p, *, *, POST, /v1/start-session, *, *
 p, *, *, GET, /v1/get-whitelabel, *, *
 p, *, *, GET, /v1/regions, *, *
@@ -125,6 +123,15 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 		}
 	}
 
+	// The two remote-session doors, admitted for any subject exactly as the two
+	// static rules they replace did. They are a predicate and not policy rows
+	// because their addresses carry path parameters and the matcher above
+	// compares urlPath by equality — a rule naming /v1/sessions/:owner/:name/tunnel
+	// would match no request that ever arrives.
+	if isSessionPath(method, urlPath) {
+		return true
+	}
+
 	res, err := Enforcer.Enforce(subOwner, subName, method, urlPath, objOwner, objName)
 	if err != nil {
 		panic(err)
@@ -168,9 +175,25 @@ func isResellComputePath(method string, urlPath string) bool {
 	return false
 }
 
+// isSessionPath reports whether (method, urlPath) is one of the two doors that
+// open and carry a remote session:
+//
+//	POST /v1/assets/<owner>/<name>/sessions    open a session on an asset
+//	GET  /v1/sessions/<owner>/<name>/tunnel    that session's guacamole stream
+//
+// They were /v1/add-asset-tunnel and /v1/get-asset-tunnel, each named by a
+// static policy row admitting any subject. This says the same thing about the
+// same two doors at the addresses they now answer on.
+func isSessionPath(method string, urlPath string) bool {
+	if method == "POST" {
+		return strings.HasPrefix(urlPath, "/v1/assets/") && strings.HasSuffix(urlPath, "/sessions")
+	}
+	return method == "GET" && strings.HasPrefix(urlPath, "/v1/sessions/") && strings.HasSuffix(urlPath, "/tunnel")
+}
+
 func isAllowedInDemoMode(method string, urlPath string) bool {
 	if method == "POST" {
-		if strings.HasPrefix(urlPath, "/v1/signin") || urlPath == "/v1/signout" || urlPath == "/v1/add-asset-tunnel" || urlPath == "/v1/start-session" || urlPath == "/v1/stop-session" {
+		if strings.HasPrefix(urlPath, "/v1/signin") || urlPath == "/v1/signout" || isSessionPath(method, urlPath) || urlPath == "/v1/start-session" || urlPath == "/v1/stop-session" {
 			return true
 		} else {
 			return false

@@ -64,11 +64,17 @@ var apiContract = []route{
 	{"POST", "/v1/delete-record", "DeleteRecord"},
 	{"POST", "/v1/commit-record", "CommitRecord"},
 	{"GET", "/v1/query-record", "QueryRecord"},
-	{"GET", "/v1/get-assets", "GetAssets"},
-	{"GET", "/v1/get-asset", "GetAsset"},
-	{"POST", "/v1/update-asset", "UpdateAsset"},
-	{"POST", "/v1/add-asset", "AddAsset"},
-	{"POST", "/v1/delete-asset", "DeleteAsset"},
+	// An ASSET — five TYPED ops (see registerAsset), so like health these rows
+	// name package functions rather than ApiController methods. The two
+	// remote-session doors that follow are untyped and hang off the noun each
+	// belongs to (registerTunnel).
+	{"GET", "/v1/assets", "ListAssets"},
+	{"POST", "/v1/assets", "CreateAsset"},
+	{"GET", "/v1/assets/:owner/:name", "GetAsset"},
+	{"PUT", "/v1/assets/:owner/:name", "UpdateAsset"},
+	{"DELETE", "/v1/assets/:owner/:name", "DeleteAsset"},
+	{"POST", "/v1/assets/:owner/:name/sessions", "OpenSession"},
+	{"GET", "/v1/sessions/:owner/:name/tunnel", "Tunnel"},
 	{"GET", "/v1/get-providers", "GetProviders"},
 	{"GET", "/v1/get-provider", "GetProvider"},
 	{"POST", "/v1/update-provider", "UpdateProvider"},
@@ -109,8 +115,6 @@ var apiContract = []route{
 	{"POST", "/v1/delete-session", "DeleteSession"},
 	{"POST", "/v1/start-session", "StartSession"},
 	{"POST", "/v1/stop-session", "StopSession"},
-	{"POST", "/v1/add-asset-tunnel", "AddAssetTunnel"},
-	{"GET", "/v1/get-asset-tunnel", "GetAssetTunnel"},
 	{"GET", "/v1/get-node-pools", "GetNodePools"},
 	{"GET", "/v1/get-node-pool", "GetNodePool"},
 	{"POST", "/v1/create-node-pool", "CreateNodePool"},
@@ -155,6 +159,14 @@ func registeredRoutes(t *testing.T) map[string]bool {
 		// fiber auto-generates a HEAD twin for every GET; it is not part of the
 		// declared contract, so it is not counted against it.
 		if r.Method == "HEAD" {
+			continue
+		}
+		// The router is a strict SUPERSET of the contract: it also carries zip's
+		// own control routes and every retired address, which serves 410 on every
+		// method and belongs to no operation (routers/gone.go). zip already tells
+		// the two apart, so this asks it rather than keeping a second list of what
+		// to skip.
+		if !app.Declares(r.Method, r.Path) {
 			continue
 		}
 		got[r.Method+" "+r.Path] = true
@@ -212,9 +224,11 @@ func TestAPIContractCount(t *testing.T) {
 }
 
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
-// as POST keeps the total at 72 while breaking every caller.
+// as POST keeps the total unchanged while breaking every caller. It is the half
+// of the contract that moves when an operation leaves the path for the method:
+// the asset family gave back four POSTs and took a PUT and a DELETE.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 35, "DELETE": 4, "PUT": 2}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

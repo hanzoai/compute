@@ -22,6 +22,7 @@ import qs from "qs";
 import {Base64} from "js-base64";
 import Draggable from "react-draggable";
 import GuacdClipboard from "./GuacdClipboard";
+import * as AssetBackend from "../../backend/AssetBackend";
 import * as SessionBackend from "../../backend/SessionBackend";
 
 const STATE_IDLE = 0;
@@ -64,25 +65,31 @@ const GuacdPage = (props) => {
       document.title = assetId.split("/")[1];
     }
     if (box && box.width && box.height && !guacd.client) {
-      addAssetTunnel();
+      openSession();
     }
   }, [assetId, box]);
 
-  const addAssetTunnel = () => {
-    SessionBackend.addAssetTunnel(assetId).then((res) => {
+  const openSession = () => {
+    const [owner, name] = assetId.split("/");
+    AssetBackend.openSession(owner, name).then((res) => {
       if (res.status === "ok") {
         const session = res.data;
         setSession(session);
-        renderDisplay(`${session.owner}/${session.name}`, session.protocol, box.width, box.height);
+        renderDisplay(session.owner, session.name, session.protocol, box.width, box.height);
       } else {
         Setting.showMessage("error", "Failed to connect: " + res.msg);
       }
     });
   };
 
-  const renderDisplay = (sessionId, protocol, width, height) => {
-    const wsEndpoint = Setting.ServerUrl.replace("http://", "ws://");
-    const wsUrl = `${wsEndpoint}/api/get-asset-tunnel`;
+  const renderDisplay = (owner, name, protocol, width, height) => {
+    const sessionId = `${owner}/${name}`;
+    // The tunnel is the session's own stream, so it hangs off the session's
+    // address. It was /api/get-asset-tunnel — a prefix this service has never
+    // served, so the upgrade reached the SPA fallback and came back 200 with
+    // index.html, which no websocket handshake survives.
+    const wsEndpoint = Setting.ServerUrl.replace(/^http/, "ws");
+    const wsUrl = `${wsEndpoint}/v1/sessions/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/tunnel`;
     const tunnel = new Guacamole.WebSocketTunnel(wsUrl);
     const client = new Guacamole.Client(tunnel);
 
@@ -102,9 +109,10 @@ const GuacdPage = (props) => {
       dpi = dpi * 2;
     }
 
+    // Which session is in the path. What is left configures this one
+    // connection: the display geometry, and the remote credentials an asset
+    // does not itself store.
     const params = {
-      "sessionId": sessionId,
-      "protocol": protocol,
       "width": width,
       "height": height,
       "dpi": dpi,
@@ -339,7 +347,7 @@ const GuacdPage = (props) => {
       cancelText: "Close this page",
       cancelButtonProps: {"danger": true},
       onOk() {
-        addAssetTunnel();
+        openSession();
       },
       onCancel() {
         if (activeKey) {

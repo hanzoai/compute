@@ -27,16 +27,13 @@ const AssetTree = ({onSelect, account}) => {
 
   useEffect(() => {
     AssetBackend.getAssets(account.owner, "", "", "name", account.name)
-      .then((res) => {
+      .then((page) => {
         setLoad(false);
-        if (res.status === "ok") {
-          setTreeData(transformData(res.data));
-        } else {
-          Setting.showMessage("error", `Failed to get assets: ${res.msg}`);
-        }
+        setTreeData(transformData(page.assets));
       })
       .catch((error) => {
-        Setting.showMessage("error", `Failed to get assets: ${error}`);
+        setLoad(false);
+        Setting.showMessage("error", `Failed to get assets: ${error.message}`);
       });
   }, []);
 

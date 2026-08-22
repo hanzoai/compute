@@ -13,44 +13,57 @@
 // limitations under the License.
 
 import * as Setting from "../Setting";
+import {answer} from "./op";
+
+// An asset lives at /v1/assets, one at /v1/assets/{owner}/{name}, and the
+// method says what to do with it. Every call here answers the value and rejects
+// with the reason — see backend/op.js.
 
 export function getAssets(owner, page = "", pageSize = "", field = "", value = "", sortField = "", sortOrder = "") {
-  return fetch(`${Setting.ServerUrl}/v1/get-assets?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}`, {
+  const q = new URLSearchParams({owner, p: page, pageSize, field, value, sortField, sortOrder});
+  return fetch(`${Setting.ServerUrl}/v1/assets?${q}`, {
     method: "GET",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(answer);
 }
 
 export function getAsset(owner, name) {
-  return fetch(`${Setting.ServerUrl}/v1/get-asset?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${Setting.ServerUrl}/v1/assets/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(answer);
 }
 
 export function updateAsset(owner, name, asset) {
-  const newAsset = Setting.deepCopy(asset);
-  return fetch(`${Setting.ServerUrl}/v1/update-asset?id=${owner}/${encodeURIComponent(name)}`, {
-    method: "POST",
+  return fetch(`${Setting.ServerUrl}/v1/assets/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, {
+    method: "PUT",
     credentials: "include",
-    body: JSON.stringify(newAsset),
-  }).then(res => res.json());
+    body: JSON.stringify({asset: Setting.deepCopy(asset)}),
+  }).then(answer);
 }
 
 export function addAsset(asset) {
-  const newAsset = Setting.deepCopy(asset);
-  return fetch(`${Setting.ServerUrl}/v1/add-asset`, {
+  return fetch(`${Setting.ServerUrl}/v1/assets`, {
     method: "POST",
     credentials: "include",
-    body: JSON.stringify(newAsset),
-  }).then(res => res.json());
+    body: JSON.stringify({asset: Setting.deepCopy(asset)}),
+  }).then(answer);
 }
 
 export function deleteAsset(asset) {
-  const newAsset = Setting.deepCopy(asset);
-  return fetch(`${Setting.ServerUrl}/v1/delete-asset`, {
+  return fetch(`${Setting.ServerUrl}/v1/assets/${encodeURIComponent(asset.owner)}/${encodeURIComponent(asset.name)}`, {
+    method: "DELETE",
+    credentials: "include",
+  }).then(answer);
+}
+
+// openSession opens a remote session ON an asset — the session belongs to the
+// asset, so it hangs off the asset's own address. It still answers the
+// {status, msg, data} envelope, because the session collection it mints into
+// has not moved yet.
+export function openSession(owner, name, mode = "guacd") {
+  return fetch(`${Setting.ServerUrl}/v1/assets/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/sessions?mode=${mode}`, {
     method: "POST",
     credentials: "include",
-    body: JSON.stringify(newAsset),
   }).then(res => res.json());
 }

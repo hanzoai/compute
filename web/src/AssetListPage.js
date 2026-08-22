@@ -53,37 +53,29 @@ class AssetListPage extends BaseListPage {
   addAsset() {
     const newAsset = this.newAsset();
     AssetBackend.addAsset(newAsset)
-      .then((res) => {
-        if (res.status === "ok") {
-          this.props.history.push({pathname: `/assets/${newAsset.owner}/${newAsset.name}`, mode: "add"});
-          Setting.showMessage("success", "Asset added successfully");
-        } else {
-          Setting.showMessage("error", `Failed to add Asset: ${res.msg}`);
-        }
+      .then((asset) => {
+        this.props.history.push({pathname: `/assets/${asset.owner}/${asset.name}`, mode: "add"});
+        Setting.showMessage("success", "Asset added successfully");
       })
       .catch(error => {
-        Setting.showMessage("error", `Asset failed to add: ${error}`);
+        Setting.showMessage("error", `Failed to add Asset: ${error.message}`);
       });
   }
 
   deleteAsset(i) {
     AssetBackend.deleteAsset(this.state.data[i])
-      .then((res) => {
-        if (res.status === "ok") {
-          Setting.showMessage("success", "Asset deleted successfully");
-          this.setState({
-            data: Setting.deleteRow(this.state.data, i),
-            pagination: {
-              ...this.state.pagination,
-              total: this.state.pagination.total - 1,
-            },
-          });
-        } else {
-          Setting.showMessage("error", `Failed to delete Asset: ${res.msg}`);
-        }
+      .then(() => {
+        Setting.showMessage("success", "Asset deleted successfully");
+        this.setState({
+          data: Setting.deleteRow(this.state.data, i),
+          pagination: {
+            ...this.state.pagination,
+            total: this.state.pagination.total - 1,
+          },
+        });
       })
       .catch(error => {
-        Setting.showMessage("error", `Asset failed to delete: ${error}`);
+        Setting.showMessage("error", `Failed to delete Asset: ${error.message}`);
       });
   }
 
@@ -295,28 +287,25 @@ class AssetListPage extends BaseListPage {
     }
     this.setState({loading: true});
     AssetBackend.getAssets(Setting.getRequestOrganization(this.props.account), params.pagination.current, params.pagination.pageSize, field, value, sortField, sortOrder)
-      .then((res) => {
+      .then((page) => {
         this.setState({
           loading: false,
+          data: page.assets,
+          pagination: {
+            ...params.pagination,
+            total: page.total,
+          },
+          searchText: params.searchText,
+          searchedColumn: params.searchedColumn,
         });
-        if (res.status === "ok") {
-          this.setState({
-            data: res.data,
-            pagination: {
-              ...params.pagination,
-              total: res.data2,
-            },
-            searchText: params.searchText,
-            searchedColumn: params.searchedColumn,
-          });
+      })
+      .catch((error) => {
+        this.setState({loading: false});
+        // A refusal is a status now, not a sentence to string-match.
+        if (error.status === 401 || error.status === 403) {
+          this.setState({isAuthorized: false});
         } else {
-          if (Setting.isResponseDenied(res)) {
-            this.setState({
-              isAuthorized: false,
-            });
-          } else {
-            Setting.showMessage("error", res.msg);
-          }
+          Setting.showMessage("error", error.message);
         }
       });
   };

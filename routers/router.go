@@ -68,6 +68,13 @@ func Route(app *zip.App) {
 	// probe measured the file server rather than the service.
 	registerHealth(app)
 
+	// Retired addresses answer here, ahead of the chain, for the same reason
+	// health does: a retirement notice behind authorization answers 403, and a
+	// caller that gets 403 learns nothing about where its address went. They are
+	// registered through zip.Undeclared, so they serve without entering the
+	// contract (routers/gone.go). One line per family; one table per file.
+	retire(app, goneAssets)
+
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
 	app.Use(zip.H(ApiFilter))
@@ -146,11 +153,8 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/commit-record", h((*controllers.ApiController).CommitRecord))
 	app.Get("/v1/query-record", h((*controllers.ApiController).QueryRecord))
 
-	app.Get("/v1/get-assets", h((*controllers.ApiController).GetAssets))
-	app.Get("/v1/get-asset", h((*controllers.ApiController).GetAsset))
-	app.Post("/v1/update-asset", h((*controllers.ApiController).UpdateAsset))
-	app.Post("/v1/add-asset", h((*controllers.ApiController).AddAsset))
-	app.Post("/v1/delete-asset", h((*controllers.ApiController).DeleteAsset))
+	registerAsset(app)
+	registerTunnel(app)
 
 	app.Get("/v1/get-providers", h((*controllers.ApiController).GetProviders))
 	app.Get("/v1/get-provider", h((*controllers.ApiController).GetProvider))
@@ -203,9 +207,6 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/delete-session", h((*controllers.ApiController).DeleteSession))
 	app.Post("/v1/start-session", h((*controllers.ApiController).StartSession))
 	app.Post("/v1/stop-session", h((*controllers.ApiController).StopSession))
-
-	app.Post("/v1/add-asset-tunnel", h((*controllers.ApiController).AddAssetTunnel))
-	app.Get("/v1/get-asset-tunnel", h((*controllers.ApiController).GetAssetTunnel))
 
 	app.Get("/v1/get-node-pools", h((*controllers.ApiController).GetNodePools))
 	app.Get("/v1/get-node-pool", h((*controllers.ApiController).GetNodePool))

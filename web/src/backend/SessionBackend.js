@@ -38,13 +38,6 @@ export function updateSession(owner, name, session) {
   }).then(res => res.json());
 }
 
-export function addAssetTunnel(assetId, mode = "guacd") {
-  return fetch(`${Setting.ServerUrl}/v1/add-asset-tunnel?assetId=${assetId}&mode=${mode}`, {
-    method: "POST",
-    credentials: "include",
-  }).then(res => res.json());
-}
-
 export function deleteSession(session) {
   const newSession = Setting.deepCopy(session);
   return fetch(`${Setting.ServerUrl}/v1/delete-session`, {

@@ -48,47 +48,46 @@ class AssetEditPage extends React.Component {
 
   getAsset(updateFromRemote = false) {
     AssetBackend.getAsset(this.props.account.owner, this.state.assetName)
-      .then((res) => {
-        if (res.status === "ok") {
-          // Clone the fetched asset data using the spread operator
-          const newAsset = {...res.data};
+      .then((asset) => {
+        // Clone the fetched asset data using the spread operator
+        const newAsset = {...asset};
 
-          if (!updateFromRemote && this.state.asset !== null) {
-            newAsset.autoQuery = this.state.asset.autoQuery;
+        if (!updateFromRemote && this.state.asset !== null) {
+          newAsset.autoQuery = this.state.asset.autoQuery;
 
-            // Update or add remote Apps to the asset data
-            newAsset.remoteApps = newAsset.remoteApps.map((newApp, i) => {
-              if (i < this.state.asset.remoteApps.length) {
-                const oldApp = this.state.asset.remoteApps[i];
-                return {
-                  ...oldApp, // Preserve old attributes
-                  ...newApp, // Override with new attributes
-                };
-              } else {
-                return newApp; // Add new service
-              }
-            }).slice(0, this.state.asset.remoteApps.length);
+          // Update or add remote Apps to the asset data
+          newAsset.remoteApps = newAsset.remoteApps.map((newApp, i) => {
+            if (i < this.state.asset.remoteApps.length) {
+              const oldApp = this.state.asset.remoteApps[i];
+              return {
+                ...oldApp, // Preserve old attributes
+                ...newApp, // Override with new attributes
+              };
+            } else {
+              return newApp; // Add new service
+            }
+          }).slice(0, this.state.asset.remoteApps.length);
 
-            // Update or add services to the asset data
-            newAsset.services = newAsset.services.map((newService, i) => {
-              if (i < this.state.asset.services.length) {
-                const oldService = this.state.asset.services[i];
-                return {
-                  ...oldService, // Preserve old attributes
-                  ...newService, // Override with new attributes
-                };
-              } else {
-                return newService; // Add new service
-              }
-            }).slice(0, this.state.asset.services.length);
-          }
-
-          this.setState({
-            asset: newAsset,
-          });
-        } else {
-          Setting.showMessage("error", `Failed to get asset: ${res.msg}`);
+          // Update or add services to the asset data
+          newAsset.services = newAsset.services.map((newService, i) => {
+            if (i < this.state.asset.services.length) {
+              const oldService = this.state.asset.services[i];
+              return {
+                ...oldService, // Preserve old attributes
+                ...newService, // Override with new attributes
+              };
+            } else {
+              return newService; // Add new service
+            }
+          }).slice(0, this.state.asset.services.length);
         }
+
+        this.setState({
+          asset: newAsset,
+        });
+      })
+      .catch(error => {
+        Setting.showMessage("error", `Failed to get asset: ${error.message}`);
       });
   }
 
@@ -352,43 +351,30 @@ class AssetEditPage extends React.Component {
   submitAssetEdit(willExist) {
     const asset = Setting.deepCopy(this.state.asset);
     AssetBackend.updateAsset(this.state.asset.owner, this.state.assetName, asset)
-      .then((res) => {
-        if (res.status === "ok") {
-          if (res.data) {
-            Setting.showMessage("success", "Successfully saved");
-            this.setState({
-              assetName: this.state.asset.name,
-            });
-            if (willExist) {
-              this.props.history.push("/assets");
-            } else {
-              this.props.history.push(`/assets/${this.state.asset.owner}/${encodeURIComponent(this.state.asset.name)}`);
-            }
-            // this.getAsset(true);
-          } else {
-            Setting.showMessage("error", "failed to save: server side failure");
-            this.updateAssetField("name", this.state.assetName);
-          }
+      .then(() => {
+        Setting.showMessage("success", "Successfully saved");
+        this.setState({
+          assetName: this.state.asset.name,
+        });
+        if (willExist) {
+          this.props.history.push("/assets");
         } else {
-          Setting.showMessage("error", `failed to save: ${res.msg}`);
+          this.props.history.push(`/assets/${this.state.asset.owner}/${encodeURIComponent(this.state.asset.name)}`);
         }
       })
       .catch(error => {
-        Setting.showMessage("error", `failed to save: ${error}`);
+        Setting.showMessage("error", `failed to save: ${error.message}`);
+        this.updateAssetField("name", this.state.assetName);
       });
   }
 
   deleteAsset() {
     AssetBackend.deleteAsset(this.state.asset)
-      .then((res) => {
-        if (res.status === "ok") {
-          this.props.history.push("/assets");
-        } else {
-          Setting.showMessage("error", `${i18next.t("general:Failed to delete")}: ${res.msg}`);
-        }
+      .then(() => {
+        this.props.history.push("/assets");
       })
       .catch(error => {
-        Setting.showMessage("error", `${i18next.t("general:Failed to connect to server")}: ${error}`);
+        Setting.showMessage("error", `${i18next.t("general:Failed to delete")}: ${error.message}`);
       });
   }
 

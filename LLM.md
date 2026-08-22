@@ -62,8 +62,9 @@ bound — so a caller dialling in the instant after start can legitimately get
 which is what puts visor in the op registry every projection reads: OpenAPI,
 MCP, CLI, SDK, and the by-name call plane. `zip.Here` reaches it in-process with
 no wire. A machine's AGENT is the second noun to land typed (4 ops,
-`controllers/agent_binding.go`, registered by `routers.registerAgent`). The
-remaining 68 routes are still untyped controller methods, so they project
+`controllers/agent_binding.go`, registered by `routers.registerAgent`), an ASSET
+the third (5 ops, `controllers/asset.go`, `routers.registerAsset`). The
+remaining 63 routes are still untyped controller methods, so they project
 nowhere — see "Typed ops: what is left".
 
 Two defects it fixed, both silent:
@@ -99,11 +100,12 @@ breaks the schema mapping. The migration is done; the tag name is just the
 tag name.
 
 ### Typed ops: what is left (IN PROGRESS, noun by noun)
-68 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
+63 of visor's 74 routes are still untyped `func (c *ApiController) X()` methods
 registered through `h()`. They serve fine and project NOWHERE — no OpenAPI
 schema, no MCP tool, no CLI verb, no `zip.Here`.
 
-Two nouns have landed: `/v1/health`, and a machine's AGENT — four ops in
+Three nouns have landed: `/v1/health`, a machine's AGENT, and an ASSET (see "A
+path names a resource" below). The agent is four ops in
 `controllers/agent_binding.go`, registered by `routers.registerAgent`, at ONE
 address with the method carrying the verb:
 
@@ -153,7 +155,7 @@ the enveloped legacy ops (23 call sites) and `cl.op` for the typed ones (9).
 They share one request half, and `call` disappears when the last noun lands.
 
 Route/contract bookkeeping: `routers/router_contract_test.go` pins the surface
-at 73 (GET 32, POST 37, DELETE 3, PUT 1) and reads the LIVE fiber router, so a
+at 74 (GET 33, POST 35, DELETE 4, PUT 2) and reads the LIVE fiber router, so a
 typed op swapped in for an untyped route keeps the same contract line and the
 test keeps holding. The typed rows name package functions rather than
 `ApiController` methods.
@@ -164,6 +166,83 @@ whatever the order — measured by moving `registerAgent` below the `:id` routes
 and watching `/v1/machines/agents` still reach `ListAgents`. What is pinned is
 the outcome (`routers.TestAgentsIsNotAMachineId`), not an ordering rule that is
 not one.
+
+### A path names a resource; the method says what to do with it
+Most of visor's addresses still carry the OPERATION — `get-machines`,
+`attach-volume`, `scale-node-pool` — so a client holds one URL per verb and the
+address moves when the operation does. Families are being moved onto the
+resource one at a time. The ASSET is the first, and it is the pattern:
+
+| Method | Path | Was |
+|--------|------|-----|
+| GET | `/v1/assets` | `GET /v1/get-assets` |
+| POST | `/v1/assets` | `POST /v1/add-asset` |
+| GET | `/v1/assets/:owner/:name` | `GET /v1/get-asset?id=owner/name` |
+| PUT | `/v1/assets/:owner/:name` | `POST /v1/update-asset?id=owner/name` |
+| DELETE | `/v1/assets/:owner/:name` | `POST /v1/delete-asset` (asset in the body) |
+| POST | `/v1/assets/:owner/:name/sessions` | `POST /v1/add-asset-tunnel?assetId=` |
+| GET | `/v1/sessions/:owner/:name/tunnel` | `GET /v1/get-asset-tunnel?sessionId=` |
+
+The member is the `(owner, name)` pair, which IS an asset's identity — the same
+address `hanzoai/iam` gives a user. The five CRUD ops are TYPED
+(`controllers/asset.go`, `routers.registerAsset`) and therefore drop the
+envelope; safe because the caller set is measured and local — `hanzoai/cloud`
+reaches no asset route, and visor's own web build moved in the same change
+(`web/src/backend/AssetBackend.js`, reading typed answers through
+`web/src/backend/op.js`).
+
+The last two rows are the interesting ones, because the old names had the
+parentage backwards. `add-asset-tunnel` made no tunnel: it made a SESSION, on an
+asset. `get-asset-tunnel` addressed no asset: it read `?sessionId=` and has
+always carried the stream of that session. Each now hangs off the noun it
+belongs to. Both stay UNTYPED — the tunnel structurally must (it hijacks the
+connection, and a typed handler is handed a `context.Context` and no request to
+hijack), and opening a session mints an `object.Session` whose own collection is
+still enveloped, so it converts with THAT noun.
+
+#### Retirement: 410, and the successor in a header
+A retired address answers **410 Gone** (RFC 9110 §15.5.11) and names its
+replacement in a `Link` header, `rel="successor-version"` (RFC 5829), beside
+`Deprecation` (RFC 9745) and `Sunset` (RFC 8594). Both stamps are NOW: the
+address is gone, not going. The body carries the same successor the header does,
+rendered from ONE row so the two cannot disagree. A 404 would say "never heard
+of it", which sends a caller hunting for a typo it will not find.
+
+- `routers/gone.go` is the mechanism and holds no addresses. Family tables live
+  one per file (`routers/gone_assets.go`), so they merge without conflict.
+- They register on `zip.Undeclared`, so they SERVE and are absent from
+  `App.Declaration` and every projection built from it. This matters because a
+  retired address answers EVERY method — 410 is about the target resource, and a
+  caller that sent the wrong verb still needs the successor — so publishing them
+  would be one operation per method per address.
+- They are registered AHEAD of the filter chain, next to health, for the same
+  reason: a retirement notice behind authorization answers 403, and a caller that
+  gets 403 learns nothing about where its address went.
+- `router_contract_test.go` asks `app.Declares` rather than keeping a second list
+  of what to skip, so the router being a superset of the contract stays a fact
+  the framework answers.
+- A successor is written as an RFC 6570 template (`/v1/assets/{owner}/{name}`) —
+  the same string the OpenAPI document uses. `TestRetiredAssetSuccessorIsServed`
+  reads the live router, so a successor cannot name an address visor does not
+  serve.
+
+#### Moving a family: the path carries the AUTHORIZATION, not just the address
+This is the part that is not mechanical, and every remaining family hits it.
+`routers/authz_filter.go`'s `getObject` resolves the object the policy judges,
+and it used to read only `?id=`, `?owner=` and the body. An address that names
+its resource in the PATH would therefore have resolved to `("", "")` — and the
+one rule that admits an ordinary user, `subOwner == objOwner` in
+`authz.IsAllowed`, would have stopped matching. Every asset route would answer
+403 for every non-`built-in` org, with nothing in the diff to suggest the
+authorization had moved. `getObject` now reads `:owner`/`:name` FIRST (the path
+is the addressing authority, so a body cannot smuggle a second target past the
+decision made about the first).
+
+The static Casbin policy is the other half. Its matcher compares `urlPath` by
+EQUALITY, so a rule naming `/v1/sessions/:owner/:name/tunnel` matches no request
+that ever arrives. The two rows that admitted `get-asset-tunnel` and
+`add-asset-tunnel` for any subject are now `authz.isSessionPath`, the same shape
+`isResellComputePath` already uses for the same reason.
 
 ### Storage backends (Postgres -> Base, additive)
 Visor persists 10 XORM tables (Asset, Provider, Machine, Record, Session,
