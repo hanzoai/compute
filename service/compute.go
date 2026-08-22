@@ -61,13 +61,23 @@ func digitalOceanToken() string {
 	return strings.TrimSpace(conf.GetConfigString("digitalOceanToken"))
 }
 
-// newDigitalOceanClient builds a DigitalOcean client bound to Hanzo's provider token.
+// newDigitalOceanClient builds a DigitalOcean client for Hanzo's own account.
+//
+// It goes through the carrier like every per-row client does (NewMachineClient),
+// which is what lets egress attach the credential instead of this process
+// holding one. Carried, an EMPTY token is the correct state rather than a
+// misconfiguration: the key is egress's, and demanding one here would keep it in
+// this pod's environment — the thing being removed.
 func newDigitalOceanClient() (MachineDigitalOceanClient, error) {
+	hc, err := httpFor(Credential{Provider: providerDigitalOcean})
+	if err != nil {
+		return MachineDigitalOceanClient{}, err
+	}
 	token := digitalOceanToken()
-	if token == "" {
+	if token == "" && !carrierRegistered() {
 		return MachineDigitalOceanClient{}, fmt.Errorf("hanzo compute is not configured: DigitalOcean token unset (resolve from KMS)")
 	}
-	return newMachineDigitalOceanClient(token, "", "", nil)
+	return newMachineDigitalOceanClient(token, "", "", hc)
 }
 
 // ComputeConfigured reports whether the platform DO token is present, so callers
@@ -77,7 +87,12 @@ func newDigitalOceanClient() (MachineDigitalOceanClient, error) {
 // credential WORK" — see ComputeReachable. A revoked token is still a non-empty
 // string, so this stays true through a revocation and every fallback written for
 // the unconfigured case is dead code exactly when it is needed.
-func ComputeConfigured() bool { return digitalOceanToken() != "" }
+//
+// A registered carrier counts as configured. Under egress this process holds no
+// token by design, so asking only about the token would report "not configured"
+// for an account egress can reach perfectly well, and every endpoint gated on
+// this would answer 503 on a working credential.
+func ComputeConfigured() bool { return digitalOceanToken() != "" || carrierRegistered() }
 
 // ComputeReachable proves the provider credential actually works, by spending one
 // authenticated round trip on it rather than inspecting its length.
