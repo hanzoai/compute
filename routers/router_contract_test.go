@@ -17,6 +17,7 @@ package routers
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/zap-proto/zip"
@@ -64,16 +65,16 @@ var apiContract = []route{
 	{"POST", "/v1/delete-record", "DeleteRecord"},
 	{"POST", "/v1/commit-record", "CommitRecord"},
 	{"GET", "/v1/query-record", "QueryRecord"},
-	{"GET", "/v1/get-assets", "GetAssets"},
-	{"GET", "/v1/get-asset", "GetAsset"},
-	{"POST", "/v1/update-asset", "UpdateAsset"},
-	{"POST", "/v1/add-asset", "AddAsset"},
-	{"POST", "/v1/delete-asset", "DeleteAsset"},
-	{"GET", "/v1/get-providers", "GetProviders"},
-	{"GET", "/v1/get-provider", "GetProvider"},
-	{"POST", "/v1/update-provider", "UpdateProvider"},
-	{"POST", "/v1/add-provider", "AddProvider"},
-	{"POST", "/v1/delete-provider", "DeleteProvider"},
+	{"GET", "/v1/assets", "GetAssets"},
+	{"GET", "/v1/assets/:owner/:name", "GetAsset"},
+	{"PUT", "/v1/assets/:owner/:name", "UpdateAsset"},
+	{"POST", "/v1/assets", "AddAsset"},
+	{"DELETE", "/v1/assets/:owner/:name", "DeleteAsset"},
+	{"GET", "/v1/providers", "GetProviders"},
+	{"GET", "/v1/providers/:owner/:name", "GetProvider"},
+	{"PUT", "/v1/providers/:owner/:name", "UpdateProvider"},
+	{"POST", "/v1/providers", "AddProvider"},
+	{"DELETE", "/v1/providers/:owner/:name", "DeleteProvider"},
 	{"GET", "/v1/get-machines", "GetMachines"},
 	{"GET", "/v1/get-machine", "GetMachine"},
 	{"POST", "/v1/update-machine", "UpdateMachine"},
@@ -188,8 +189,17 @@ func TestAPIContractPreserved(t *testing.T) {
 	sort.Strings(missing)
 	sort.Strings(extra)
 
+	// A route may LEAVE this table only by being retired. Retirement is not a
+	// drop: the address still answers, with 410 and the resource that replaced
+	// it, so a caller is told where to go rather than meeting a 404. Anything
+	// that leaves without a successor is the silent break this test exists for.
 	for _, k := range missing {
-		t.Errorf("route dropped by the migration: %s", k)
+		path := k[strings.Index(k, " ")+1:]
+		if Retired(path) {
+			continue
+		}
+		t.Errorf("route dropped by the migration: %s — retire it with Retire(%q, <successor>) "+
+			"so callers are told where it went, or put it back", k, path)
 	}
 	for _, k := range extra {
 		t.Errorf("route served but not declared: %s", k)
@@ -214,7 +224,17 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	// assets and providers moved to resource addresses, and the shape moved with
+	// them: replacing an item is PUT and removing one is DELETE, where the verb
+	// surface said POST to both. Four POSTs became two PUTs and two DELETEs —
+	// update-asset, delete-asset, update-provider, delete-provider.
+	//
+	//	POST 37 -> 33    PUT 1 -> 3    DELETE 3 -> 5    GET 33 unchanged
+	//
+	// GET does not move: reading a collection and reading an item were both GET
+	// before and are both GET now. A number here that changes WITHOUT a family
+	// moving is the thing this test is for.
+	want := map[string]int{"GET": 33, "POST": 33, "DELETE": 5, "PUT": 3}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

@@ -33,7 +33,7 @@ const recordUserIDKey = "recordUserId"
 // signup and get-assets are exempted from the user-id stash exactly as before.
 func RecordMessage(c *zip.Ctx) error {
 	path := c.Path()
-	if path != "/v1/login" && path != "/v1/signup" && path != "/v1/get-assets" {
+	if path != "/v1/login" && path != "/v1/signup" && path != "/v1/assets" {
 		if userId := getUsername(c); userId != "" {
 			c.Locals(recordUserIDKey, userId)
 		}

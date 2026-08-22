@@ -147,17 +147,22 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/commit-record", h((*controllers.ApiController).CommitRecord))
 	app.Get("/v1/query-record", h((*controllers.ApiController).QueryRecord))
 
-	app.Get("/v1/get-assets", h((*controllers.ApiController).GetAssets))
-	app.Get("/v1/get-asset", h((*controllers.ApiController).GetAsset))
-	app.Post("/v1/update-asset", h((*controllers.ApiController).UpdateAsset))
-	app.Post("/v1/add-asset", h((*controllers.ApiController).AddAsset))
-	app.Post("/v1/delete-asset", h((*controllers.ApiController).DeleteAsset))
+	// An asset is a resource. The collection lists and creates; the item, named
+	// by its (owner, name) key, is read, replaced and removed.
+	app.Get("/v1/assets", h((*controllers.ApiController).GetAssets))
+	app.Post("/v1/assets", h((*controllers.ApiController).AddAsset))
+	app.Get("/v1/assets/:owner/:name", h((*controllers.ApiController).GetAsset))
+	app.Put("/v1/assets/:owner/:name", h((*controllers.ApiController).UpdateAsset))
+	app.Delete("/v1/assets/:owner/:name", h((*controllers.ApiController).DeleteAsset))
 
-	app.Get("/v1/get-providers", h((*controllers.ApiController).GetProviders))
-	app.Get("/v1/get-provider", h((*controllers.ApiController).GetProvider))
-	app.Post("/v1/update-provider", h((*controllers.ApiController).UpdateProvider))
-	app.Post("/v1/add-provider", h((*controllers.ApiController).AddProvider))
-	app.Post("/v1/delete-provider", h((*controllers.ApiController).DeleteProvider))
+	// A provider holds a cloud credential, so the authorization on each address
+	// is the one the verb spelling had: the seam reads the (owner, name) out of
+	// the path (see pathTarget) and compares it to the subject exactly as before.
+	app.Get("/v1/providers", h((*controllers.ApiController).GetProviders))
+	app.Post("/v1/providers", h((*controllers.ApiController).AddProvider))
+	app.Get("/v1/providers/:owner/:name", h((*controllers.ApiController).GetProvider))
+	app.Put("/v1/providers/:owner/:name", h((*controllers.ApiController).UpdateProvider))
+	app.Delete("/v1/providers/:owner/:name", h((*controllers.ApiController).DeleteProvider))
 
 	app.Get("/v1/get-machines", h((*controllers.ApiController).GetMachines))
 	app.Get("/v1/get-machine", h((*controllers.ApiController).GetMachine))
