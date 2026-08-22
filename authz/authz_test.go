@@ -80,9 +80,9 @@ func TestAdminOwnedObjectIsNotEveryonesObject(t *testing.T) {
 	customer := &iamsdk.User{Owner: "acme", Name: "alice"}
 	superadmin := &iamsdk.User{Owner: "admin", Name: "z"}
 
-	// A route the static policy does not cover, so the decision is the subject
-	// rule alone.
-	const method, path = "POST", "/v1/create-node-pool"
+	// A route the static policy does not cover, and which isResellComputePath does
+	// not admit either, so the decision is the subject rule alone.
+	const method, path = "POST", "/v1/k8s/pools"
 
 	if IsAllowed(customer, "acme", "alice", method, path, "admin", "thing") {
 		t.Fatal("a customer must not reach a SuperAdmin-owned object")

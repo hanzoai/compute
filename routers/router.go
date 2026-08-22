@@ -68,6 +68,12 @@ func Route(app *zip.App) {
 	// probe measured the file server rather than the service.
 	registerHealth(app)
 
+	// Retired addresses answer AHEAD of the chain, for the same reason health
+	// does and one of its own: a caller holding a dead address has nothing to
+	// authenticate with that would help, and behind ApiFilter the 410 that names
+	// its successor becomes a 403 that names nothing. One line per family.
+	routeGonePools(app)
+
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
 	app.Use(zip.H(ApiFilter))
@@ -126,6 +132,50 @@ func registerAgent(app *zip.App) {
 		zip.WithSummary("Unbind a machine's agent"),
 		zip.WithOperationID("unbindAgent"),
 		zip.WithTags("AgentBinding"),
+	)
+}
+
+// registerPools declares a Kubernetes NODE POOL (controllers/node_pool.go).
+// Five TYPED ops, so this noun is in the registry every projection reads rather
+// than only on the wire.
+//
+// ONE noun, ONE address, and the METHOD carries the verb. It replaces six
+// addresses that each carried the operation instead — get-node-pools,
+// get-node-pool, create-node-pool, update-node-pool, delete-node-pool and
+// scale-node-pool — which are retired in gone_pools.go.
+//
+// PUT rather than PATCH on the item because the request states what the pool
+// SHOULD BE, count included: scale was never a resource, it was one field of
+// this one.
+//
+// It sits under /v1/k8s beside clusters and nodes, and flat rather than under a
+// cluster, because the store keys a pool by (owner, name) across every cluster
+// and the list a caller wants is the org's — see controllers/node_pool.go.
+func registerPools(app *zip.App) {
+	zip.Get(app, "/v1/k8s/pools", controllers.ListPools,
+		zip.WithSummary("List the caller org's Kubernetes node pools"),
+		zip.WithOperationID("listPools"),
+		zip.WithTags("NodePool"),
+	)
+	zip.Post(app, "/v1/k8s/pools", controllers.CreatePool,
+		zip.WithSummary("Provision a node pool on one of the org's clusters"),
+		zip.WithOperationID("createPool"),
+		zip.WithTags("NodePool"),
+	)
+	zip.Get(app, "/v1/k8s/pools/:id", controllers.GetPool,
+		zip.WithSummary("Read one of the org's node pools"),
+		zip.WithOperationID("getPool"),
+		zip.WithTags("NodePool"),
+	)
+	zip.Put(app, "/v1/k8s/pools/:id", controllers.ReplacePool,
+		zip.WithSummary("State a node pool's node count and autoscale bounds"),
+		zip.WithOperationID("replacePool"),
+		zip.WithTags("NodePool"),
+	)
+	zip.Delete(app, "/v1/k8s/pools/:id", controllers.RemovePool,
+		zip.WithSummary("Destroy a node pool at its provider"),
+		zip.WithOperationID("removePool"),
+		zip.WithTags("NodePool"),
 	)
 }
 
@@ -207,12 +257,7 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/add-asset-tunnel", h((*controllers.ApiController).AddAssetTunnel))
 	app.Get("/v1/get-asset-tunnel", h((*controllers.ApiController).GetAssetTunnel))
 
-	app.Get("/v1/get-node-pools", h((*controllers.ApiController).GetNodePools))
-	app.Get("/v1/get-node-pool", h((*controllers.ApiController).GetNodePool))
-	app.Post("/v1/create-node-pool", h((*controllers.ApiController).CreateNodePool))
-	app.Post("/v1/update-node-pool", h((*controllers.ApiController).UpdateNodePool))
-	app.Post("/v1/delete-node-pool", h((*controllers.ApiController).DeleteNodePool))
-	app.Post("/v1/scale-node-pool", h((*controllers.ApiController).ScaleNodePool))
+	registerPools(app)
 
 	app.Get("/v1/get-plans", h((*controllers.ApiController).GetPlans))
 	app.Get("/v1/get-plan", h((*controllers.ApiController).GetPlan))

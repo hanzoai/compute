@@ -93,11 +93,6 @@ func GetAllNodePools(pools *[]*NodePool) error {
 	return nil
 }
 
-func GetNodePoolCount(owner, field, value string) (int64, error) {
-	session := GetSession(owner, -1, -1, field, value, "", "")
-	return session.Count(&NodePool{})
-}
-
 func GetNodePools(owner string) ([]*NodePool, error) {
 	pools := []*NodePool{}
 	engine, err := EngineFor(owner)
@@ -105,17 +100,6 @@ func GetNodePools(owner string) ([]*NodePool, error) {
 		return pools, err
 	}
 	err = engine.Desc("created_time").Find(&pools, &NodePool{Owner: owner})
-	if err != nil {
-		return pools, err
-	}
-
-	return pools, nil
-}
-
-func GetPaginationNodePools(owner string, offset, limit int, field, value, sortField, sortOrder string) ([]*NodePool, error) {
-	pools := []*NodePool{}
-	session := GetSession(owner, offset, limit, field, value, sortField, sortOrder)
-	err := session.Find(&pools)
 	if err != nil {
 		return pools, err
 	}
@@ -532,37 +516,31 @@ func authorizedNodes(spec *service.CreateNodePoolSpec) int {
 	return n
 }
 
-// ScaleNodePoolCloud updates the node count of an existing DOKS node pool.
+// ScaleNodePoolCloud sets a STORED pool's node count at its provider.
 //
 // Money gate: scaling UP is a provision, so the owner is authorized for the
 // first hour of the ADDED nodes before the upstream is touched. Scaling down (or
 // to the same count) adds no cost and is never gated — refusing to shrink a pool
 // because a balance is low would keep the meter running on nodes the customer
 // asked to release.
-func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int) (*NodePool, error) {
-	provider, err := getProvider(owner, providerName)
+//
+// EVERY field it acts on comes from the ROW — whose account, which cluster,
+// which upstream pool, which project the hour is billed to — exactly as
+// DeleteNodePoolCloud does, and through the same poolCloudClient. It used to
+// take the account, the cluster and the pool id as three request strings beside
+// the owner: a caller could then name a pool that has no row here, and the scale
+// authorized the org and reached DigitalOcean before failing on the missing row,
+// so a request could spend and still fail. A pool with no row is now not a pool
+// this service scales.
+func ScaleNodePoolCloud(stored *NodePool, count int) (*NodePool, error) {
+	if stored.PoolID == "" {
+		return nil, fmt.Errorf("node pool %s has no provider pool to scale", stored.GetId())
+	}
+	client, err := poolCloudClient(stored)
 	if err != nil {
 		return nil, err
 	}
-	if provider == nil {
-		return nil, fmt.Errorf("provider %q not found for owner %q", providerName, owner)
-	}
-
-	token := provider.ClientSecret
-	if token == "" {
-		token = provider.ClientId
-	}
-
-	cid := clusterID
-	if cid == "" {
-		cid = provider.ClusterID
-	}
-
-	client, err := service.NewDOKSClient(token, cid)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create DOKS client: %w", err)
-	}
-	current, err := client.GetNodePool(poolID)
+	current, err := client.GetNodePool(stored.PoolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current node pool: %w", err)
 	}
@@ -572,7 +550,7 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 	// with a nil error, so zero unambiguously means UNPRICED, and only the growing
 	// path treats that as fatal.
 	rate, _ := service.HourlyCents(current.Size)
-	return scaleNodePoolMetered(client, current, rate, owner, provider.Project, poolID, count)
+	return scaleNodePoolMetered(client, current, rate, stored.Owner, stored.ProjectID, stored.PoolID, count)
 }
 
 // cloudNodePoolScaler is the minimal cloud surface a metered scale WRITES to.
@@ -663,6 +641,16 @@ type cloudNodePoolDeleter interface {
 	DeleteNodePool(poolID string) error
 }
 
+// poolCloud is everything a STORED pool's own writes ask of a cloud: read the
+// pool as it is, resize it, destroy it. *service.DOKSClient satisfies it; the
+// narrow interfaces above stay as the seams the metered helpers take, so a test
+// still fakes one verb at a time.
+type poolCloud interface {
+	cloudNodePoolScaler
+	cloudNodePoolDeleter
+	GetNodePool(poolID string) (*service.NodePool, error)
+}
+
 // confirmCloudPoolDeleted asks the provider to delete the pool and reports
 // whether it is now gone. A nil error means it was deleted; a provider 404 means
 // it was already gone. Any other error (e.g. a 422 while the pool is still
@@ -675,14 +663,19 @@ func confirmCloudPoolDeleted(client cloudNodePoolDeleter, poolID string) error {
 	return err
 }
 
-// poolCloudClient builds the cloud client that can delete a STORED pool: the
+// poolCloudClient builds the cloud client that acts on a STORED pool: the
 // per-org Provider named on the row, or the configured cloud account when the row names
 // none (a cluster's seed pool is recorded by the platform cluster create, which has
 // no Provider row to name).
 //
 // A Provider the row names but the store does not have is an ERROR, never a skip.
 // Skipping is how a row gets dropped while its pool keeps running.
-func poolCloudClient(stored *NodePool) (cloudNodePoolDeleter, error) {
+//
+// Scale and delete ask the same question — which account holds this pool — so
+// they ask it here, once. Scale used to resolve its own client from a request's
+// provider name, which had no seed-pool fallback: a platform cluster's own pool
+// could be destroyed but never resized.
+func poolCloudClient(stored *NodePool) (poolCloud, error) {
 	if stored.Provider == "" {
 		return service.NewDOKSClientFromConfig(stored.ClusterID)
 	}

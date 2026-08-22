@@ -27,44 +27,51 @@ import (
 	"github.com/hanzoai/visor/object"
 )
 
-// The tenant a node-pool handler acts on is the caller's own, and the id is
-// only ever a NAME. An id naming another org addresses the caller's own pool of
-// that name — never the other org's — so the historical `owner/name` form keeps
-// working without carrying a tenant.
+// The tenant a node-pool handler acts on is the caller's own, and the id is only
+// ever a NAME. The name half of a crafted id addresses the caller's own pool of
+// that name — never another org's.
 func TestPoolIdIsAlwaysTheCallersOwn(t *testing.T) {
-	for name, tc := range map[string]struct{ org, id, want string }{
-		"owner/name keeps only the name": {"acme", "acme/gpu", "acme/gpu"},
-		"a foreign owner is discarded":   {"acme", "hanzo/gpu", "acme/gpu"},
-		"a bare name is a name":          {"acme", "gpu", "acme/gpu"},
-		"whitespace is trimmed":          {"acme", "  acme/gpu  ", "acme/gpu"},
-		"no org context fails closed":    {"", "acme/gpu", ""},
-		"no name fails closed":           {"acme", "", ""},
-		"a trailing slash is no name":    {"acme", "acme/", ""},
+	for name, tc := range map[string]struct {
+		org, id, want string
+		bad           bool
+	}{
+		"a bare name is a name":        {org: "acme", id: "gpu", want: "acme/gpu"},
+		"whitespace is trimmed":        {org: "acme", id: "  gpu  ", want: "acme/gpu"},
+		"an owner/name id is refused":  {org: "acme", id: "hanzo/gpu", bad: true},
+		"the caller's own id too":      {org: "acme", id: "acme/gpu", bad: true},
+		"a trailing slash is no name":  {org: "acme", id: "gpu/", bad: true},
+		"no org context fails closed":  {org: "", id: "gpu", bad: true},
+		"an empty name fails closed":   {org: "acme", id: "", bad: true},
+		"whitespace is not a name":     {org: "acme", id: "   ", bad: true},
+		"a path is not a name, either": {org: "acme", id: "a/b/c", bad: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := poolId(tc.org, tc.id); got != tc.want {
-				t.Fatalf("poolId(%q, %q) = %q, want %q", tc.org, tc.id, got, tc.want)
+			got, err := pool(caller{Owner: tc.org}, tc.id)
+			if tc.bad {
+				if err == nil {
+					t.Fatalf("pool(%q, %q) = %q, want an error", tc.org, tc.id, got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("pool(%q, %q) = %q, %v; want %q", tc.org, tc.id, got, err, tc.want)
 			}
 		})
 	}
 }
 
-// poolWire stands the node-pool lifecycle up on a bare app, registered exactly as
-// routers.Route registers it. The read buffer is raised only because an RS256
-// bearer over a 2048-bit key does not fit fasthttp's 4 KiB default — the whole
-// point here is to drive real requests carrying a real token.
+// poolWire stands the node-pool resource up on a bare app, registered exactly as
+// routers.registerPools registers it. The read buffer is raised only because an
+// RS256 bearer over a 2048-bit key does not fit fasthttp's 4 KiB default — the
+// whole point here is to drive real requests carrying a real token.
 func poolWire(t *testing.T) *zip.App {
 	t.Helper()
 	app := zip.New(zip.Config{ReadBufferSize: 16384})
-	handler := func(fn func(*ApiController)) zip.Handler {
-		return func(c *zip.Ctx) error { fn(New(c)); return nil }
-	}
-	app.Get("/v1/get-node-pools", handler((*ApiController).GetNodePools))
-	app.Get("/v1/get-node-pool", handler((*ApiController).GetNodePool))
-	app.Post("/v1/update-node-pool", handler((*ApiController).UpdateNodePool))
-	app.Post("/v1/delete-node-pool", handler((*ApiController).DeleteNodePool))
-	app.Post("/v1/create-node-pool", handler((*ApiController).CreateNodePool))
-	app.Post("/v1/scale-node-pool", handler((*ApiController).ScaleNodePool))
+	zip.Get(app, "/v1/k8s/pools", ListPools)
+	zip.Post(app, "/v1/k8s/pools", CreatePool)
+	zip.Get(app, "/v1/k8s/pools/:id", GetPool)
+	zip.Put(app, "/v1/k8s/pools/:id", ReplacePool)
+	zip.Delete(app, "/v1/k8s/pools/:id", RemovePool)
 	return app
 }
 
@@ -107,9 +114,33 @@ func get(t *testing.T, app *zip.App, path, bearer string) string {
 	return string(b)
 }
 
-// storedPool plants a DB-only node pool (no provider linkage, so nothing reaches
-// a cloud) belonging to owner.
-func storedPool(t *testing.T, owner, name string) *object.NodePool {
+// poolReq drives one real request at any method and returns the status with the
+// body — the item ops answer with a status (404 absent, 204 removed) as much as
+// with a value, so a driver that drops it cannot see what they said.
+func poolReq(t *testing.T, app *zip.App, method, path, bearer, body string) (int, string) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", bearer)
+	}
+	res, err := app.Fiber().Test(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("%s %s: read body: %v", method, path, err)
+	}
+	return res.StatusCode, string(b)
+}
+
+// storedPool plants a node pool belonging to owner. An empty provider leaves it
+// DB-only, so nothing reaches a cloud; naming one gives it the LINKAGE — whose
+// account, which cluster, which upstream pool — that a scale and a destroy read
+// off the row.
+func storedPool(t *testing.T, owner, name, provider string) *object.NodePool {
 	t.Helper()
 	now := time.Now().Format(time.RFC3339)
 	p := &object.NodePool{
@@ -117,23 +148,25 @@ func storedPool(t *testing.T, owner, name string) *object.NodePool {
 		Size: "gpu-h100x8-640gb", Count: 4, State: "Active", CostPerHour: 3178,
 		MaxNodes: 4, CreatedTime: now, UpdatedTime: now,
 	}
+	if provider != "" {
+		p.Provider, p.ClusterID, p.PoolID = provider, "cl-1", "p-1"
+	}
 	if _, err := object.AddNodePool(p); err != nil {
 		t.Fatalf("AddNodePool(%s/%s): %v", owner, name, err)
 	}
 	return p
 }
 
-// A signed-in customer cannot reach another org's pool by naming it in `?id=`.
-// The handler took the tenant from the id while the authorization filter took it
-// from the id too — so the two agreed, and both were the caller's to choose.
-func TestUpdateNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
+// A signed-in customer cannot reach another org's pool. The address names only a
+// NAME now, and `?owner=` is honoured for a service subject alone — so a bearer
+// naming one org and a query naming another writes the bearer's pool.
+func TestReplacePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
-	victim := storedPool(t, "victimorg", "gpu")
-	storedPool(t, "attackerorg", "gpu")
+	victim := storedPool(t, "victimorg", "gpu", "")
+	storedPool(t, "attackerorg", "gpu", "")
 
-	post(t, app, "/v1/update-node-pool?owner=victimorg&id=victimorg/gpu", mint("attackerorg"),
-		`{"owner":"victimorg","name":"gpu","maxNodes":99}`)
+	poolReq(t, app, http.MethodPut, "/v1/k8s/pools/gpu?owner=victimorg", mint("attackerorg"), `{"maxNodes":99}`)
 
 	after, err := object.GetNodePool("victimorg/gpu")
 	if err != nil || after == nil {
@@ -153,14 +186,17 @@ func TestUpdateNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	}
 }
 
-// The delete body names WHICH pool, never WHOSE.
-func TestDeleteNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
+// The address names WHICH pool, never WHOSE.
+func TestRemovePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
-	storedPool(t, "victimdel", "gpu")
-	storedPool(t, "attackerdel", "gpu")
+	storedPool(t, "victimdel", "gpu", "")
+	storedPool(t, "attackerdel", "gpu", "")
 
-	post(t, app, "/v1/delete-node-pool", mint("attackerdel"), `{"owner":"victimdel","name":"gpu"}`)
+	status, body := poolReq(t, app, http.MethodDelete, "/v1/k8s/pools/gpu?owner=victimdel", mint("attackerdel"), "")
+	if status != http.StatusNoContent {
+		t.Fatalf("DELETE /v1/k8s/pools/gpu = %d %s, want 204", status, body)
+	}
 
 	if p, err := object.GetNodePool("victimdel/gpu"); err != nil || p == nil {
 		t.Fatalf("another org's pool was deleted (err=%v)", err)
@@ -170,19 +206,87 @@ func TestDeleteNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	}
 }
 
+// Removing a pool an org does not have is the state the caller asked for, so it
+// answers 204 rather than an error nobody can act on.
+func TestRemovePoolIsIdempotent(t *testing.T) {
+	mint := signer(t, "https://test.id")
+	app := poolWire(t)
+
+	status, body := poolReq(t, app, http.MethodDelete, "/v1/k8s/pools/nosuch", mint("emptyorg"), "")
+	if status != http.StatusNoContent {
+		t.Fatalf("DELETE of an absent pool = %d %s, want 204", status, body)
+	}
+}
+
+// Reading a pool an org does not have is 404, not a 200 carrying null. A caller
+// that has to look inside a success to find a miss is one that will forget to.
+func TestGetPoolOfAnAbsentPoolIs404(t *testing.T) {
+	mint := signer(t, "https://test.id")
+	app := poolWire(t)
+
+	status, body := poolReq(t, app, http.MethodGet, "/v1/k8s/pools/nosuch", mint("emptyread"), "")
+	if status != http.StatusNotFound {
+		t.Fatalf("GET of an absent pool = %d %s, want 404", status, body)
+	}
+}
+
+// COUNT IS OPTIONAL, and absent means unchanged. Reaching a count spends money at
+// the provider, so a request that only edits the autoscale bounds must not read
+// as "scale to nothing" — this pool has no provider linkage at all, so a scale
+// attempt would fail loudly rather than silently succeed.
+func TestReplacePoolWithoutACountTouchesNoProvider(t *testing.T) {
+	mint := signer(t, "https://test.id")
+	app := poolWire(t)
+	storedPool(t, "boundsorg", "gpu", "")
+
+	status, body := poolReq(t, app, http.MethodPut, "/v1/k8s/pools/gpu", mint("boundsorg"),
+		`{"minNodes":2,"maxNodes":8,"autoScale":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("PUT bounds only = %d %s, want 200", status, body)
+	}
+
+	after, err := object.GetNodePool("boundsorg/gpu")
+	if err != nil || after == nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if after.MinNodes != 2 || after.MaxNodes != 8 || !after.AutoScale {
+		t.Fatalf("the bounds must be written, got %+v", after)
+	}
+	if after.Count != 4 {
+		t.Fatalf("an absent count must leave the pool at its provider's count, got %d", after.Count)
+	}
+}
+
+// A stated count is the provider's to reach, and a pool with no provider pool
+// behind it has nothing to scale — said as a refusal, not as a silent 200 that
+// leaves the caller believing it resized something.
+func TestReplacePoolWithACountNeedsAProviderPool(t *testing.T) {
+	mint := signer(t, "https://test.id")
+	app := poolWire(t)
+	storedPool(t, "scalenolink", "gpu", "")
+
+	status, body := poolReq(t, app, http.MethodPut, "/v1/k8s/pools/gpu", mint("scalenolink"), `{"count":8}`)
+	if status == http.StatusOK {
+		t.Fatalf("PUT count on a pool with no provider pool = 200 %s, want a refusal", body)
+	}
+	if !strings.Contains(body, "no provider pool") {
+		t.Fatalf("the refusal must say what is missing, got %s", body)
+	}
+}
+
 // Every write refuses outright when there is no org context: no bearer and no
 // service credential means no tenant, and a tenant-less provision is a platform
 // account waiting to happen.
 func TestNodePoolWritesFailClosedWithoutAnOrg(t *testing.T) {
 	app := poolWire(t)
-	for name, tc := range map[string]struct{ path, body string }{
-		"create": {"/v1/create-node-pool?provider=do", `{"size":"gpu-h100x8-640gb","count":1}`},
-		"scale":  {"/v1/scale-node-pool?provider=do&poolId=p-1&count=4", ``},
-		"update": {"/v1/update-node-pool", `{"maxNodes":9}`},
-		"delete": {"/v1/delete-node-pool", `{"name":"gpu"}`},
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"create":  {http.MethodPost, "/v1/k8s/pools", `{"provider":"do","size":"gpu-h100x8-640gb","count":1}`},
+		"replace": {http.MethodPut, "/v1/k8s/pools/gpu", `{"maxNodes":9}`},
+		"scale":   {http.MethodPut, "/v1/k8s/pools/gpu", `{"count":4}`},
+		"remove":  {http.MethodDelete, "/v1/k8s/pools/gpu", ``},
 	} {
 		t.Run(name, func(t *testing.T) {
-			body := post(t, app, tc.path, "", tc.body)
+			_, body := poolReq(t, app, tc.method, tc.path, "", tc.body)
 			if !strings.Contains(body, "no org context") {
 				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
 			}
@@ -198,12 +302,16 @@ func TestProvisionUsesTheSignedOrgNotTheQuery(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
 
-	for name, path := range map[string]string{
-		"create": "/v1/create-node-pool?owner=hanzo&provider=platformdo",
-		"scale":  "/v1/scale-node-pool?owner=hanzo&provider=platformdo&poolId=p-1&count=8",
+	// A scale reads WHICH provider account off the stored row, so the row is what
+	// carries the linkage a scale resolves.
+	storedPool(t, "acmeprov", "gpu", "platformdo")
+
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"create": {http.MethodPost, "/v1/k8s/pools?owner=hanzo", `{"provider":"platformdo","size":"gpu-h100x8-640gb","count":8}`},
+		"scale":  {http.MethodPut, "/v1/k8s/pools/gpu?owner=hanzo", `{"count":8}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			body := post(t, app, path, mint("acmeprov"), `{"owner":"hanzo","size":"gpu-h100x8-640gb","count":8}`)
+			_, body := poolReq(t, app, tc.method, tc.path, mint("acmeprov"), tc.body)
 			if !strings.Contains(body, "acmeprov") {
 				t.Fatalf("the provision must resolve the provider in the CALLER's org, got %s", body)
 			}
@@ -214,17 +322,17 @@ func TestProvisionUsesTheSignedOrgNotTheQuery(t *testing.T) {
 	}
 }
 
-// The READS take their tenant from the caller too. Authorization keys a GET on
-// the very ?owner= the handler used to read, so the two agreed and the caller
+// The READS take their tenant from the caller too. Authorization used to key a
+// GET on the very ?owner= the handler read, so the two agreed and the caller
 // chose both — a customer listing another org's pools was one query parameter
 // away, and the agreement is exactly what hid it.
 func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
-	storedPool(t, "victimread", "secret-gpu")
-	storedPool(t, "attackerread", "own-gpu")
+	storedPool(t, "victimread", "secret-gpu", "")
+	storedPool(t, "attackerread", "own-gpu", "")
 
-	list := get(t, app, "/v1/get-node-pools?owner=victimread", mint("attackerread"))
+	list := get(t, app, "/v1/k8s/pools?owner=victimread", mint("attackerread"))
 	if strings.Contains(list, "secret-gpu") || strings.Contains(list, "victimread") {
 		t.Fatalf("another org's pools were listed: %s", list)
 	}
@@ -232,7 +340,7 @@ func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 		t.Fatalf("the caller must still see its OWN pools: %s", list)
 	}
 
-	one := get(t, app, "/v1/get-node-pool?owner=victimread&id=victimread/secret-gpu", mint("attackerread"))
+	_, one := poolReq(t, app, http.MethodGet, "/v1/k8s/pools/secret-gpu?owner=victimread", mint("attackerread"), "")
 	if strings.Contains(one, "secret-gpu") || strings.Contains(one, "victimread") {
 		t.Fatalf("another org's pool was readable by id: %s", one)
 	}
@@ -242,8 +350,8 @@ func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 func TestNodePoolReadsFailClosedWithoutAnOrg(t *testing.T) {
 	app := poolWire(t)
 	for name, path := range map[string]string{
-		"list": "/v1/get-node-pools",
-		"get":  "/v1/get-node-pool?id=gpu",
+		"list": "/v1/k8s/pools",
+		"get":  "/v1/k8s/pools/gpu",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if body := get(t, app, path, ""); !strings.Contains(body, "no org context") {

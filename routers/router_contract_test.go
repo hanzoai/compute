@@ -111,12 +111,15 @@ var apiContract = []route{
 	{"POST", "/v1/stop-session", "StopSession"},
 	{"POST", "/v1/add-asset-tunnel", "AddAssetTunnel"},
 	{"GET", "/v1/get-asset-tunnel", "GetAssetTunnel"},
-	{"GET", "/v1/get-node-pools", "GetNodePools"},
-	{"GET", "/v1/get-node-pool", "GetNodePool"},
-	{"POST", "/v1/create-node-pool", "CreateNodePool"},
-	{"POST", "/v1/update-node-pool", "UpdateNodePool"},
-	{"POST", "/v1/delete-node-pool", "DeleteNodePool"},
-	{"POST", "/v1/scale-node-pool", "ScaleNodePool"},
+	// A Kubernetes NODE POOL — five TYPED ops (see registerPools), so like health
+	// these rows name package functions rather than ApiController methods. The six
+	// verb addresses they replaced are retired in gone_pools.go: they still answer,
+	// 410 with their successor, and they are deliberately outside this contract.
+	{"GET", "/v1/k8s/pools", "ListPools"},
+	{"POST", "/v1/k8s/pools", "CreatePool"},
+	{"GET", "/v1/k8s/pools/:id", "GetPool"},
+	{"PUT", "/v1/k8s/pools/:id", "ReplacePool"},
+	{"DELETE", "/v1/k8s/pools/:id", "RemovePool"},
 	{"GET", "/v1/get-plans", "GetPlans"},
 	{"GET", "/v1/get-plan", "GetPlan"},
 	{"POST", "/v1/add-plan", "AddPlan"},
@@ -139,25 +142,39 @@ func (r route) key() string { return r.method + " " + r.path }
 // app, read back off the live fiber router (not re-parsed from source), so the
 // assertion covers what the server will really serve.
 //
-// Both registration functions run, because the contract is the whole surface and
-// health is registered separately — ahead of the filter chain, deliberately (see
-// Route). Calling only registerAPI here would leave a served route outside the
-// contract, which is the exact gap this test exists to close. The filter chain
-// itself is omitted: Use-handlers are not routes.
+// Every registration function runs, because the contract is the whole surface
+// and two of them are separate: health and the retired addresses are both
+// installed ahead of the filter chain, deliberately (see Route). Calling only
+// registerAPI here would leave a served route outside the contract, which is the
+// exact gap this test exists to close. The filter chain itself is omitted:
+// Use-handlers are not routes.
+//
+// What is served is a strict SUPERSET of what is declared, and the difference is
+// exactly three things: fiber's auto-generated HEAD twin for every GET, zip's own
+// control plane (/docs, /mcp, the openapi and call-plane routes), and the retired
+// addresses, which serve 410 on every method through zip.Undeclared. Intersecting
+// with the declaration is how those are told apart without a second list of what
+// to skip — and it keeps the property that matters: a route that answers and is
+// published must have a line here, and a line here must answer.
 func registeredRoutes(t *testing.T) map[string]bool {
 	t.Helper()
 	app := zip.New(zip.Config{})
 	registerHealth(app)
+	routeGonePools(app)
 	registerAPI(app)
+
+	declared := make(map[string]bool)
+	for _, r := range app.Declaration().Routes {
+		declared[r.Method+" "+r.Pattern] = true
+	}
 
 	got := make(map[string]bool)
 	for _, r := range app.Fiber().GetRoutes(true) {
-		// fiber auto-generates a HEAD twin for every GET; it is not part of the
-		// declared contract, so it is not counted against it.
-		if r.Method == "HEAD" {
+		k := r.Method + " " + r.Path
+		if !declared[k] {
 			continue
 		}
-		got[r.Method+" "+r.Path] = true
+		got[k] = true
 	}
 	return got
 }
@@ -202,7 +219,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 74
+	const wantRoutes = 73
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -212,9 +229,9 @@ func TestAPIContractCount(t *testing.T) {
 }
 
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
-// as POST keeps the total at 72 while breaking every caller.
+// as POST keeps the total where it was while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 34, "DELETE": 4, "PUT": 2}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {
