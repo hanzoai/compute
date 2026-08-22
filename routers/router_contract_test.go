@@ -84,7 +84,7 @@ var apiContract = []route{
 	{"GET", "/v1/sizes", "GetComputeSizes"},
 	{"GET", "/v1/gpus", "GetComputeGPUs"},
 	{"GET", "/v1/machines", "ListComputeMachines"},
-	{"POST", "/v1/machines/launch", "LaunchComputeMachine"},
+	{"POST", "/v1/machines", "LaunchComputeMachine"},
 	// A machine's AGENT — four TYPED ops (see registerAgent), so like health
 	// these rows name package functions rather than ApiController methods. The
 	// literal /v1/machines/agents is declared here, ahead of /v1/machines/:id,
@@ -139,15 +139,23 @@ func (r route) key() string { return r.method + " " + r.path }
 // app, read back off the live fiber router (not re-parsed from source), so the
 // assertion covers what the server will really serve.
 //
-// Both registration functions run, because the contract is the whole surface and
-// health is registered separately — ahead of the filter chain, deliberately (see
-// Route). Calling only registerAPI here would leave a served route outside the
-// contract, which is the exact gap this test exists to close. The filter chain
-// itself is omitted: Use-handlers are not routes.
+// All three registration functions run, because the contract is the whole
+// surface and health is registered separately — ahead of the filter chain,
+// deliberately (see Route). Calling only registerAPI here would leave a served
+// route outside the contract, which is the exact gap this test exists to close.
+// The filter chain itself is omitted: Use-handlers are not routes.
+//
+// A retired address (registerGone) is a served route that is deliberately NOT
+// part of the contract: it answers 410 for every method and names its successor,
+// and publishing it would be one dead operation per method per address. The
+// router carries it, App.Declaration does not, and Declares is what tells the
+// two apart — the same question every projection asks, rather than a second list
+// here of what to skip.
 func registeredRoutes(t *testing.T) map[string]bool {
 	t.Helper()
 	app := zip.New(zip.Config{})
 	registerHealth(app)
+	registerGone(app)
 	registerAPI(app)
 
 	got := make(map[string]bool)
@@ -155,6 +163,9 @@ func registeredRoutes(t *testing.T) map[string]bool {
 		// fiber auto-generates a HEAD twin for every GET; it is not part of the
 		// declared contract, so it is not counted against it.
 		if r.Method == "HEAD" {
+			continue
+		}
+		if !app.Declares(r.Method, r.Path) {
 			continue
 		}
 		got[r.Method+" "+r.Path] = true

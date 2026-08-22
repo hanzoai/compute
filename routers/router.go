@@ -67,6 +67,7 @@ func Route(app *zip.App) {
 	// path outside /v1/ falls to the SPA fallback and comes back 200, so the
 	// probe measured the file server rather than the service.
 	registerHealth(app)
+	registerGone(app)
 
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
@@ -170,8 +171,11 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/regions", h((*controllers.ApiController).GetComputeRegions))
 	app.Get("/v1/sizes", h((*controllers.ApiController).GetComputeSizes))
 	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
+	// The collection carries both the read and the create: a machine is created
+	// in the collection it joins, so POST is the launch and /v1/machines/launch
+	// (a second door onto the same one) is retired — see goneMachines.
 	app.Get("/v1/machines", h((*controllers.ApiController).ListComputeMachines))
-	app.Post("/v1/machines/launch", h((*controllers.ApiController).LaunchComputeMachine))
+	app.Post("/v1/machines", h((*controllers.ApiController).LaunchComputeMachine))
 	registerAgent(app)
 	app.Get("/v1/machines/:id", h((*controllers.ApiController).GetComputeMachine))
 	app.Delete("/v1/machines/:id", h((*controllers.ApiController).DeleteComputeMachine))

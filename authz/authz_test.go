@@ -29,7 +29,7 @@ func TestIsResellComputePath(t *testing.T) {
 		{"GET", "/v1/sizes"},
 		{"GET", "/v1/gpus"},
 		{"GET", "/v1/machines"},
-		{"POST", "/v1/machines/launch"},
+		{"POST", "/v1/machines"},
 		{"GET", "/v1/machines/abc-123"},
 		{"DELETE", "/v1/machines/abc-123"},
 		// A machine's agent — one address, the method carrying the verb.
@@ -45,11 +45,12 @@ func TestIsResellComputePath(t *testing.T) {
 	}
 
 	deny := []struct{ method, path string }{
-		{"POST", "/v1/regions"},           // catalog is read-only
-		{"POST", "/v1/machines"},          // no bulk create on the collection
-		{"DELETE", "/v1/machines/launch"}, // launch is POST-only
-		{"GET", "/v1/plans"},              // not a resell-compute route
-		{"POST", "/v1/start-session"},     // legacy surface, gated separately
+		{"POST", "/v1/regions"},         // catalog is read-only
+		{"PUT", "/v1/machines"},         // the collection takes GET and POST, nothing else
+		{"DELETE", "/v1/machines"},      // …and is not deletable as a whole
+		{"POST", "/v1/machines/launch"}, // the launch verb left the path; the address is gone
+		{"GET", "/v1/plans"},            // not a resell-compute route
+		{"POST", "/v1/start-session"},   // legacy surface, gated separately
 		{"GET", "/v1/get-account"},
 		{"PUT", "/v1/machines/abc-123"},             // only GET/DELETE by id
 		{"POST", "/v1/machines/abc-123"},            // no blanket POST by id

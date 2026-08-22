@@ -458,7 +458,7 @@ func (c *ApiController) DeleteComputeMachine() {
 	c.ResponseOk("deleted")
 }
 
-// launchComputeRequest is the body for POST /v1/machines/launch. It embeds the
+// launchComputeRequest is the body for POST /v1/machines. It embeds the
 // provider spec and adds a size alias, a kind, an optional app/project scope, a
 // dryRun flag (quote only, no spend) and a batch launch: count>1 launches N
 // machines named "<name>-000", "<name>-001", … (a "fleet" is just this batch,
@@ -574,7 +574,7 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 // @Title LaunchComputeMachine
 // @Tag Compute API
 // @Description quote (dryRun) or launch a metered, per-org machine; count>1 launches a batch of <name>-NNN
-// @router /machines/launch [post]
+// @router /machines [post]
 func (c *ApiController) LaunchComputeMachine() {
 	org := c.resolveComputeOrg()
 	if org == "" {

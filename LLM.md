@@ -158,6 +158,18 @@ typed op swapped in for an untyped route keeps the same contract line and the
 test keeps holding. The typed rows name package functions rather than
 `ApiController` methods.
 
+A RETIRED address is the one served route that is deliberately outside that
+contract. `registerGone` mounts it on `zip.Undeclared`, so the router carries it
+and `App.Declaration` does not — and the contract test tells the two apart with
+`App.Declares`, the same question every projection asks, rather than a second
+list of what to skip. It matters because a retired address answers EVERY method
+(410 is about the target resource, and a caller who also got the verb wrong still
+needs the successor): published, that is one dead operation per method per
+address in the surface customers read. It is registered AHEAD of the filter
+chain, beside health — no credential admits a resource that does not exist, and
+behind the policy engine a stale caller is told 403 and never learns where the
+resource went.
+
 One piece of folklore worth not repeating: registering a literal ahead of a
 `:param` sibling does NOT decide the match. Fiber prefers the static segment
 whatever the order — measured by moving `registerAgent` below the `:id` routes
@@ -324,8 +336,25 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 | GET | `/v1/sizes` | Cached sizes, Hanzo resale price only |
 | GET | `/v1/gpus` | GPU sizes (H100/H200/MI300X/L40S/…), resale-priced |
 | GET | `/v1/machines` | Caller org's machines (DO tag `hanzo-org:<org>`) |
-| POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
+| POST | `/v1/machines` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
 | GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |
+
+The launch VERB left the path: a machine is created in the collection it joins,
+so the create is `POST` on the collection and `/v1/machines/launch` — a second
+door onto the same one — answers **410** naming its successor (`routers/gone.go`,
+`routers/gone_machines.go`). `authz.isResellComputePath` admits the write on that
+exact address and nowhere else under the prefix.
+
+The six `/v1/*-machine` addresses are NOT part of this surface and did not move
+onto it. They read the visor `machine` TABLE, which `GetMachines`/`GetMachine`
+rebuild on every read (`SyncMachinesCloud` deletes every row for the owner and
+re-inserts what the org's OWN provider credentials list, keeping only the four
+remote-access fields); `/v1/machines` reads live droplets on the house account.
+The two disagree on the tenant (`?owner` verbatim against the token's `Owner`
+claim), on the item key (`owner/name` against a droplet id, which
+`service.GetOrgMachine` parses with `strconv.Atoi`) and on the row shape, and
+cloud unions them deliberately (`apps/visor` `managedMachines`). Folding them
+would answer from the other store for the other tenant at 200.
 
 A machine's AGENT hangs off the same noun and is the exception to the envelope
 row above — those four are TYPED ops with no envelope at all (see "Typed ops"):
