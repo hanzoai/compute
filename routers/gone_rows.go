@@ -59,6 +59,12 @@ func init() {
 	Retire("/v1/add-plan", "/v1/plans")
 	Retire("/v1/update-plan", "/v1/plans")
 	Retire("/v1/delete-plan", "/v1/plans")
+
+	// The two that were called asset tunnels. Each successor is the collection
+	// the thing actually belongs to: creating a session is a POST to the asset's
+	// sessions, and the live connection belongs to the session it connects to.
+	Retire("/v1/add-asset-tunnel", "/v1/assets")
+	Retire("/v1/get-asset-tunnel", "/v1/sessions")
 }
 
 // NOT RETIRED, AND THE REASON IS MEASURED.

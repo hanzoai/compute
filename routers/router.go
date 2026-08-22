@@ -210,8 +210,18 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/start-session", h((*controllers.ApiController).StartSession))
 	app.Post("/v1/stop-session", h((*controllers.ApiController).StopSession))
 
-	app.Post("/v1/add-asset-tunnel", h((*controllers.ApiController).AddAssetTunnel))
-	app.Get("/v1/get-asset-tunnel", h((*controllers.ApiController).GetAssetTunnel))
+	// Neither of these is a tunnel on an asset, which is what they were called.
+	//
+	// The first CREATES A SESSION for an asset and returns it, so it is a POST to
+	// the asset's sessions. The second opens the live connection to a SESSION —
+	// it reads ?sessionId= and upgrades to a WebSocket — so it belongs to the
+	// session, not to the asset it happens to reach.
+	//
+	// Separating them puts each with the thing it is about: creating belongs to
+	// the collection that holds the created, and the connection belongs to the
+	// session it connects to.
+	app.Post("/v1/assets/:owner/:name/sessions", h((*controllers.ApiController).AddAssetTunnel))
+	app.Get("/v1/sessions/:owner/:name/connection", h((*controllers.ApiController).GetAssetTunnel))
 
 	app.Get("/v1/get-node-pools", h((*controllers.ApiController).GetNodePools))
 	app.Get("/v1/get-node-pool", h((*controllers.ApiController).GetNodePool))

@@ -39,7 +39,7 @@ export function updateSession(owner, name, session) {
 }
 
 export function addAssetTunnel(assetId, mode = "guacd") {
-  return fetch(`${Setting.ServerUrl}/v1/add-asset-tunnel?assetId=${assetId}&mode=${mode}`, {
+  return fetch(`${Setting.ServerUrl}/v1/assets/${assetId}/sessions?mode=${mode}`, {
     method: "POST",
     credentials: "include",
   }).then(res => res.json());
