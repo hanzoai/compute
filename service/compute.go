@@ -24,14 +24,12 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/digitalocean/godo"
-	"github.com/hanzoai/visor/conf"
 	"github.com/hanzoai/visor/logs"
 )
 
@@ -49,50 +47,34 @@ func orgTag(org string) string { return orgTagKey + ":" + org }
 // (empty) project writes no project tag.
 func projectTag(project string) string { return projectTagKey + ":" + project }
 
-// digitalOceanToken resolves Hanzo's DigitalOcean API token. KMS is the only source:
-// the operator wires it from KMS into DIGITALOCEAN_ACCESS_TOKEN (or the app.conf
-// digitalOceanToken key, itself KMS-synced via the visor-kms-sync KMSSecret).
-// Never hard-coded. Empty means "compute not configured" and every platform
-// endpoint fails closed.
-func digitalOceanToken() string {
-	if t := strings.TrimSpace(os.Getenv("DIGITALOCEAN_ACCESS_TOKEN")); t != "" {
-		return t
-	}
-	return strings.TrimSpace(conf.GetConfigString("digitalOceanToken"))
-}
-
 // newDigitalOceanClient builds a DigitalOcean client for Hanzo's own account.
 //
-// It goes through the carrier like every per-row client does (NewMachineClient),
-// which is what lets egress attach the credential instead of this process
-// holding one. Carried, an EMPTY token is the correct state rather than a
-// misconfiguration: the key is egress's, and demanding one here would keep it in
-// this pod's environment — the thing being removed.
+// There is no token here and no way to supply one. The credential belongs to
+// hanzoai/egress, which holds it on a host that is not a resource of the cloud
+// it holds keys for; this process describes the call and egress attaches the
+// key. So the client is the carrier's, and without a carrier there is nothing
+// to build — refusing is the only honest answer, and it is a clean one.
 func newDigitalOceanClient() (MachineDigitalOceanClient, error) {
+	if !carrierRegistered() {
+		return MachineDigitalOceanClient{}, fmt.Errorf("hanzo compute is not configured: set egressAddress — a provider key is spent through egress, never held here")
+	}
 	hc, err := httpFor(Credential{Provider: providerDigitalOcean})
 	if err != nil {
 		return MachineDigitalOceanClient{}, err
 	}
-	token := digitalOceanToken()
-	if token == "" && !carrierRegistered() {
-		return MachineDigitalOceanClient{}, fmt.Errorf("hanzo compute is not configured: DigitalOcean token unset (resolve from KMS)")
-	}
-	return newMachineDigitalOceanClient(token, "", "", hc)
+	return newMachineDigitalOceanClient("", "", "", hc)
 }
 
-// ComputeConfigured reports whether the platform DO token is present, so callers
-// can return a clean 503 instead of a cryptic client error.
+// ComputeConfigured reports whether this process can reach the platform account
+// at all, so callers return a clean 503 instead of a cryptic client error.
 //
-// It answers "is a credential SET", which is a different question from "does the
-// credential WORK" — see ComputeReachable. A revoked token is still a non-empty
-// string, so this stays true through a revocation and every fallback written for
-// the unconfigured case is dead code exactly when it is needed.
-//
-// A registered carrier counts as configured. Under egress this process holds no
-// token by design, so asking only about the token would report "not configured"
-// for an account egress can reach perfectly well, and every endpoint gated on
-// this would answer 503 on a working credential.
-func ComputeConfigured() bool { return digitalOceanToken() != "" || carrierRegistered() }
+// It is one question now — is there a carrier — because there is one way to
+// reach a cloud. It was two while a token could also be held here, and the token
+// half was the misleading one: a revoked key is still a non-empty string, so it
+// answered "configured" through a revocation and every caller took the
+// configured branch and failed inside it, reporting zeros that read as real data
+// instead of "not connected". See ComputeReachable for the live question.
+func ComputeConfigured() bool { return carrierRegistered() }
 
 // ComputeReachable proves the provider credential actually works, by spending one
 // authenticated round trip on it rather than inspecting its length.

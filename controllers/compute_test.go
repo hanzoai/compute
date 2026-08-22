@@ -265,7 +265,6 @@ func launchCommerceOf(t *testing.T, availableCents int64) *launchCommerce {
 	// No provider token: LaunchOrgMachine cannot reach DigitalOcean, so if the
 	// launch ever gets that far it fails for a DIFFERENT reason — which is
 	// exactly what the read count is here to detect.
-	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 	return c
 }
 

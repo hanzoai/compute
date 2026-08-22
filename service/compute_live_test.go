@@ -15,17 +15,18 @@
 package service
 
 import (
-	"os"
 	"testing"
 )
 
 // TestLiveDOCatalog exercises the real DigitalOcean catalog through the exact
 // production code path (platform client -> godo -> mapping -> resale pricing).
-// It is skipped unless DIGITALOCEAN_ACCESS_TOKEN is set, so it never runs in CI
-// without credentials.
+//
+// It needs a CARRIER, because that is the only way this process reaches a cloud:
+// the credential is egress's. Register one and it runs; otherwise it skips, which
+// is what it does in CI.
 func TestLiveDOCatalog(t *testing.T) {
-	if os.Getenv("DIGITALOCEAN_ACCESS_TOKEN") == "" {
-		t.Skip("DIGITALOCEAN_ACCESS_TOKEN unset — skipping live DO catalog test")
+	if !carrierRegistered() {
+		t.Skip("no carrier registered — the catalog is reached through egress, so there is nothing to ask")
 	}
 
 	regions, err := ListRegions()

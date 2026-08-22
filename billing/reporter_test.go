@@ -106,7 +106,6 @@ func commerceOf(t *testing.T) *commerceFake {
 	// No platform DigitalOcean token: the resale catalog cannot refresh, so a pool
 	// with no stored rate has no price at all — which is exactly the condition the
 	// refuse-rather-than-bill-zero case needs.
-	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 	return f
 }
 
@@ -252,7 +251,6 @@ func TestMeterPools_SkipsWhatCannotOrShouldNotBill(t *testing.T) {
 // the catalog at provision time and is the only price a slug the upstream has
 // since delisted still has.
 func TestUnitRate_PrefersTheStampedRate(t *testing.T) {
-	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 
 	cents, err := unitRate(unit{size: "a-slug-the-upstream-delisted", centsHour: 3178})
 	if err != nil {

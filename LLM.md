@@ -358,9 +358,9 @@ row above — those four are TYPED ops with no envelope at all (see "Typed ops")
   ×1.25 over DO list). Wholesale + provider never surfaced (brand policy).
 - **Metering:** canonical `github.com/hanzoai/commerce/metering` (Authorize
   gate + Record debit, per-org, real launches only).
-- **Secrets (KMS-only):** `houseDOToken()` reads env `DIGITALOCEAN_ACCESS_TOKEN`
-  or the KMS-synced `digitalOceanToken` conf key; commerce token from
-  `COMMERCE_SERVICE_TOKEN`. Never hardcoded; absent ⇒ fail closed.
+- **Secrets:** visor holds NO provider credential. A cloud key is spent through
+  hanzoai/egress, which holds it off-cluster; commerce token from
+  `COMMERCE_SERVICE_TOKEN`. Never hardcoded; no carrier ⇒ fail closed.
 
 ### How visor reaches a cloud — one seam, `service/transport.go`
 Every provider client is built over an `*http.Client` from `httpFor`, and that

@@ -144,13 +144,8 @@ func cloudProviders() []cloudProvider {
 			return out
 		}
 	}
-	if t := digitalOceanToken(); t != "" {
-		return []cloudProvider{{provider: providerDigitalOcean, secret: t}}
-	}
-	// Carried, the platform account is still there to ask about — it is simply
-	// asked WITHOUT a secret, because egress attaches it. Returning nothing here
-	// would hide Hanzo's own clusters from every reader the moment the token
-	// left this pod, which is the state egress is supposed to make normal.
+	// The platform account carries no secret: egress attaches it. Without a
+	// carrier there is no way to reach it, so there is nothing to name.
 	if carrierRegistered() {
 		return []cloudProvider{{provider: providerDigitalOcean}}
 	}

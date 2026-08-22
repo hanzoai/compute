@@ -29,19 +29,17 @@ import (
 // even with egress configured. Both halves are checked here: that it stops
 // demanding a token, and that the request would actually go through the carrier.
 func TestPlatformDigitalOceanIsCarried(t *testing.T) {
-	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
-
-	t.Run("no carrier and no token still fails closed", func(t *testing.T) {
+	t.Run("no carrier fails closed", func(t *testing.T) {
 		RegisterCarrier(nil)
 		if _, err := newDigitalOceanClient(); err == nil {
 			t.Fatal("an unconfigured account with no carrier must refuse: nothing can reach DigitalOcean")
 		}
 		if ComputeConfigured() {
-			t.Error("ComputeConfigured() = true with neither token nor carrier")
+			t.Error("ComputeConfigured() = true with no carrier — nothing can reach the cloud")
 		}
 	})
 
-	t.Run("carried needs no token", func(t *testing.T) {
+	t.Run("carried needs no credential here", func(t *testing.T) {
 		t.Cleanup(func() { RegisterCarrier(nil) })
 		var saw Credential
 		carried := &http.Client{}
