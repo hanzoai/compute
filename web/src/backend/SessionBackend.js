@@ -15,27 +15,53 @@
 import * as Setting from "../Setting";
 import {Connected} from "../SessionListPage";
 
+// A session is addressed by the pair that identifies it, both path segments, and
+// the method says what to do with it. The SPA carries that pair composed, as
+// `owner/name`, which is how the store addresses a row too — so this is the one
+// place it is taken apart.
+function at(sessionId) {
+  const [owner, ...rest] = String(sessionId).split("/");
+  return `${Setting.ServerUrl}/v1/sessions/${encodeURIComponent(owner)}/${encodeURIComponent(rest.join("/"))}`;
+}
+
+// The session ops are typed, so there is no {status, msg, data} envelope: the
+// answer IS the value and the status IS the outcome. read resolves the value
+// (nothing, for a 204) and rejects with what the server said, carrying the
+// status so a caller can tell a refusal from a failure.
+function read(res) {
+  if (res.status === 204) {
+    return Promise.resolve();
+  }
+  return res.json().then(body => {
+    if (res.ok) {
+      return body;
+    }
+    const error = new Error(body?.detail || body?.title || res.statusText);
+    error.status = res.status;
+    return Promise.reject(error);
+  });
+}
+
 export function getSessions(owner, page = "", pageSize = "", field = "", value = "", sortField = "", sortOrder = "", status = Connected) {
-  return fetch(`${Setting.ServerUrl}/v1/get-sessions?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}&status=${status}`, {
+  return fetch(`${Setting.ServerUrl}/v1/sessions?owner=${owner}&page=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}&status=${status}`, {
     method: "GET",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(read);
 }
 
 export function getSession(owner, name) {
-  return fetch(`${Setting.ServerUrl}/v1/get-session?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(at(`${owner}/${name}`), {
     method: "GET",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(read);
 }
 
 export function updateSession(owner, name, session) {
-  const newSession = Setting.deepCopy(session);
-  return fetch(`${Setting.ServerUrl}/v1/update-session?id=${owner}/${encodeURIComponent(name)}`, {
-    method: "POST",
+  return fetch(at(`${owner}/${name}`), {
+    method: "PUT",
     credentials: "include",
-    body: JSON.stringify(newSession),
-  }).then(res => res.json());
+    body: JSON.stringify(Setting.deepCopy(session)),
+  }).then(read);
 }
 
 export function addAssetTunnel(assetId, mode = "guacd") {
@@ -46,24 +72,25 @@ export function addAssetTunnel(assetId, mode = "guacd") {
 }
 
 export function deleteSession(session) {
-  const newSession = Setting.deepCopy(session);
-  return fetch(`${Setting.ServerUrl}/v1/delete-session`, {
-    method: "POST",
+  return fetch(at(Setting.GetIdFromObject(session)), {
+    method: "DELETE",
     credentials: "include",
-    body: JSON.stringify(newSession),
-  }).then(res => res.json());
+  }).then(read);
 }
 
+// The live connection is a sub-resource of the session, not a value of its
+// status column: closing it leaves the record, closed, while deleting the
+// session removes the record itself.
 export function connect(sessionId) {
-  return fetch(`${Setting.ServerUrl}/v1/start-session?id=${sessionId}`, {
-    method: "POST",
+  return fetch(`${at(sessionId)}/connection`, {
+    method: "PUT",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(read);
 }
 
 export function disconnect(sessionId) {
-  return fetch(`${Setting.ServerUrl}/v1/stop-session?id=${sessionId}`, {
-    method: "POST",
+  return fetch(`${at(sessionId)}/connection`, {
+    method: "DELETE",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(read);
 }

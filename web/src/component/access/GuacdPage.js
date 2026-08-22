@@ -300,8 +300,9 @@ const GuacdPage = (props) => {
       Modal.destroyAll();
       message.destroy(key);
       message.success({content: "Connection successful", duration: 3, key: key});
-      // Send a request to the backend to update the session's status
-      SessionBackend.connect(sessionId);
+      // The connection is up: tell the session so, which is what dates it.
+      SessionBackend.connect(sessionId)
+        .catch(error => Setting.showMessage("error", `Failed to record the connection: ${error.message}`));
       break;
     case STATE_DISCONNECTING:
       // Handle disconnecting state if needed

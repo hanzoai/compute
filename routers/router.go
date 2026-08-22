@@ -67,6 +67,7 @@ func Route(app *zip.App) {
 	// path outside /v1/ falls to the SPA fallback and comes back 200, so the
 	// probe measured the file server rather than the service.
 	registerHealth(app)
+	retireSessions(app)
 
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
@@ -126,6 +127,51 @@ func registerAgent(app *zip.App) {
 		zip.WithSummary("Unbind a machine's agent"),
 		zip.WithOperationID("unbindAgent"),
 		zip.WithTags("AgentBinding"),
+	)
+}
+
+// registerSession declares a SESSION — one remote-access connection to a machine
+// and the record of it (controllers/session.go). Six TYPED ops, so this noun is
+// in the registry every projection reads (OpenAPI, MCP, CLI, the by-name call
+// plane) rather than only on the wire.
+//
+// ONE noun, ONE address per thing, and the METHOD carries the verb. A session's
+// identity is the pair (owner, name), so both are path segments — the shape
+// Hanzo IAM addresses its own owner/name entities with. The live CONNECTION is a
+// sub-resource of the session rather than a value of its status column: DELETE
+// on the session removes the record, DELETE on its connection tears the tunnel
+// down and leaves the record closed, so the two are different things at
+// different addresses.
+func registerSession(app *zip.App) {
+	zip.Get(app, "/v1/sessions", controllers.ListSessions,
+		zip.WithSummary("List an org's sessions"),
+		zip.WithOperationID("listSessions"),
+		zip.WithTags("Session"),
+	)
+	zip.Get(app, "/v1/sessions/:owner/:name", controllers.GetSession,
+		zip.WithSummary("Read one session"),
+		zip.WithOperationID("getSession"),
+		zip.WithTags("Session"),
+	)
+	zip.Put(app, "/v1/sessions/:owner/:name", controllers.ReplaceSession,
+		zip.WithSummary("Replace one session"),
+		zip.WithOperationID("replaceSession"),
+		zip.WithTags("Session"),
+	)
+	zip.Delete(app, "/v1/sessions/:owner/:name", controllers.DeleteSession,
+		zip.WithSummary("Remove one session"),
+		zip.WithOperationID("deleteSession"),
+		zip.WithTags("Session"),
+	)
+	zip.Put(app, "/v1/sessions/:owner/:name/connection", controllers.ConnectSession,
+		zip.WithSummary("Record that a session's connection is up"),
+		zip.WithOperationID("connectSession"),
+		zip.WithTags("Session"),
+	)
+	zip.Delete(app, "/v1/sessions/:owner/:name/connection", controllers.DisconnectSession,
+		zip.WithSummary("Force a session's connection down"),
+		zip.WithOperationID("disconnectSession"),
+		zip.WithTags("Session"),
 	)
 }
 
@@ -196,13 +242,11 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
 	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
 
-	app.Get("/v1/get-sessions", h((*controllers.ApiController).GetSessions))
-	app.Get("/v1/get-session", h((*controllers.ApiController).GetConnSession))
-	app.Post("/v1/update-session", h((*controllers.ApiController).UpdateSession))
+	registerSession(app)
+	// The one session address that keeps its verb, and deliberately: see
+	// controllers.AddSession. A session is the record OF a connection, and the
+	// door that mints one is the tunnel handshake.
 	app.Post("/v1/add-session", h((*controllers.ApiController).AddSession))
-	app.Post("/v1/delete-session", h((*controllers.ApiController).DeleteSession))
-	app.Post("/v1/start-session", h((*controllers.ApiController).StartSession))
-	app.Post("/v1/stop-session", h((*controllers.ApiController).StopSession))
 
 	app.Post("/v1/add-asset-tunnel", h((*controllers.ApiController).AddAssetTunnel))
 	app.Get("/v1/get-asset-tunnel", h((*controllers.ApiController).GetAssetTunnel))

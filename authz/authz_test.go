@@ -49,8 +49,11 @@ func TestIsResellComputePath(t *testing.T) {
 		{"POST", "/v1/machines"},          // no bulk create on the collection
 		{"DELETE", "/v1/machines/launch"}, // launch is POST-only
 		{"GET", "/v1/plans"},              // not a resell-compute route
-		{"POST", "/v1/start-session"},     // legacy surface, gated separately
 		{"GET", "/v1/get-account"},
+		// Sessions are their own noun with their own predicate; the two must not
+		// overlap, or one edit would widen the other.
+		{"GET", "/v1/sessions"},
+		{"PUT", "/v1/sessions/acme/s-1/connection"},
 		{"PUT", "/v1/machines/abc-123"},             // only GET/DELETE by id
 		{"POST", "/v1/machines/abc-123"},            // no blanket POST by id
 		{"POST", "/v1/machines/abc-123/agent"},      // the bind is PUT, and only PUT
@@ -64,6 +67,48 @@ func TestIsResellComputePath(t *testing.T) {
 		if isResellComputePath(c.method, c.path) {
 			t.Errorf("expected DENY for %s %s", c.method, c.path)
 		}
+	}
+}
+
+// The session noun is admitted here and org-scoped in the handler, which is a
+// relocation and not a widening: the org a session belongs to is a path segment
+// now, and the filter reads its target out of `?id=` or the body, so it can no
+// longer see the thing it was deciding on. What these pin is the SHAPE of the
+// door — which methods, and which one of them answers without a credential.
+func TestSessionAdmission(t *testing.T) {
+	InitAuthz()
+
+	// The connect report is the one address that answers unauthenticated. Its
+	// predecessor (POST /v1/start-session) carried the same admission, and the
+	// guacamole client that sends it came through the tunnel routes, which are
+	// open in the same policy, so it holds nothing to authenticate with.
+	if !IsAllowed(nil, "anonymous", "anonymous", "PUT", "/v1/sessions/acme/s-1/connection", "", "") {
+		t.Error("the connect report must answer without a credential")
+	}
+	// Everything else on the noun still needs one.
+	anonymous := []struct{ method, path string }{
+		{"GET", "/v1/sessions"},
+		{"GET", "/v1/sessions/acme/s-1"},
+		{"PUT", "/v1/sessions/acme/s-1"},
+		{"DELETE", "/v1/sessions/acme/s-1"},
+		{"DELETE", "/v1/sessions/acme/s-1/connection"},
+	}
+	for _, c := range anonymous {
+		if IsAllowed(nil, "anonymous", "anonymous", c.method, c.path, "", "") {
+			t.Errorf("%s %s must not answer an anonymous caller", c.method, c.path)
+		}
+	}
+
+	user := &iamsdk.User{Owner: "acme", Name: "alice"}
+	for _, c := range anonymous {
+		if !IsAllowed(user, "acme", "alice", c.method, c.path, "", "") {
+			t.Errorf("%s %s must reach an authenticated user (the handler scopes it)", c.method, c.path)
+		}
+	}
+	// The method set is closed: nothing is POSTed to this noun, so admitting one
+	// would admit a door that does not exist.
+	if IsAllowed(user, "acme", "alice", "POST", "/v1/sessions", "", "") {
+		t.Error("POST /v1/sessions is not a door")
 	}
 }
 

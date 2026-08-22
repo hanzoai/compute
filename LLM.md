@@ -62,8 +62,9 @@ bound — so a caller dialling in the instant after start can legitimately get
 which is what puts visor in the op registry every projection reads: OpenAPI,
 MCP, CLI, SDK, and the by-name call plane. `zip.Here` reaches it in-process with
 no wire. A machine's AGENT is the second noun to land typed (4 ops,
-`controllers/agent_binding.go`, registered by `routers.registerAgent`). The
-remaining 68 routes are still untyped controller methods, so they project
+`controllers/agent_binding.go`, registered by `routers.registerAgent`) and a
+SESSION the third (6 ops, `controllers/session.go`, `routers.registerSession`).
+The remaining 62 routes are still untyped controller methods, so they project
 nowhere — see "Typed ops: what is left".
 
 Two defects it fixed, both silent:
@@ -99,13 +100,14 @@ breaks the schema mapping. The migration is done; the tag name is just the
 tag name.
 
 ### Typed ops: what is left (IN PROGRESS, noun by noun)
-68 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
+62 of visor's 74 routes are still untyped `func (c *ApiController) X()` methods
 registered through `h()`. They serve fine and project NOWHERE — no OpenAPI
 schema, no MCP tool, no CLI verb, no `zip.Here`.
 
-Two nouns have landed: `/v1/health`, and a machine's AGENT — four ops in
-`controllers/agent_binding.go`, registered by `routers.registerAgent`, at ONE
-address with the method carrying the verb:
+Three nouns have landed: `/v1/health`, a machine's AGENT — four ops in
+`controllers/agent_binding.go`, registered by `routers.registerAgent` — and a
+SESSION, six ops in `controllers/session.go` (`routers.registerSession`). Each is
+at ONE address with the method carrying the verb:
 
 | Method | Path | Was |
 |--------|------|-----|
@@ -113,14 +115,54 @@ address with the method carrying the verb:
 | PUT | `/v1/machines/:id/agent` | `POST /v1/machines/:id/bind-agent` |
 | GET | `/v1/machines/:id/agent` | `GET /v1/machines/:id/agent-binding` |
 | DELETE | `/v1/machines/:id/agent` | `DELETE /v1/machines/:id/agent-binding` |
+| GET | `/v1/sessions` | `GET /v1/get-sessions` |
+| GET | `/v1/sessions/:owner/:name` | `GET /v1/get-session?id=` |
+| PUT | `/v1/sessions/:owner/:name` | `POST /v1/update-session?id=` |
+| DELETE | `/v1/sessions/:owner/:name` | `POST /v1/delete-session` |
+| PUT | `/v1/sessions/:owner/:name/connection` | `POST /v1/start-session?id=` |
+| DELETE | `/v1/sessions/:owner/:name/connection` | `POST /v1/stop-session?id=` |
 
-Those four DROPPED the envelope, exactly as the order below requires: the answer
-is the value, the status is the outcome (absent read → 404, unbind → 204), and
-the org-scoped list is `{"agentBindings":[…]}`. It landed with its cloud caller
-in the same change (`hanzoai/cloud` `apps/visor/{client,bots,visor}.go`), which
-is what makes the break safe. `controllers/agent_wire_test.go` pins those
+The agent four DROPPED the envelope, exactly as the order below requires: the
+answer is the value, the status is the outcome (absent read → 404, unbind → 204),
+and the org-scoped list is `{"agentBindings":[…]}`. It landed with its cloud
+caller in the same change (`hanzoai/cloud` `apps/visor/{client,bots,visor}.go`),
+which is what makes the break safe. `controllers/agent_wire_test.go` pins those
 answers; the fake vm in cloud's `apps/visor/bots_http_test.go` is written to
 match it.
+
+The session six dropped it too, and their caller is in this repo — the console
+(`web/src/backend/SessionBackend.js`), which reads the value and the status
+instead of `{status,msg,data,data2}`. A session's identity is the pair (owner,
+name), so both are path segments — the shape Hanzo IAM addresses its own
+owner/name entities with. Its live CONNECTION is a SUB-RESOURCE and not a value
+of the status column, because the two DELETEs remove two different things: one
+tears the guacamole tunnel down and leaves the record closed, the other removes
+the record (`controllers/session_wire_test.go` pins that pair). `POST
+/v1/add-session` deliberately keeps its verb — a session is the record OF a
+connection and the one door that mints one is the tunnel handshake, so renaming
+it would publish a second way to create one (see `controllers.AddSession`).
+
+Their org scope moved WITH the address. `ApiFilter`/`getObject` reads the object
+being addressed out of `?id=` or the body, and a session's owner is a path
+segment now, so the seam can no longer see the thing it was deciding on:
+`authz.isSessionPath` admits the noun for any authenticated brand user and
+`controllers.admit` decides which org's sessions from the address the router
+matched — the same relocation `isResellComputePath` already makes for machines.
+`authz.isSessionConnect` carries the ONE unauthenticated admission the old
+`p, *, *, POST, /v1/start-session, *, *` row had, and no wider: the guacamole
+client that reports a connection came through the tunnel routes, which are open
+in that same policy, so it holds nothing to authenticate with.
+
+**Retirement.** A migrated address answers **410 Gone** naming its successor in a
+`Link` header (`rel="successor-version"`, RFC 5829) beside `Deprecation` (RFC
+9745) and `Sunset` (RFC 8594), from ONE table per family
+(`routers/gone_sessions.go`) so header and body cannot disagree. They are
+registered on `zip.Undeclared`, so they SERVE and are absent from
+`App.Declaration` and every projection built from it — each answers every method,
+and publishing that would be one dead operation per method per address. They sit
+ahead of the filter chain for the same reason IAM's are public: behind
+authorization the notice is a 403, which tells a caller nothing about where its
+address went.
 
 An op declares the identity it reads — `header:"Authorization"` plus
 `url:"owner"` on the embedded `caller` — because a typed handler is given a
@@ -153,10 +195,12 @@ the enveloped legacy ops (23 call sites) and `cl.op` for the typed ones (9).
 They share one request half, and `call` disappears when the last noun lands.
 
 Route/contract bookkeeping: `routers/router_contract_test.go` pins the surface
-at 73 (GET 32, POST 37, DELETE 3, PUT 1) and reads the LIVE fiber router, so a
+at 74 (GET 33, POST 33, DELETE 5, PUT 3) and reads the LIVE fiber router, so a
 typed op swapped in for an untyped route keeps the same contract line and the
 test keeps holding. The typed rows name package functions rather than
-`ApiController` methods.
+`ApiController` methods. What it counts is the DECLARED surface — the served set
+intersected with `App.Declaration` — so a retired address is served, is checked
+to answer 410, and is not a contract line.
 
 One piece of folklore worth not repeating: registering a literal ahead of a
 `:param` sibling does NOT decide the match. Fiber prefers the static segment

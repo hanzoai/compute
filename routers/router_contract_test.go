@@ -102,13 +102,17 @@ var apiContract = []route{
 	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
 	{"GET", "/v1/images", "ListImages"},
 	{"POST", "/v1/images", "CreateImage"},
-	{"GET", "/v1/get-sessions", "GetSessions"},
-	{"GET", "/v1/get-session", "GetConnSession"},
-	{"POST", "/v1/update-session", "UpdateSession"},
+	// A SESSION — six TYPED ops (see registerSession), so like health these rows
+	// name package functions. Its identity is the (owner, name) pair, both path
+	// segments; its live CONNECTION is a sub-resource, so the two DELETEs remove
+	// two different things.
+	{"GET", "/v1/sessions", "ListSessions"},
+	{"GET", "/v1/sessions/:owner/:name", "GetSession"},
+	{"PUT", "/v1/sessions/:owner/:name", "ReplaceSession"},
+	{"DELETE", "/v1/sessions/:owner/:name", "DeleteSession"},
+	{"PUT", "/v1/sessions/:owner/:name/connection", "ConnectSession"},
+	{"DELETE", "/v1/sessions/:owner/:name/connection", "DisconnectSession"},
 	{"POST", "/v1/add-session", "AddSession"},
-	{"POST", "/v1/delete-session", "DeleteSession"},
-	{"POST", "/v1/start-session", "StartSession"},
-	{"POST", "/v1/stop-session", "StopSession"},
 	{"POST", "/v1/add-asset-tunnel", "AddAssetTunnel"},
 	{"GET", "/v1/get-asset-tunnel", "GetAssetTunnel"},
 	{"GET", "/v1/get-node-pools", "GetNodePools"},
@@ -139,25 +143,41 @@ func (r route) key() string { return r.method + " " + r.path }
 // app, read back off the live fiber router (not re-parsed from source), so the
 // assertion covers what the server will really serve.
 //
-// Both registration functions run, because the contract is the whole surface and
-// health is registered separately — ahead of the filter chain, deliberately (see
-// Route). Calling only registerAPI here would leave a served route outside the
-// contract, which is the exact gap this test exists to close. The filter chain
-// itself is omitted: Use-handlers are not routes.
+// Every registration function runs, because the contract is the whole surface
+// and two of them sit outside registerAPI — health and the retirements, both
+// ahead of the filter chain, deliberately (see Route). Calling only registerAPI
+// here would leave a served route outside the contract, which is the exact gap
+// this test exists to close. The filter chain itself is omitted: Use-handlers
+// are not routes.
+//
+// A RETIRED address serves and is not part of the contract, which is what
+// zip.Undeclared means, so the set is intersected with App.Declaration rather
+// than filtered by a second list of what to skip. That is also why the
+// retirements can be registered here at all: each answers every method, and
+// counting those against a hand-written table would be one row per method per
+// dead address.
 func registeredRoutes(t *testing.T) map[string]bool {
 	t.Helper()
 	app := zip.New(zip.Config{})
 	registerHealth(app)
+	retireSessions(app)
 	registerAPI(app)
 
-	got := make(map[string]bool)
+	served := map[string]bool{}
 	for _, r := range app.Fiber().GetRoutes(true) {
 		// fiber auto-generates a HEAD twin for every GET; it is not part of the
 		// declared contract, so it is not counted against it.
 		if r.Method == "HEAD" {
 			continue
 		}
-		got[r.Method+" "+r.Path] = true
+		served[r.Method+" "+r.Path] = true
+	}
+
+	got := make(map[string]bool)
+	for _, r := range app.Declaration().Routes {
+		if k := r.Method + " " + r.Pattern; served[k] {
+			got[k] = true
+		}
 	}
 	return got
 }
@@ -214,7 +234,7 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 33, "DELETE": 5, "PUT": 3}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

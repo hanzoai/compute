@@ -70,7 +70,6 @@ p, *, *, POST, /v1/signout, *, *
 p, *, *, GET, /v1/get-account, *, *
 p, *, *, GET, /v1/get-asset-tunnel, *, *
 p, *, *, POST, /v1/add-asset-tunnel, *, *
-p, *, *, POST, /v1/start-session, *, *
 p, *, *, GET, /v1/get-whitelabel, *, *
 p, *, *, GET, /v1/regions, *, *
 p, *, *, GET, /v1/sizes, *, *
@@ -97,6 +96,17 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 		return true
 	}
 
+	// The connect report is the ONE session address that answers without a
+	// credential, and it is the same admission its predecessor carried
+	// (`p, *, *, POST, /v1/start-session, *, *`, whose address is now retired, so
+	// the row went with it). The guacamole client that sends it came through the
+	// tunnel routes, which are open in the policy below, so it holds nothing to
+	// authenticate with. It cannot read anything and cannot address a session that
+	// does not already exist — it stamps a start time.
+	if isSessionConnect(method, urlPath) {
+		return true
+	}
+
 	if user != nil {
 		if user.IsDeleted {
 			return false
@@ -111,6 +121,17 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 		// manage their OWN machines (not just browse the catalog) without the
 		// request having to carry a matching ?owner for the subOwner==objOwner rule.
 		if isResellComputePath(method, urlPath) {
+			return true
+		}
+
+		// Sessions are org-scoped IN THE HANDLER (controllers.admit), for the same
+		// reason and by the same model. It is not a widening but a relocation: the
+		// org a session belongs to is now a path segment, and getObject reads a
+		// target out of `?id=` or the body, so this seam can no longer see the one
+		// thing it was deciding on. Any authenticated user of the brand reaches the
+		// routes; which org's sessions it may touch is decided one layer in, from
+		// the address the router matched.
+		if isSessionPath(method, urlPath) {
 			return true
 		}
 
@@ -131,6 +152,35 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 	}
 
 	return res
+}
+
+// isSessionPath reports whether (method, urlPath) is a session address whose
+// org-scoping lives in the handler:
+//
+//	GET                 /v1/sessions                          list an org's sessions
+//	GET/PUT/DELETE      /v1/sessions/<owner>/<name>           read, replace, remove one
+//	PUT/DELETE          /v1/sessions/<owner>/<name>/connection  the live connection
+//
+// The method set is closed rather than a blanket prefix: nothing is POSTed to
+// this noun, so admitting one here would admit a door that does not exist.
+func isSessionPath(method string, urlPath string) bool {
+	if urlPath == "/v1/sessions" {
+		return method == "GET"
+	}
+	if !strings.HasPrefix(urlPath, "/v1/sessions/") {
+		return false
+	}
+	return method == "GET" || method == "PUT" || method == "DELETE"
+}
+
+// isSessionConnect reports the ONE session address that answers without a
+// credential: PUT on a session's connection, the report the guacamole client
+// sends once its own handshake completes. It is the successor of
+// POST /v1/start-session and carries that address's admission, no wider.
+func isSessionConnect(method string, urlPath string) bool {
+	return method == "PUT" &&
+		strings.HasPrefix(urlPath, "/v1/sessions/") &&
+		strings.HasSuffix(urlPath, "/connection")
 }
 
 // isResellComputePath reports whether (method, urlPath) is a resell-compute
@@ -170,7 +220,7 @@ func isResellComputePath(method string, urlPath string) bool {
 
 func isAllowedInDemoMode(method string, urlPath string) bool {
 	if method == "POST" {
-		if strings.HasPrefix(urlPath, "/v1/signin") || urlPath == "/v1/signout" || urlPath == "/v1/add-asset-tunnel" || urlPath == "/v1/start-session" || urlPath == "/v1/stop-session" {
+		if strings.HasPrefix(urlPath, "/v1/signin") || urlPath == "/v1/signout" || urlPath == "/v1/add-asset-tunnel" {
 			return true
 		} else {
 			return false
