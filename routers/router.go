@@ -19,6 +19,7 @@ import (
 	"github.com/zap-proto/zip/middleware"
 
 	"github.com/hanzoai/visor/controllers"
+	"github.com/hanzoai/visor/pkg/gone"
 )
 
 // h adapts a controller method to a zip.Handler: it binds a fresh controller to
@@ -129,6 +130,57 @@ func registerAgent(app *zip.App) {
 	)
 }
 
+// registerPlans declares the PLAN catalog — the resale tiers a brand sells
+// (controllers/plan.go). Five TYPED ops at ONE address, with the METHOD
+// carrying the verb, where there were five addresses each naming an operation.
+//
+// PUT rather than POST for the replace, because it writes every column: the
+// plan that comes back is the plan that was sent.
+//
+// The five verb addresses are retired in the same call, so a client holding one
+// is told 410 and where the catalog moved to rather than 404 and nothing.
+func registerPlans(app *zip.App) {
+	zip.Get(app, "/v1/plans", controllers.ListPlans,
+		zip.WithSummary("List a catalog's active plans"),
+		zip.WithOperationID("listPlans"),
+		zip.WithTags("Plan"),
+	)
+	zip.Post(app, "/v1/plans", controllers.CreatePlan,
+		zip.WithSummary("Add a plan to a catalog"),
+		zip.WithOperationID("createPlan"),
+		zip.WithTags("Plan"),
+	)
+	zip.Get(app, "/v1/plans/:name", controllers.GetPlan,
+		zip.WithSummary("Read one plan"),
+		zip.WithOperationID("getPlan"),
+		zip.WithTags("Plan"),
+	)
+	zip.Put(app, "/v1/plans/:name", controllers.ReplacePlan,
+		zip.WithSummary("Replace one plan"),
+		zip.WithOperationID("replacePlan"),
+		zip.WithTags("Plan"),
+	)
+	zip.Delete(app, "/v1/plans/:name", controllers.DeletePlan,
+		zip.WithSummary("Remove one plan"),
+		zip.WithOperationID("deletePlan"),
+		zip.WithTags("Plan"),
+	)
+	gone.Serve(app, gonePlans)
+}
+
+// registerWhitelabel declares the WHITELABEL of a hostname — the branding visor
+// serves under it (controllers/whitelabel.go). ONE typed op, reading the
+// hostname it is asked about as a declared input rather than off the request,
+// which is what lets an in-process caller ask about a host it is not serving.
+func registerWhitelabel(app *zip.App) {
+	zip.Get(app, "/v1/whitelabel", controllers.GetWhitelabel,
+		zip.WithSummary("Read the branding a hostname serves"),
+		zip.WithOperationID("whitelabel"),
+		zip.WithTags("Whitelabel"),
+	)
+	gone.Serve(app, goneWhitelabel)
+}
+
 // registerAPI registers the /v1 surface, one verb per line. The table is pinned
 // by router_contract_test.go: a route added here without a contract line fails,
 // and so does a contract line with no route.
@@ -214,13 +266,8 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/delete-node-pool", h((*controllers.ApiController).DeleteNodePool))
 	app.Post("/v1/scale-node-pool", h((*controllers.ApiController).ScaleNodePool))
 
-	app.Get("/v1/get-plans", h((*controllers.ApiController).GetPlans))
-	app.Get("/v1/get-plan", h((*controllers.ApiController).GetPlan))
-	app.Post("/v1/add-plan", h((*controllers.ApiController).AddPlan))
-	app.Post("/v1/update-plan", h((*controllers.ApiController).UpdatePlan))
-	app.Post("/v1/delete-plan", h((*controllers.ApiController).DeletePlan))
-
-	app.Get("/v1/get-whitelabel", h((*controllers.ApiController).GetWhitelabel))
+	registerPlans(app)
+	registerWhitelabel(app)
 
 	app.Get("/v1/get-volumes", h((*controllers.ApiController).GetVolumes))
 	app.Get("/v1/get-volume", h((*controllers.ApiController).GetVolume))

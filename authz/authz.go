@@ -61,6 +61,11 @@ m = (r.subOwner == p.subOwner || p.subOwner == "*") && (r.subName == p.subName |
 		panic(err)
 	}
 
+	// /v1/whitelabel is public-read because the console asks for its branding
+	// before it asks who the visitor is. /v1/get-whitelabel, the address it
+	// replaced, keeps its line for the same reason: that address now answers 410
+	// naming its successor, and a retirement nobody unauthenticated can read is
+	// one nobody unauthenticated can act on.
 	if true {
 		ruleText := `
 p, built-in, *, *, *, *, *
@@ -71,6 +76,7 @@ p, *, *, GET, /v1/get-account, *, *
 p, *, *, GET, /v1/get-asset-tunnel, *, *
 p, *, *, POST, /v1/add-asset-tunnel, *, *
 p, *, *, POST, /v1/start-session, *, *
+p, *, *, GET, /v1/whitelabel, *, *
 p, *, *, GET, /v1/get-whitelabel, *, *
 p, *, *, GET, /v1/regions, *, *
 p, *, *, GET, /v1/sizes, *, *

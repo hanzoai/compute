@@ -99,9 +99,10 @@ breaks the schema mapping. The migration is done; the tag name is just the
 tag name.
 
 ### Typed ops: what is left (IN PROGRESS, noun by noun)
-68 of visor's 73 routes are still untyped `func (c *ApiController) X()` methods
-registered through `h()`. They serve fine and project NOWHERE — no OpenAPI
-schema, no MCP tool, no CLI verb, no `zip.Here`.
+Most of visor's routes are still untyped `func (c *ApiController) X()` methods
+registered through `h()` (the count is in `router_contract_test.go`, not here).
+They serve fine and project NOWHERE — no OpenAPI schema, no MCP tool, no CLI
+verb, no `zip.Here`.
 
 Two nouns have landed: `/v1/health`, and a machine's AGENT — four ops in
 `controllers/agent_binding.go`, registered by `routers.registerAgent`, at ONE
@@ -122,11 +123,49 @@ is what makes the break safe. `controllers/agent_wire_test.go` pins those
 answers; the fake vm in cloud's `apps/visor/bots_http_test.go` is written to
 match it.
 
+The PLAN catalog and the WHITELABEL landed next — `controllers/plan.go` and
+`controllers/whitelabel.go`, registered by `routers.registerPlans` and
+`routers.registerWhitelabel`:
+
+| Method | Path | Was |
+|--------|------|-----|
+| GET | `/v1/plans` | `GET /v1/get-plans` |
+| POST | `/v1/plans` | `POST /v1/add-plan` |
+| GET | `/v1/plans/:name` | `GET /v1/get-plan` |
+| PUT | `/v1/plans/:name` | `POST /v1/update-plan` |
+| DELETE | `/v1/plans/:name` | `POST /v1/delete-plan` |
+| GET | `/v1/whitelabel` | `GET /v1/get-whitelabel` |
+
+Free of the two-repo rule above, and measured rather than assumed: nothing in
+the estate calls those six — cloud's `apps/visor` names none of them, and the
+visor console called only `get-whitelabel`, which moved in this same change
+(`web/src/backend/WhitelabelBackend.js`). `object.Plan` has no reader outside
+its own seed either, so the catalog is written and not yet read by anything.
+
+### Retiring an address
+An address that MOVED answers **410 Gone** and names its successor — never 404,
+which a client reads as a typo and retries. `pkg/gone` is the mechanism and it
+is one row per retirement, rendered twice so the two cannot disagree: a `Link`
+header with `rel="successor-version"` (RFC 5829) beside `Deprecation` (RFC 9745,
+`@`+unix) and `Sunset` (RFC 8594, `http.TimeFormat`), and a body carrying the
+same pair. Both stamps read NOW: the address is gone, not going.
+
+The table is per-noun — `routers/gone_plans.go`, `routers/gone_whitelabel.go` —
+and `gone.Serve` registers it on **`zip.Undeclared`**, so those addresses SERVE
+but stay out of `App.Declaration` and every projection built from it. That is
+load-bearing: a retired address answers EVERY method, because 410 is about the
+target resource and a caller who sent the wrong verb still needs the successor,
+so publishing them would put eight dead operations per address in the customer
+contract.
+
 An op declares the identity it reads — `header:"Authorization"` plus
 `url:"owner"` on the embedded `caller` — because a typed handler is given a
 `context.Context` and no request to reach into. `principal()` is the ONE rule
 resolving those two into an org, and `resolveComputeOrg` now calls it rather
-than restating it.
+than restating it. A typed op is also reachable by NAME, where there is no
+request for `ApiFilter` to authorize, so each one authorizes the object it is
+about to touch: `authorize(user, owner/name)` — the machine guard, reused by
+`plan()` rather than restated.
 
 Converting them is not a mechanical rewrite, and the reason is the wire, not the
 handlers. Visor answers the casibase envelope — HTTP 200 with
@@ -144,7 +183,8 @@ Order to do it in:
    name) — the socket it needs now exists. No visor change required. NOT DONE.
 2. Convert visor's routes to typed ops noun by noun (machines, k8s, node-pools,
    volumes, plans), each with its cloud caller, dropping the envelope as each
-   lands. Started: agent DONE.
+   lands. Started: agent, plans, whitelabel DONE — the last two had no cloud
+   caller to carry, which is why they went alone.
 3. `pkg/visor/embed.go`'s fiber→`http.Handler` adaptor goes when step 1 lands.
 
 Step 2 before step 1 costs one thing, and it is paid: while the migration runs,
@@ -152,11 +192,13 @@ cloud's client reads TWO upstream wires and has to be told which — `cl.call` f
 the enveloped legacy ops (23 call sites) and `cl.op` for the typed ones (9).
 They share one request half, and `call` disappears when the last noun lands.
 
-Route/contract bookkeeping: `routers/router_contract_test.go` pins the surface
-at 73 (GET 32, POST 37, DELETE 3, PUT 1) and reads the LIVE fiber router, so a
-typed op swapped in for an untyped route keeps the same contract line and the
-test keeps holding. The typed rows name package functions rather than
-`ApiController` methods.
+Route/contract bookkeeping: `routers/router_contract_test.go` pins the surface —
+the table, the total and the per-verb split all live IN that file, and are not
+copied here, where a count goes stale the first time a noun moves (this line
+claimed 73 while the test asserted 74). It reads the LIVE fiber router and keeps
+what the app DECLARES, so a typed op swapped in for an untyped route keeps its
+contract line while a retired address serves without joining the contract. The
+typed rows name package functions rather than `ApiController` methods.
 
 One piece of folklore worth not repeating: registering a literal ahead of a
 `:param` sibling does NOT decide the match. Fiber prefers the static segment

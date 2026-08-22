@@ -14,9 +14,11 @@
 
 import * as Setting from "../Setting";
 
+// The whitelabel is a TYPED op, so the answer IS the branding — no
+// {status, msg, data} envelope to unwrap, and a failure is a status code.
 export function getWhitelabel() {
-  return fetch(`${Setting.ServerUrl}/v1/get-whitelabel`, {
+  return fetch(`${Setting.ServerUrl}/v1/whitelabel`, {
     method: "GET",
     credentials: "include",
-  }).then(res => res.json());
+  }).then(res => res.ok ? res.json() : null);
 }

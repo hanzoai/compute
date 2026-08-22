@@ -104,9 +104,8 @@ class App extends Component {
 
   getWhitelabel() {
     WhitelabelBackend.getWhitelabel()
-      .then((res) => {
-        if (res.status === "ok" && res.data) {
-          const wl = res.data;
+      .then((wl) => {
+        if (wl) {
           this.setState({
             whitelabel: wl,
             themeData: {

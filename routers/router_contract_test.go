@@ -117,12 +117,17 @@ var apiContract = []route{
 	{"POST", "/v1/update-node-pool", "UpdateNodePool"},
 	{"POST", "/v1/delete-node-pool", "DeleteNodePool"},
 	{"POST", "/v1/scale-node-pool", "ScaleNodePool"},
-	{"GET", "/v1/get-plans", "GetPlans"},
-	{"GET", "/v1/get-plan", "GetPlan"},
-	{"POST", "/v1/add-plan", "AddPlan"},
-	{"POST", "/v1/update-plan", "UpdatePlan"},
-	{"POST", "/v1/delete-plan", "DeletePlan"},
-	{"GET", "/v1/get-whitelabel", "GetWhitelabel"},
+	// The PLAN catalog and the WHITELABEL — TYPED ops (see registerPlans and
+	// registerWhitelabel), so these rows name package functions rather than
+	// ApiController methods. The addresses they replaced are RETIRED rather than
+	// listed here: they answer 410 on every method and are registered on
+	// zip.Undeclared, so they are outside the contract by construction.
+	{"GET", "/v1/plans", "ListPlans"},
+	{"POST", "/v1/plans", "CreatePlan"},
+	{"GET", "/v1/plans/:name", "GetPlan"},
+	{"PUT", "/v1/plans/:name", "ReplacePlan"},
+	{"DELETE", "/v1/plans/:name", "DeletePlan"},
+	{"GET", "/v1/whitelabel", "GetWhitelabel"},
 	{"GET", "/v1/get-volumes", "GetVolumes"},
 	{"GET", "/v1/get-volume", "GetVolume"},
 	{"POST", "/v1/create-volume", "CreateVolume"},
@@ -155,6 +160,17 @@ func registeredRoutes(t *testing.T) map[string]bool {
 		// fiber auto-generates a HEAD twin for every GET; it is not part of the
 		// declared contract, so it is not counted against it.
 		if r.Method == "HEAD" {
+			continue
+		}
+		// A RETIRED address serves too — 410 naming its successor — and it serves
+		// on EVERY method, because 410 is a statement about the target resource
+		// and a caller who sent the wrong verb still needs the successor. It is
+		// registered on zip.Undeclared and so is absent from App.Declaration and
+		// from every projection built from it; counting it here would put dozens
+		// of dead operations in the contract table. What the app DECLARES is the
+		// contract, and this is still read off the live router rather than parsed
+		// from source.
+		if !app.Declares(r.Method, r.Path) {
 			continue
 		}
 		got[r.Method+" "+r.Path] = true
@@ -212,9 +228,9 @@ func TestAPIContractCount(t *testing.T) {
 }
 
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
-// as POST keeps the total at 72 while breaking every caller.
+// as POST leaves the total untouched while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 35, "DELETE": 4, "PUT": 2}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {
