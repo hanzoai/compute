@@ -75,27 +75,22 @@ var apiContract = []route{
 	{"PUT", "/v1/providers/:owner/:name", "UpdateProvider"},
 	{"POST", "/v1/providers", "AddProvider"},
 	{"DELETE", "/v1/providers/:owner/:name", "DeleteProvider"},
-	{"GET", "/v1/get-machines", "GetMachines"},
-	{"GET", "/v1/get-machine", "GetMachine"},
-	{"POST", "/v1/update-machine", "UpdateMachine"},
-	{"POST", "/v1/add-machine", "AddMachine"},
-	{"POST", "/v1/delete-machine", "DeleteMachine"},
-	{"POST", "/v1/launch-machine", "LaunchMachine"},
+	{"GET", "/v1/machines", "ListMachines"},
+	{"GET", "/v1/machines/:owner/:name", "GetMachine"},
+	{"PUT", "/v1/machines/:owner/:name", "UpdateMachine"},
+	{"POST", "/v1/machines", "LaunchComputeMachine"},
+	{"DELETE", "/v1/machines/:owner/:name", "DeleteMachine"},
 	{"GET", "/v1/regions", "GetComputeRegions"},
 	{"GET", "/v1/sizes", "GetComputeSizes"},
 	{"GET", "/v1/gpus", "GetComputeGPUs"},
-	{"GET", "/v1/machines", "ListComputeMachines"},
-	{"POST", "/v1/machines/launch", "LaunchComputeMachine"},
 	// A machine's AGENT — four TYPED ops (see registerAgent), so like health
 	// these rows name package functions rather than ApiController methods. The
-	// literal /v1/machines/agents is declared here, ahead of /v1/machines/:id,
+	// literal /v1/machines/agents is declared here, ahead of /v1/machines/:owner/:name,
 	// in the order registerAPI installs them.
 	{"GET", "/v1/machines/agents", "ListAgents"},
-	{"PUT", "/v1/machines/:id/agent", "BindAgent"},
-	{"GET", "/v1/machines/:id/agent", "GetAgent"},
-	{"DELETE", "/v1/machines/:id/agent", "UnbindAgent"},
-	{"GET", "/v1/machines/:id", "GetComputeMachine"},
-	{"DELETE", "/v1/machines/:id", "DeleteComputeMachine"},
+	{"PUT", "/v1/machines/:owner/:name/agent", "BindAgent"},
+	{"GET", "/v1/machines/:owner/:name/agent", "GetAgent"},
+	{"DELETE", "/v1/machines/:owner/:name/agent", "UnbindAgent"},
 	{"GET", "/v1/k8s/providers", "ListComputeKubernetesProviders"},
 	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
@@ -212,7 +207,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 74
+	const wantRoutes = 69
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -244,7 +239,14 @@ func TestAPIContractVerbMix(t *testing.T) {
 	// GET stays put across every family: reading a collection and reading an item
 	// were both GET before and are both GET now. A number that moves WITHOUT a
 	// family moving is what this test is for.
-	want := map[string]int{"GET": 33, "POST": 17, "DELETE": 12, "PUT": 12}
+	// The two machine collections became one, so the counts fall as well as move:
+	// four POSTs and two GETs went away entirely rather than changing method.
+	//
+	//	GET 33 -> 31    POST 17 -> 13    PUT 12 -> 13    DELETE 12 unchanged
+	//
+	// GET falls for the first time in this migration, and only here — two
+	// addresses answered the same question and one of them is gone.
+	want := map[string]int{"GET": 31, "POST": 13, "DELETE": 12, "PUT": 13}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

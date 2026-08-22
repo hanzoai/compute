@@ -28,9 +28,14 @@ type Machine struct {
 	// boundary): the project WITHIN the org that owns this machine. Not part of the
 	// (Owner, Name) primary key — an additive, Sync2-safe column that defaults to
 	// "" (the org's default project), so existing rows and callers are unaffected.
-	Project     string `xorm:"varchar(100)" json:"project"`
-	Id          string `xorm:"varchar(100)" json:"id"`
-	Provider    string `xorm:"varchar(100)" json:"provider"`
+	Project  string `xorm:"varchar(100)" json:"project"`
+	Id       string `xorm:"varchar(100)" json:"id"`
+	Provider string `xorm:"varchar(100)" json:"provider"`
+	// Source is which account this machine is known through: "registry" for the
+	// organization's own provider credentials, "live" for the house account. It
+	// is answered, never stored — the two used to be two ADDRESSES, and this is
+	// the property that difference actually was.
+	Source string `xorm:"-" json:"source,omitempty"`
 	// Account is which credential within the provider this machine launched on,
 	// carrying the provider's ProviderKey.Name; "" is the provider's own account.
 	// A launch cycles across a provider's accounts, and on most clouds a resource

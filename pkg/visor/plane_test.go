@@ -39,7 +39,21 @@ func bind(t *testing.T) *zip.App {
 	if err != nil {
 		t.Fatalf("serve %s on %s: %v", Name, zip.SocketPath(Name), err)
 	}
-	t.Cleanup(func() { _ = h.Close() })
+	// Close returns once the listeners are told to stop, but the transport
+	// goroutine that creates the socket files is still running — the same
+	// asymmetry `bound` documents on the way up, seen from the other end. The
+	// test's own TempDir removal races it, and loses with "directory not empty".
+	// Wait for the name to leave the plane before letting that removal run.
+	t.Cleanup(func() {
+		_ = h.Close()
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+			if zip.Serving(Name) == nil {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Error("the app was still on the plane 2s after Close")
+	})
 	return app
 }
 

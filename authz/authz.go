@@ -140,19 +140,22 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 //
 //	GET    /v1/regions|/v1/sizes|/v1/gpus     catalog (also public-read)
 //	GET    /v1/machines                       list the caller org's machines
-//	POST   /v1/machines/launch                quote (dryRun) or metered launch
-//	GET    /v1/machines/<id>                  get one of the caller org's machines
-//	DELETE /v1/machines/<id>                  destroy one of the caller org's machines
+//	POST   /v1/machines                       quote (dryRun) or metered launch
+//	GET    /v1/machines/<org>/<name>          get one of the caller org's machines
+//	DELETE /v1/machines/<org>/<name>          destroy one of the caller org's machines
 //	GET    /v1/machines/agents                list the caller org's agent bindings
-//	GET    /v1/machines/<id>/agent            read a machine's agent binding
-//	DELETE /v1/machines/<id>/agent            unbind a machine's agent
-//	PUT    /v1/machines/<id>/agent            bind a cloud Agent to a machine
+//	GET    /v1/machines/<org>/<name>/agent    read a machine's agent binding
+//	DELETE /v1/machines/<org>/<name>/agent    unbind a machine's agent
+//	PUT    /v1/machines/<org>/<name>/agent    bind a cloud Agent to a machine
 func isResellComputePath(method string, urlPath string) bool {
 	switch urlPath {
-	case "/v1/regions", "/v1/sizes", "/v1/gpus", "/v1/machines":
+	case "/v1/regions", "/v1/sizes", "/v1/gpus":
 		return method == "GET"
-	case "/v1/machines/launch":
-		return method == "POST"
+	case "/v1/machines":
+		// The collection: read it, or add to it. Adding is the launch — a quote
+		// when dryRun, a metered provision otherwise — which is why the POST that
+		// spends money is admitted here and every other write is not.
+		return method == "GET" || method == "POST"
 	}
 	// Agent↔machine binding: the bind is the ONE write admitted here, and only as
 	// PUT on the machine's own agent sub-resource. Every other write under
@@ -160,8 +163,8 @@ func isResellComputePath(method string, urlPath string) bool {
 	if method == "PUT" && strings.HasPrefix(urlPath, "/v1/machines/") && strings.HasSuffix(urlPath, "/agent") {
 		return true
 	}
-	// /v1/machines/<id>, /v1/machines/<id>/agent and /v1/machines/agents — read
-	// or delete a specific machine, its binding, or the org's binding list.
+	// /v1/machines/<org>/<name>, its /agent, and /v1/machines/agents — read or
+	// delete one machine, its binding, or the org's binding list.
 	if strings.HasPrefix(urlPath, "/v1/machines/") {
 		return method == "GET" || method == "DELETE"
 	}

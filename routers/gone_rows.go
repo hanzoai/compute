@@ -94,6 +94,16 @@ func init() {
 	// thing at its address, so the address is simply the thing.
 	Retire("/v1/get-account", "/v1/account")
 	Retire("/v1/get-whitelabel", "/v1/whitelabel")
+
+	// Machines. There were two collections and a caller had to join them; there
+	// is one now, and the join is the server's.
+	Retire("/v1/get-machines", "/v1/machines")
+	Retire("/v1/get-machine", "/v1/machines")
+	Retire("/v1/add-machine", "/v1/machines")
+	Retire("/v1/update-machine", "/v1/machines")
+	Retire("/v1/delete-machine", "/v1/machines")
+	Retire("/v1/launch-machine", "/v1/machines")
+	Retire("/v1/machines/launch", "/v1/machines")
 }
 
 // NOT RETIRED, AND THE REASON IS MEASURED.

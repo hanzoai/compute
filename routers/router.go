@@ -102,7 +102,7 @@ func registerHealth(app *zip.App) {
 // It is called next to the other /v1/machines routes because that is where the
 // noun lives, and NOT because the position decides anything: fiber prefers a
 // static segment over a `:param` at the same position however the two were
-// registered, so /v1/machines/agents beats /v1/machines/:id on specificity.
+// registered, so /v1/machines/agents beats /v1/machines/:owner/:name on specificity.
 // Measured, not assumed — moving this call below the :id routes leaves the
 // literal still winning. What is worth pinning is the OUTCOME rather than an
 // ordering rule that turns out not to be one, so TestAgentsIsNotAMachineId
@@ -113,17 +113,17 @@ func registerAgent(app *zip.App) {
 		zip.WithOperationID("listAgents"),
 		zip.WithTags("AgentBinding"),
 	)
-	zip.Put(app, "/v1/machines/:id/agent", controllers.BindAgent,
+	zip.Put(app, "/v1/machines/:owner/:name/agent", controllers.BindAgent,
 		zip.WithSummary("Bind a cloud Agent to a machine"),
 		zip.WithOperationID("bindAgent"),
 		zip.WithTags("AgentBinding"),
 	)
-	zip.Get(app, "/v1/machines/:id/agent", controllers.GetAgent,
+	zip.Get(app, "/v1/machines/:owner/:name/agent", controllers.GetAgent,
 		zip.WithSummary("Read a machine's agent binding"),
 		zip.WithOperationID("getAgent"),
 		zip.WithTags("AgentBinding"),
 	)
-	zip.Delete(app, "/v1/machines/:id/agent", controllers.UnbindAgent,
+	zip.Delete(app, "/v1/machines/:owner/:name/agent", controllers.UnbindAgent,
 		zip.WithSummary("Unbind a machine's agent"),
 		zip.WithOperationID("unbindAgent"),
 		zip.WithTags("AgentBinding"),
@@ -166,23 +166,20 @@ func registerAPI(app *zip.App) {
 	app.Put("/v1/providers/:owner/:name", h((*controllers.ApiController).UpdateProvider))
 	app.Delete("/v1/providers/:owner/:name", h((*controllers.ApiController).DeleteProvider))
 
-	app.Get("/v1/get-machines", h((*controllers.ApiController).GetMachines))
-	app.Get("/v1/get-machine", h((*controllers.ApiController).GetMachine))
-	app.Post("/v1/update-machine", h((*controllers.ApiController).UpdateMachine))
-	app.Post("/v1/add-machine", h((*controllers.ApiController).AddMachine))
-	app.Post("/v1/delete-machine", h((*controllers.ApiController).DeleteMachine))
-	app.Post("/v1/launch-machine", h((*controllers.ApiController).LaunchMachine))
-
 	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
 	// per-org machines over the configured cloud account (controllers/compute.go).
 	app.Get("/v1/regions", h((*controllers.ApiController).GetComputeRegions))
 	app.Get("/v1/sizes", h((*controllers.ApiController).GetComputeSizes))
 	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
-	app.Get("/v1/machines", h((*controllers.ApiController).ListComputeMachines))
-	app.Post("/v1/machines/launch", h((*controllers.ApiController).LaunchComputeMachine))
+	// ONE machines collection. It answers from the organization's own providers
+	// and from the house account, keyed the one way (owner, name), with Source
+	// saying which. There is no second address to join against.
+	app.Get("/v1/machines", h((*controllers.ApiController).ListMachines))
+	app.Post("/v1/machines", h((*controllers.ApiController).LaunchComputeMachine))
 	registerAgent(app)
-	app.Get("/v1/machines/:id", h((*controllers.ApiController).GetComputeMachine))
-	app.Delete("/v1/machines/:id", h((*controllers.ApiController).DeleteComputeMachine))
+	app.Get("/v1/machines/:owner/:name", h((*controllers.ApiController).GetMachine))
+	app.Put("/v1/machines/:owner/:name", h((*controllers.ApiController).UpdateMachine))
+	app.Delete("/v1/machines/:owner/:name", h((*controllers.ApiController).DeleteMachine))
 	// Unified /v1/k8s noun — the ONE Kubernetes surface: DOKS cluster lifecycle
 	// (list / detail+nodes / create / delete) plus the worker NODES on the fleet.
 	app.Get("/v1/k8s/providers", h((*controllers.ApiController).ListComputeKubernetesProviders))

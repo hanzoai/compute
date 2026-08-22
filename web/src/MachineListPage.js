@@ -28,44 +28,6 @@ class MachineListPage extends BaseListPage {
     super(props);
   }
 
-  newMachine() {
-    return {
-      owner: this.props.account.owner,
-      name: `machine_${Setting.getRandomName()}`,
-      provider: "provider_1",
-      createdTime: moment().format(),
-      updatedTime: moment().format(),
-      expireTime: "",
-      displayName: `New Machine - ${Setting.getRandomName()}`,
-      region: "West US 2",
-      zone: "Zone 1",
-      category: "Standard",
-      type: "Pay As You Go",
-      size: "Standard_D4ls_v5",
-      tag: "",
-      state: "Active",
-      image: "Ubuntu 24.04",
-      publicIp: "",
-      privateIp: "",
-    };
-  }
-
-  addMachine() {
-    const newMachine = this.newMachine();
-    MachineBackend.addMachine(newMachine)
-      .then((res) => {
-        if (res.status === "ok") {
-          this.props.history.push({pathname: `/machines/${newMachine.owner}/${newMachine.name}`, mode: "add"});
-          Setting.showMessage("success", "Machine added successfully");
-        } else {
-          Setting.showMessage("error", `Failed to add Machine: ${res.msg}`);
-        }
-      })
-      .catch(error => {
-        Setting.showMessage("error", `Machine failed to add: ${error}`);
-      });
-  }
-
   deleteMachine(i) {
     MachineBackend.deleteMachine(this.state.data[i])
       .then((res) => {
@@ -276,7 +238,6 @@ class MachineListPage extends BaseListPage {
           title={() => (
             <div>
               {i18next.t("general:Machines")}&nbsp;&nbsp;&nbsp;&nbsp;
-              <Button type="primary" size="small" onClick={this.addMachine.bind(this)}>{i18next.t("general:Add")}</Button>
             </div>
           )}
           loading={this.state.loading}

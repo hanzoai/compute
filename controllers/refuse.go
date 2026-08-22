@@ -43,6 +43,7 @@ const (
 	refuseNoProvider = "this organization has no cloud provider: add one at /v1/providers, then launch"
 
 	// A required parameter, with the values it takes.
+	refuseNoPool         = "the pool is named by the address: /v1/pools/{owner}/{name}"
 	refuseNoProviderName = "name the provider: ?provider=<name>, one of the providers this organization has added"
 
 	// No credential at all.

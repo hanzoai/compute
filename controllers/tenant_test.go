@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -41,14 +42,14 @@ func tenantWire(t *testing.T) *zip.App {
 	handler := func(fn func(*ApiController)) zip.Handler {
 		return func(c *zip.Ctx) error { fn(New(c)); return nil }
 	}
-	app.Post("/v1/launch-machine", handler((*ApiController).LaunchMachine))
-	app.Get("/v1/get-volumes", handler((*ApiController).GetVolumes))
-	app.Get("/v1/get-volume", handler((*ApiController).GetVolume))
-	app.Post("/v1/create-volume", handler((*ApiController).CreateVolume))
-	app.Post("/v1/delete-volume", handler((*ApiController).DeleteVolume))
-	app.Post("/v1/attach-volume", handler((*ApiController).AttachVolume))
-	app.Post("/v1/detach-volume", handler((*ApiController).DetachVolume))
-	app.Post("/v1/resize-volume", handler((*ApiController).ResizeVolume))
+	app.Post("/v1/machines", handler((*ApiController).LaunchComputeMachine))
+	app.Get("/v1/volumes", handler((*ApiController).GetVolumes))
+	app.Post("/v1/volumes", handler((*ApiController).CreateVolume))
+	app.Get("/v1/volumes/:owner/:name", handler((*ApiController).GetVolume))
+	app.Delete("/v1/volumes/:owner/:name", handler((*ApiController).DeleteVolume))
+	app.Put("/v1/volumes/:owner/:name/attachment", handler((*ApiController).AttachVolume))
+	app.Delete("/v1/volumes/:owner/:name/attachment", handler((*ApiController).DetachVolume))
+	app.Put("/v1/volumes/:owner/:name/size", handler((*ApiController).ResizeVolume))
 	return app
 }
 
@@ -67,25 +68,35 @@ func storedVolume(t *testing.T, owner, name string) *object.Volume {
 	return v
 }
 
-// `POST /v1/launch-machine?owner=victim` with a body naming the attacker cleared
-// authorization against the attacker's own org and then provisioned a machine on
-// the VICTIM's provider credentials, billed to the victim.
+// `?owner=victim` with a body naming the attacker cleared authorization against
+// the attacker's own org and then provisioned on the VICTIM's provider
+// credentials, billed to the victim.
 //
-// The provision now resolves the provider in the CALLER's org, which is what the
-// error proves: it got past tenant resolution carrying the signed org and looked
-// the provider up THERE.
-func TestLaunchMachineUsesTheSignedOrgNotTheQuery(t *testing.T) {
+// The org a compute call runs as is decided in ONE place, so that place is the
+// subject here rather than any single handler: an error message that happens to
+// name an org is a weaker proof, and it disappears the moment a handler refuses
+// earlier for an unrelated reason.
+func TestComputeOrgComesFromTheTokenNotTheAddress(t *testing.T) {
 	mint := signer(t, "https://test.id")
-	app := tenantWire(t)
+	app := zip.New(zip.Config{ReadBufferSize: 16384})
+	echo := func(c *zip.Ctx) error { return c.String(http.StatusOK, New(c).resolveComputeOrg()) }
+	app.Get("/v1/machines", echo)
+	app.Get("/v1/machines/:owner/:name", echo)
 
-	body := post(t, app, "/v1/launch-machine?owner=victimlaunch&provider=platformdo",
-		mint("attackerlaunch"), `{"owner":"attackerlaunch","name":"m1","instanceType":"s-1vcpu-1gb"}`)
-
-	if !strings.Contains(body, "attackerlaunch") {
-		t.Fatalf("the launch must resolve the provider in the CALLER's org, got %s", body)
+	if got := get(t, app, "/v1/machines?owner=victimlaunch", mint("attackerlaunch")); got != "attackerlaunch" {
+		t.Errorf("the query's org won: %q", got)
 	}
-	if strings.Contains(body, "victimlaunch") {
-		t.Fatalf("the query's org reached the provision: %s", body)
+	// The address is the newer vector: the owner moved out of the query and into
+	// a path segment, and it must not have gained authority on the way.
+	if got := get(t, app, "/v1/machines/victimlaunch/m1", mint("attackerlaunch")); got != "attackerlaunch" {
+		t.Errorf("the address's org won: %q", got)
+	}
+	// The control, and the actual contract: with no token there is nothing to
+	// override the address, so the address resolves. That is why an
+	// unauthenticated request must never reach a handler — routers/health_test.go
+	// is what holds that end.
+	if got := get(t, app, "/v1/machines?owner=victimlaunch", ""); got != "victimlaunch" {
+		t.Errorf("without a token the address must resolve, got %q", got)
 	}
 }
 
@@ -96,15 +107,17 @@ func TestVolumeWritesUseTheSignedOrgNotTheQuery(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := tenantWire(t)
 
-	for name, path := range map[string]string{
-		"create": "/v1/create-volume?owner=victimvol&provider=platformdo",
-		"delete": "/v1/delete-volume?owner=victimvol&provider=platformdo&name=vol-1",
-		"attach": "/v1/attach-volume?owner=victimvol&provider=platformdo&volume=vol-1&machine=m-1",
-		"detach": "/v1/detach-volume?owner=victimvol&provider=platformdo&volume=vol-1",
-		"resize": "/v1/resize-volume?owner=victimvol&provider=platformdo&volume=vol-1&size=200",
+	// The victim's org is now named in the ADDRESS, which is the stronger form of
+	// the same attack: the caller is asking for a path it has no claim to.
+	for name, tc := range map[string]struct{ method, path string }{
+		"create": {http.MethodPost, "/v1/volumes?owner=victimvol&provider=platformdo"},
+		"delete": {http.MethodDelete, "/v1/volumes/victimvol/vol-1?provider=platformdo"},
+		"attach": {http.MethodPut, "/v1/volumes/victimvol/vol-1/attachment?provider=platformdo&machine=m-1"},
+		"detach": {http.MethodDelete, "/v1/volumes/victimvol/vol-1/attachment?provider=platformdo"},
+		"resize": {http.MethodPut, "/v1/volumes/victimvol/vol-1/size?provider=platformdo&size=200"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			body := post(t, app, path, mint("attackervol"), `{"owner":"attackervol","name":"vol-1","sizeGb":100}`)
+			_, body := ask(t, app, tc.method, tc.path, mint("attackervol"), `{"owner":"attackervol","name":"vol-1","sizeGb":100}`)
 			if !strings.Contains(body, "attackervol") {
 				t.Fatalf("%s must resolve the provider in the CALLER's org, got %s", name, body)
 			}
@@ -115,16 +128,17 @@ func TestVolumeWritesUseTheSignedOrgNotTheQuery(t *testing.T) {
 	}
 }
 
-// The volume READS are scoped to the caller as well. Authorization keys a GET on
-// `?id=`, so a request could name its own org there and another org's in
-// `?owner=` — the filter judged the first and the handler read the second.
+// The volume READS are scoped to the caller as well. The owner is now a PATH
+// segment, which is the same segment the authorization seam reads, so the two
+// can no longer disagree — a caller naming another org's volume in the address
+// is judged on that address. This asks for exactly that.
 func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := tenantWire(t)
 	storedVolume(t, "victimvolread", "secret-disk")
 	storedVolume(t, "attackervolread", "own-disk")
 
-	list := get(t, app, "/v1/get-volumes?owner=victimvolread&id=attackervolread/own-disk", mint("attackervolread"))
+	list := get(t, app, "/v1/volumes?owner=victimvolread", mint("attackervolread"))
 	if strings.Contains(list, "secret-disk") || strings.Contains(list, "victimvolread") {
 		t.Fatalf("another org's volumes were listed: %s", list)
 	}
@@ -132,7 +146,7 @@ func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 		t.Fatalf("the caller must still see its OWN volumes: %s", list)
 	}
 
-	one := get(t, app, "/v1/get-volume?owner=victimvolread&name=secret-disk", mint("attackervolread"))
+	one := get(t, app, "/v1/volumes/victimvolread/secret-disk", mint("attackervolread"))
 	if strings.Contains(one, "secret-disk") || strings.Contains(one, "victimvolread") {
 		t.Fatalf("another org's volume was readable: %s", one)
 	}
@@ -142,25 +156,23 @@ func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 // provision is a configured cloud account waiting to happen.
 func TestMachineAndVolumeWritesFailClosedWithoutAnOrg(t *testing.T) {
 	app := tenantWire(t)
-	for name, tc := range map[string]struct{ path, body string }{
-		"launch": {"/v1/launch-machine?provider=do", `{"name":"m1"}`},
-		"create": {"/v1/create-volume?provider=do", `{"name":"v1","sizeGb":10}`},
-		"delete": {"/v1/delete-volume?provider=do&name=v1", ``},
-		"attach": {"/v1/attach-volume?provider=do&volume=v1&machine=m1", ``},
-		"detach": {"/v1/detach-volume?provider=do&volume=v1", ``},
-		"resize": {"/v1/resize-volume?provider=do&volume=v1&size=20", ``},
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"launch": {http.MethodPost, "/v1/machines?provider=do", `{"name":"m1"}`},
+		"create": {http.MethodPost, "/v1/volumes?provider=do", `{"name":"v1","sizeGb":10}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			body := post(t, app, tc.path, "", tc.body)
+			_, body := ask(t, app, tc.method, tc.path, "", tc.body)
 			if !strings.Contains(body, refuseNoOrg) {
 				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
 			}
 		})
 	}
 
+	// Only the collection. An item address NAMES its org, so "no org context" is
+	// not a state it can be in — what must be refused there is reading ANOTHER
+	// org's item, which is the test above and the filter in front of it.
 	for name, path := range map[string]string{
-		"list": "/v1/get-volumes",
-		"get":  "/v1/get-volume?name=v1",
+		"list": "/v1/volumes",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if body := get(t, app, path, ""); !strings.Contains(body, refuseNoOrg) {

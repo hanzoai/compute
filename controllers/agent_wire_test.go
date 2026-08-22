@@ -81,16 +81,24 @@ func wire(t *testing.T) *zip.App {
 	t.Helper()
 	app := zip.New(zip.Config{})
 	zip.Get(app, "/v1/machines/agents", ListAgents)
-	zip.Put(app, "/v1/machines/:id/agent", BindAgent)
-	zip.Get(app, "/v1/machines/:id/agent", GetAgent)
-	zip.Delete(app, "/v1/machines/:id/agent", UnbindAgent)
+	zip.Put(app, "/v1/machines/:owner/:name/agent", BindAgent)
+	zip.Get(app, "/v1/machines/:owner/:name/agent", GetAgent)
+	zip.Delete(app, "/v1/machines/:owner/:name/agent", UnbindAgent)
 	return app
 }
 
-// ask drives one real request and returns the status and the raw body.
-func ask(t *testing.T, app *zip.App, method, path string) (int, string) {
+// ask drives one real request and returns the status and the raw body. Method is
+// a parameter because an item is PUT and DELETEd where a collection is POSTed, so
+// a table of routes is a table of (method, path) — a helper that fixed the method
+// answered 404, and a 404 reads as a refusal.
+func ask(t *testing.T, app *zip.App, method, path, bearer, body string) (int, string) {
 	t.Helper()
-	res, err := app.Fiber().Test(httptest.NewRequest(method, path, nil))
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", bearer)
+	}
+	res, err := app.Fiber().Test(req)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
@@ -111,7 +119,7 @@ func ask(t *testing.T, app *zip.App, method, path string) (int, string) {
 func TestReadOfAnAbsentBindingIs404(t *testing.T) {
 	app := wire(t)
 
-	status, body := ask(t, app, http.MethodGet, "/v1/machines/drop-a/agent?owner="+org(t))
+	status, body := ask(t, app, http.MethodGet, "/v1/machines/"+org(t)+"/drop-a/agent", "", "")
 
 	if status != http.StatusNotFound {
 		t.Fatalf("GET .../agent (no binding) = %d %s, want 404", status, body)
@@ -128,7 +136,7 @@ func TestReadOfAnAbsentBindingIs404(t *testing.T) {
 func TestUnbindIs204(t *testing.T) {
 	app := wire(t)
 
-	status, body := ask(t, app, http.MethodDelete, "/v1/machines/drop-a/agent?owner="+org(t))
+	status, body := ask(t, app, http.MethodDelete, "/v1/machines/"+org(t)+"/drop-a/agent", "", "")
 
 	if status != http.StatusNoContent {
 		t.Fatalf("DELETE .../agent = %d %s, want 204", status, body)
@@ -156,7 +164,7 @@ func TestListIsAnObjectKeyedAgentBindings(t *testing.T) {
 		t.Fatalf("seed binding: %v", err)
 	}
 
-	status, body := ask(t, app, http.MethodGet, "/v1/machines/agents?owner="+mine)
+	status, body := ask(t, app, http.MethodGet, "/v1/machines/agents?owner="+mine, "", "")
 	if status != http.StatusOK {
 		t.Fatalf("GET /v1/machines/agents = %d %s, want 200", status, body)
 	}
@@ -201,7 +209,7 @@ func TestListIsScopedToTheCallerOrg(t *testing.T) {
 		}
 	}
 
-	_, body := ask(t, app, http.MethodGet, "/v1/machines/agents?owner="+mine)
+	_, body := ask(t, app, http.MethodGet, "/v1/machines/agents?owner="+mine, "", "")
 	var got struct {
 		AgentBindings []object.AgentBinding `json:"agentBindings"`
 	}
@@ -224,11 +232,16 @@ func TestListIsScopedToTheCallerOrg(t *testing.T) {
 func TestNoOrgContextIsRefused(t *testing.T) {
 	app := wire(t)
 
-	if status, body := ask(t, app, http.MethodGet, "/v1/machines/agents"); status != http.StatusForbidden {
+	if status, body := ask(t, app, http.MethodGet, "/v1/machines/agents", "", ""); status != http.StatusForbidden {
 		t.Errorf("GET /v1/machines/agents anonymous = %d %s, want 403", status, body)
 	}
-	if status, body := ask(t, app, http.MethodGet, "/v1/machines/drop-a/agent"); status != http.StatusBadRequest {
-		t.Errorf("GET .../agent anonymous = %d %s, want 400", status, body)
+	// The machine is in the ADDRESS now, so "machine id is required" is no longer
+	// reachable from a well-formed request — the refusal a caller meets is about
+	// the machine, not about a missing parameter. Anonymous finds no binding in
+	// the empty tenant, which is the refusal that matters: it must not read
+	// whatever an empty org happens to hold.
+	if status, body := ask(t, app, http.MethodGet, "/v1/machines/acme/drop-a/agent", "", ""); status != http.StatusNotFound {
+		t.Errorf("GET .../agent anonymous = %d %s, want 404", status, body)
 	}
 }
 

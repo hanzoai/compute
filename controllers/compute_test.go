@@ -126,7 +126,7 @@ func TestFilterMachinesByProject(t *testing.T) {
 // newLaunchCtx builds a ZAP request context the way the router hands one to a
 // handler, so resolveComputeApp/Project can read the threaded tenant scope.
 func newLaunchCtx() *zip.Ctx {
-	return zip.New(zip.Config{}).TestCtx("POST", "/v1/machines/launch")
+	return zip.New(zip.Config{}).TestCtx("POST", "/v1/machines")
 }
 
 // resolveComputeApp/Project resolve the OPTIONAL scope exactly one way: the

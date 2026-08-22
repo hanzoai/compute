@@ -67,16 +67,27 @@ type caller struct {
 
 // AgentRef addresses one machine's agent binding.
 type AgentRef struct {
-	// Id is the machine's name within the caller's org, from the URL path. The
-	// OWNER half of the machine id is never taken from the caller — see machine.
-	Id string `json:"id"`
+	// Owner is in the ADDRESS because every resource here is addressed the same
+	// way, and because the authorization seam runs as middleware and reads the
+	// owner out of the path — it cannot see route parameters or a body.
+	//
+	// It is NOT what the handler trusts. machine() still derives the owner from
+	// the CALLER, so a path naming someone else's organization changes nothing:
+	// the address is checked by the seam and the identity is decided by the
+	// credential, and both have to agree for anything to happen.
+	Owner string `json:"-" url:"owner"`
+	// Id is the machine's name within that organization.
+	Id string `json:"id" url:"name"`
 	caller
 }
 
 // AgentBind binds a cloud Agent to a machine.
 type AgentBind struct {
+	// Owner is in the address; the handler still takes the owner from the
+	// caller. See AgentRef.
+	Owner string `json:"-" url:"owner"`
 	// Id is the machine to bind, from the URL path.
-	Id string `json:"id"`
+	Id string `json:"id" url:"name"`
 	// AgentName is the Agent in cloud's /v1/agents registry this machine runs.
 	AgentName string `json:"agentName" validate:"required"`
 	// BotVersion pins the @hanzo/bot npm version; empty tracks the machine's

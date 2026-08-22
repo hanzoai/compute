@@ -63,23 +63,27 @@ func TestAgentsIsNotAMachineId(t *testing.T) {
 	}
 }
 
-// TestMachineIdStillRoutes is the control. Without it the test above passes just
-// as well when /v1/machines/:id has been deleted outright, which is the failure
-// it is least able to notice on its own.
-func TestMachineIdStillRoutes(t *testing.T) {
+// TestMachineItemStillRoutes is the control. Without it the test above passes
+// just as well when the machine item has been deleted outright, which is the
+// failure it is least able to notice on its own.
+//
+// The collision it used to guard is gone by construction: a machine is
+// /v1/machines/{owner}/{name}, three segments, and /v1/machines/agents is two.
+// They cannot be confused for one another whatever order they register in.
+func TestMachineItemStillRoutes(t *testing.T) {
 	app := zip.New(zip.Config{})
 	registerAPI(app)
 
-	res, err := app.Fiber().Test(httptest.NewRequest(http.MethodGet, "/v1/machines/drop-a", nil))
+	res, err := app.Fiber().Test(httptest.NewRequest(http.MethodGet, "/v1/machines/acme/drop-a", nil))
 	if err != nil {
-		t.Fatalf("GET /v1/machines/drop-a: %v", err)
+		t.Fatalf("GET /v1/machines/acme/drop-a: %v", err)
 	}
 	defer res.Body.Close()
 
 	// The untyped handler ran: it answers HTTP 200 and carries its verdict in the
 	// envelope. A 404 would mean the route is gone.
 	if res.StatusCode == http.StatusNotFound {
-		t.Fatalf("GET /v1/machines/drop-a = 404 — the machine route is not registered")
+		t.Fatalf("GET /v1/machines/acme/drop-a = 404 — the machine route is not registered")
 	}
 }
 
@@ -91,22 +95,22 @@ func TestAgentBindIsPut(t *testing.T) {
 	app := zip.New(zip.Config{})
 	registerAPI(app)
 
-	gone, err := app.Fiber().Test(httptest.NewRequest(http.MethodPost, "/v1/machines/drop-a/bind-agent", nil))
+	gone, err := app.Fiber().Test(httptest.NewRequest(http.MethodPost, "/v1/machines/acme/drop-a/bind-agent", nil))
 	if err != nil {
-		t.Fatalf("POST /v1/machines/drop-a/bind-agent: %v", err)
+		t.Fatalf("POST /v1/machines/acme/drop-a/bind-agent: %v", err)
 	}
 	defer gone.Body.Close()
 	if gone.StatusCode != http.StatusNotFound {
-		t.Fatalf("POST /v1/machines/drop-a/bind-agent = %d, want 404 — the old address must be gone", gone.StatusCode)
+		t.Fatalf("POST /v1/machines/acme/drop-a/bind-agent = %d, want 404 — the old address must be gone", gone.StatusCode)
 	}
 
 	// And the new one exists: it refuses (no org context), it does not 404.
-	res, err := app.Fiber().Test(httptest.NewRequest(http.MethodPut, "/v1/machines/drop-a/agent", nil))
+	res, err := app.Fiber().Test(httptest.NewRequest(http.MethodPut, "/v1/machines/acme/drop-a/agent", nil))
 	if err != nil {
-		t.Fatalf("PUT /v1/machines/drop-a/agent: %v", err)
+		t.Fatalf("PUT /v1/machines/acme/drop-a/agent: %v", err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusNotFound {
-		t.Fatalf("PUT /v1/machines/drop-a/agent = 404 — the bind op is not registered")
+		t.Fatalf("PUT /v1/machines/acme/drop-a/agent = 404 — the bind op is not registered")
 	}
 }

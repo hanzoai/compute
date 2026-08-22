@@ -25,7 +25,7 @@ import (
 // newFilterCtx builds a ZAP request context the way the router hands one to the
 // filter chain, with the gateway-injected tenant headers set.
 func newFilterCtx(app *zip.App, headers map[string]string) *zip.Ctx {
-	c := app.TestCtx("POST", "/v1/machines/launch")
+	c := app.TestCtx("POST", "/v1/machines")
 	for k, v := range headers {
 		c.Fiber().Request().Header.Set(k, v)
 	}

@@ -18,7 +18,7 @@
 //
 // It used to take it from two. The authorization filter derives the object's
 // owner from `?id=` or the request BODY, while these handlers read
-// `?owner=` — so `POST /v1/create-node-pool?owner=hanzo` with a body naming
+// `?owner=` — so `POST /v1/pools?owner=hanzo` with a body naming
 // `acme` cleared authorization against acme and then provisioned against hanzo's
 // cloud credentials, hanzo's balance and hanzo's invoice. A tenant read from a
 // different field than the one authorization judged is not a second opinion, it
@@ -60,7 +60,7 @@ func poolId(org, id string) string {
 // @Param   pageSize     query    string  false        "The size of each page"
 // @Param   p     query    string  false        "The number of the page"
 // @Success 200 {object} object.NodePool The Response object
-// @router /get-node-pools [get]
+// @router /pools [get]
 func (c *ApiController) GetNodePools() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
@@ -113,7 +113,7 @@ func (c *ApiController) GetNodePools() {
 // @Description get a node pool
 // @Param   id     query    string  true        "The id ( owner/name ) of the node pool"
 // @Success 200 {object} object.NodePool The Response object
-// @router /get-node-pool [get]
+// @router /pools/{owner}/{name} [get]
 func (c *ApiController) GetNodePool() {
 	id := poolId(c.resolveComputeOrg(), c.Id())
 	if id == "" {
@@ -138,7 +138,7 @@ func (c *ApiController) GetNodePool() {
 // @Param   clusterId query    string  false "The DOKS cluster ID (optional, uses provider default)"
 // @Param   body      body     service.CreateNodePoolSpec  true  "The spec for the node pool"
 // @Success 200 {object} object.NodePool The Response object
-// @router /create-node-pool [post]
+// @router /pools [post]
 func (c *ApiController) CreateNodePool() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
@@ -176,7 +176,7 @@ func (c *ApiController) CreateNodePool() {
 // @Param   id     query    string  true        "The id ( owner/name ) of the node pool"
 // @Param   body    body   object.NodePool  true        "The details of the node pool"
 // @Success 200 {object} controllers.Response The Response object
-// @router /update-node-pool [post]
+// @router /pools/{owner}/{name} [put]
 func (c *ApiController) UpdateNodePool() {
 	id := poolId(c.resolveComputeOrg(), c.Id())
 	if id == "" {
@@ -201,7 +201,7 @@ func (c *ApiController) UpdateNodePool() {
 // @Description delete a node pool from DOKS and DB
 // @Param   body    body   object.NodePool  true        "The details of the node pool"
 // @Success 200 {object} controllers.Response The Response object
-// @router /delete-node-pool [post]
+// @router /pools/{owner}/{name} [delete]
 func (c *ApiController) DeleteNodePool() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
@@ -209,14 +209,15 @@ func (c *ApiController) DeleteNodePool() {
 		return
 	}
 
-	var pool object.NodePool
-	err := json.Unmarshal(c.Ctx.Body(), &pool)
-	if err != nil {
-		c.ResponseError(err.Error())
+	// The ADDRESS names WHICH pool; the token names WHOSE. DeleteNodePoolCloud
+	// reads only those two and takes every other field from the stored row, so
+	// there is nothing left for a body to carry.
+	name := strings.TrimSpace(c.Ctx.Param("name"))
+	if name == "" {
+		c.ResponseError(refuseNoPool)
 		return
 	}
-	// The body names WHICH pool; it never names WHOSE.
-	pool.Owner = owner
+	pool := object.NodePool{Owner: owner, Name: name}
 
 	c.Data["json"] = wrapActionResponse(object.DeleteNodePoolCloud(&pool))
 	c.ServeJSON()
@@ -231,20 +232,20 @@ func (c *ApiController) DeleteNodePool() {
 // @Param   poolId    query    string  true  "The DOKS node pool ID"
 // @Param   count     query    string  true  "The desired node count"
 // @Success 200 {object} object.NodePool The Response object
-// @router /scale-node-pool [post]
+// @router /pools/{owner}/{name}/size [put]
 func (c *ApiController) ScaleNodePool() {
 	owner := c.resolveComputeOrg()
 	if owner == "" {
 		c.ResponseError(refuseNoOrg)
 		return
 	}
-	provider := c.Ctx.Query("provider")
-	clusterID := c.Ctx.Query("clusterId")
-	poolID := c.Ctx.Query("poolId")
+	// The address names the pool; the provider, the cluster and the upstream pool
+	// id are on the row visor already keeps. A caller that has to repeat them can
+	// contradict them.
+	name := strings.TrimSpace(c.Ctx.Param("name"))
 	countStr := c.Ctx.Query("count")
-
-	if provider == "" || poolID == "" || countStr == "" {
-		c.ResponseError("provider, poolId, and count query parameters are required")
+	if name == "" || countStr == "" {
+		c.ResponseError(refuseNoPool)
 		return
 	}
 
@@ -254,7 +255,17 @@ func (c *ApiController) ScaleNodePool() {
 		return
 	}
 
-	pool, err := object.ScaleNodePoolCloud(owner, provider, clusterID, poolID, count)
+	stored, err := object.GetNodePool(owner + "/" + name)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if stored == nil {
+		c.ResponseError("no pool " + name + " in " + owner)
+		return
+	}
+
+	pool, err := object.ScaleNodePoolCloud(owner, stored.Provider, stored.ClusterID, stored.PoolID, count)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

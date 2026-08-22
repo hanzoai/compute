@@ -72,13 +72,13 @@ func TestHealthReachesTheHandlerUnauthenticated(t *testing.T) {
 // able to notice on its own: every assertion about a bypass is only meaningful
 // against a route that is NOT bypassed.
 func TestGatedRouteStillGated(t *testing.T) {
-	status, body := get(t, "/v1/get-machines")
+	status, body := get(t, "/v1/machines")
 
 	if status == http.StatusOK {
-		t.Fatalf("GET /v1/get-machines = 200 %s — an unauthenticated read was served", body)
+		t.Fatalf("GET /v1/machines = 200 %s — an unauthenticated read was served", body)
 	}
 	if strings.Contains(body, "store unreachable") {
-		t.Fatalf("GET /v1/get-machines reached a handler unauthenticated: %s", body)
+		t.Fatalf("GET /v1/machines reached a handler unauthenticated: %s", body)
 	}
 }
 

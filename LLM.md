@@ -324,7 +324,7 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 | GET | `/v1/sizes` | Cached sizes, Hanzo resale price only |
 | GET | `/v1/gpus` | GPU sizes (H100/H200/MI300X/L40S/…), resale-priced |
 | GET | `/v1/machines` | Caller org's machines (DO tag `hanzo-org:<org>`) |
-| POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
+| POST | `/v1/machines` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
 | GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |
 
 A machine's AGENT hangs off the same noun and is the exception to the envelope

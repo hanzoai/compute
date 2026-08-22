@@ -15,9 +15,7 @@
 package controllers
 
 import (
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -59,52 +57,27 @@ func poolWire(t *testing.T) *zip.App {
 	handler := func(fn func(*ApiController)) zip.Handler {
 		return func(c *zip.Ctx) error { fn(New(c)); return nil }
 	}
-	app.Get("/v1/get-node-pools", handler((*ApiController).GetNodePools))
-	app.Get("/v1/get-node-pool", handler((*ApiController).GetNodePool))
-	app.Post("/v1/update-node-pool", handler((*ApiController).UpdateNodePool))
-	app.Post("/v1/delete-node-pool", handler((*ApiController).DeleteNodePool))
-	app.Post("/v1/create-node-pool", handler((*ApiController).CreateNodePool))
-	app.Post("/v1/scale-node-pool", handler((*ApiController).ScaleNodePool))
+	app.Get("/v1/pools", handler((*ApiController).GetNodePools))
+	app.Get("/v1/pools/:owner/:name", handler((*ApiController).GetNodePool))
+	app.Put("/v1/pools/:owner/:name", handler((*ApiController).UpdateNodePool))
+	app.Delete("/v1/pools/:owner/:name", handler((*ApiController).DeleteNodePool))
+	app.Post("/v1/pools", handler((*ApiController).CreateNodePool))
+	app.Put("/v1/pools/:owner/:name/size", handler((*ApiController).ScaleNodePool))
 	return app
 }
 
 // post drives one real request, with an optional bearer, and returns the body.
 func post(t *testing.T, app *zip.App, path, bearer, body string) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if bearer != "" {
-		req.Header.Set("Authorization", bearer)
-	}
-	res, err := app.Fiber().Test(req)
-	if err != nil {
-		t.Fatalf("POST %s: %v", path, err)
-	}
-	defer res.Body.Close()
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		t.Fatalf("POST %s: read body: %v", path, err)
-	}
-	return string(b)
+	_, b := ask(t, app, http.MethodPost, path, bearer, body)
+	return b
 }
 
 // get drives one real GET, with an optional bearer, and returns the body.
 func get(t *testing.T, app *zip.App, path, bearer string) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	if bearer != "" {
-		req.Header.Set("Authorization", bearer)
-	}
-	res, err := app.Fiber().Test(req)
-	if err != nil {
-		t.Fatalf("GET %s: %v", path, err)
-	}
-	defer res.Body.Close()
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		t.Fatalf("GET %s: read body: %v", path, err)
-	}
-	return string(b)
+	_, b := ask(t, app, http.MethodGet, path, bearer, "")
+	return b
 }
 
 // storedPool plants a DB-only node pool (no provider linkage, so nothing reaches
@@ -132,7 +105,7 @@ func TestUpdateNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	victim := storedPool(t, "victimorg", "gpu")
 	storedPool(t, "attackerorg", "gpu")
 
-	post(t, app, "/v1/update-node-pool?owner=victimorg&id=victimorg/gpu", mint("attackerorg"),
+	ask(t, app, http.MethodPut, "/v1/pools/victimorg/gpu", mint("attackerorg"),
 		`{"owner":"victimorg","name":"gpu","maxNodes":99}`)
 
 	after, err := object.GetNodePool("victimorg/gpu")
@@ -153,14 +126,15 @@ func TestUpdateNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	}
 }
 
-// The delete body names WHICH pool, never WHOSE.
+// The address names WHICH pool, never WHOSE — a caller aiming the address at
+// another org still deletes its own.
 func TestDeleteNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
 	storedPool(t, "victimdel", "gpu")
 	storedPool(t, "attackerdel", "gpu")
 
-	post(t, app, "/v1/delete-node-pool", mint("attackerdel"), `{"owner":"victimdel","name":"gpu"}`)
+	ask(t, app, http.MethodDelete, "/v1/pools/victimdel/gpu", mint("attackerdel"), "")
 
 	if p, err := object.GetNodePool("victimdel/gpu"); err != nil || p == nil {
 		t.Fatalf("another org's pool was deleted (err=%v)", err)
@@ -175,14 +149,11 @@ func TestDeleteNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 // account waiting to happen.
 func TestNodePoolWritesFailClosedWithoutAnOrg(t *testing.T) {
 	app := poolWire(t)
-	for name, tc := range map[string]struct{ path, body string }{
-		"create": {"/v1/create-node-pool?provider=do", `{"size":"gpu-h100x8-640gb","count":1}`},
-		"scale":  {"/v1/scale-node-pool?provider=do&poolId=p-1&count=4", ``},
-		"update": {"/v1/update-node-pool", `{"maxNodes":9}`},
-		"delete": {"/v1/delete-node-pool", `{"name":"gpu"}`},
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"create": {http.MethodPost, "/v1/pools?provider=do", `{"size":"gpu-h100x8-640gb","count":1}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			body := post(t, app, tc.path, "", tc.body)
+			_, body := ask(t, app, tc.method, tc.path, "", tc.body)
 			if !strings.Contains(body, refuseNoOrg) {
 				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
 			}
@@ -198,12 +169,13 @@ func TestProvisionUsesTheSignedOrgNotTheQuery(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
 
-	for name, path := range map[string]string{
-		"create": "/v1/create-node-pool?owner=hanzo&provider=platformdo",
-		"scale":  "/v1/scale-node-pool?owner=hanzo&provider=platformdo&poolId=p-1&count=8",
+	storedPool(t, "acmeprov", "p-1")
+	for name, tc := range map[string]struct{ method, path string }{
+		"create": {http.MethodPost, "/v1/pools?owner=hanzo&provider=platformdo"},
+		"scale":  {http.MethodPut, "/v1/pools/hanzo/p-1/size?count=8"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			body := post(t, app, path, mint("acmeprov"), `{"owner":"hanzo","size":"gpu-h100x8-640gb","count":8}`)
+			_, body := ask(t, app, tc.method, tc.path, mint("acmeprov"), `{"owner":"hanzo","size":"gpu-h100x8-640gb","count":8}`)
 			if !strings.Contains(body, "acmeprov") {
 				t.Fatalf("the provision must resolve the provider in the CALLER's org, got %s", body)
 			}
@@ -224,7 +196,7 @@ func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 	storedPool(t, "victimread", "secret-gpu")
 	storedPool(t, "attackerread", "own-gpu")
 
-	list := get(t, app, "/v1/get-node-pools?owner=victimread", mint("attackerread"))
+	list := get(t, app, "/v1/pools?owner=victimread", mint("attackerread"))
 	if strings.Contains(list, "secret-gpu") || strings.Contains(list, "victimread") {
 		t.Fatalf("another org's pools were listed: %s", list)
 	}
@@ -232,7 +204,7 @@ func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 		t.Fatalf("the caller must still see its OWN pools: %s", list)
 	}
 
-	one := get(t, app, "/v1/get-node-pool?owner=victimread&id=victimread/secret-gpu", mint("attackerread"))
+	one := get(t, app, "/v1/pools/victimread/secret-gpu", mint("attackerread"))
 	if strings.Contains(one, "secret-gpu") || strings.Contains(one, "victimread") {
 		t.Fatalf("another org's pool was readable by id: %s", one)
 	}
@@ -241,9 +213,11 @@ func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 // A read with no org context is refused rather than served somebody's rows.
 func TestNodePoolReadsFailClosedWithoutAnOrg(t *testing.T) {
 	app := poolWire(t)
+	// Only the collection. An item address NAMES its org, so "no org context" is
+	// not a state it can be in — what must be refused there is reading ANOTHER
+	// org's item, which is the test above and the filter in front of it.
 	for name, path := range map[string]string{
-		"list": "/v1/get-node-pools",
-		"get":  "/v1/get-node-pool?id=gpu",
+		"list": "/v1/pools",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if body := get(t, app, path, ""); !strings.Contains(body, refuseNoOrg) {
