@@ -80,7 +80,7 @@ func (c *ApiController) GetMachines() {
 // @Success 200 {object} object.Machine The Response object
 // @router /get-machine [get]
 func (c *ApiController) GetMachine() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	owner, _ := util.GetOwnerAndNameFromId(id)
 	_, err := object.SyncMachinesCloud(owner)
@@ -107,7 +107,7 @@ func (c *ApiController) GetMachine() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-machine [post]
 func (c *ApiController) UpdateMachine() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	var machine object.Machine
 	err := json.Unmarshal(c.Ctx.Body(), &machine)

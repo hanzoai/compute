@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"github.com/hanzoai/visor/util"
 	"strings"
 
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
@@ -101,4 +102,34 @@ func (c *ApiController) GetSessionUsername() string {
 	}
 
 	return GetUserName(user)
+}
+
+// Id is the identifier this request addresses, in the spelling object.* takes.
+//
+// It reads the ADDRESS first and the query only when the address does not carry
+// it. A resource surface puts the target in the path; the surface this replaces
+// put it in ?id=. One reader means a handler cannot answer for the right thing
+// at one spelling and the wrong thing at the other — and reading only the query
+// at a path address yields the EMPTY id, which is a different object, not an
+// error.
+//
+// The query value is returned VERBATIM. Not every id is owner/name — a node
+// pool is addressed by bare name — so parsing here and rebuilding would turn an
+// id this service accepts into one it does not.
+func (c *ApiController) Id() string {
+	if o := c.Ctx.Param("owner"); o != "" {
+		if n := c.Ctx.Param("name"); n != "" {
+			return o + "/" + n
+		}
+		return o
+	}
+	return c.Ctx.Query("id")
+}
+
+// Target is Id split into its parts, for the callers that want them apart.
+func (c *ApiController) Target() (string, string) {
+	if id := c.Id(); id != "" {
+		return util.GetOwnerAndNameFromIdNoCheck(id)
+	}
+	return c.Ctx.Query("owner"), c.Ctx.Query("name")
 }

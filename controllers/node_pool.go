@@ -115,7 +115,7 @@ func (c *ApiController) GetNodePools() {
 // @Success 200 {object} object.NodePool The Response object
 // @router /get-node-pool [get]
 func (c *ApiController) GetNodePool() {
-	id := poolId(c.resolveComputeOrg(), c.Ctx.Query("id"))
+	id := poolId(c.resolveComputeOrg(), c.Id())
 	if id == "" {
 		c.ResponseError("unauthorized: no org context")
 		return
@@ -178,7 +178,7 @@ func (c *ApiController) CreateNodePool() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-node-pool [post]
 func (c *ApiController) UpdateNodePool() {
-	id := poolId(c.resolveComputeOrg(), c.Ctx.Query("id"))
+	id := poolId(c.resolveComputeOrg(), c.Id())
 	if id == "" {
 		c.ResponseError("unauthorized: no org context")
 		return

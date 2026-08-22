@@ -73,7 +73,7 @@ func (c *ApiController) GetProviders() {
 // @Success 200 {object} object.Provider The Response object
 // @router /get-provider [get]
 func (c *ApiController) GetProvider() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	provider, err := object.GetMaskedProvider(object.GetProvider(id))
 	if err != nil {
@@ -93,7 +93,7 @@ func (c *ApiController) GetProvider() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-provider [post]
 func (c *ApiController) UpdateProvider() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	var provider object.Provider
 	err := json.Unmarshal(c.Ctx.Body(), &provider)

@@ -74,7 +74,7 @@ func (c *ApiController) GetRecords() {
 // @Success 200 {object} object.Record The Response object
 // @router /get-record [get]
 func (c *ApiController) GetRecord() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	record, err := object.GetRecord(id)
 	if err != nil {
@@ -94,7 +94,7 @@ func (c *ApiController) GetRecord() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-record [post]
 func (c *ApiController) UpdateRecord() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	var record object.Record
 	err := json.Unmarshal(c.Ctx.Body(), &record)
