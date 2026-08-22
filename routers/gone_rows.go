@@ -65,6 +65,35 @@ func init() {
 	// sessions, and the live connection belongs to the session it connects to.
 	Retire("/v1/add-asset-tunnel", "/v1/assets")
 	Retire("/v1/get-asset-tunnel", "/v1/sessions")
+
+	// Node pools.
+	Retire("/v1/get-node-pools", "/v1/pools")
+	Retire("/v1/get-node-pool", "/v1/pools")
+	Retire("/v1/create-node-pool", "/v1/pools")
+	Retire("/v1/update-node-pool", "/v1/pools")
+	Retire("/v1/delete-node-pool", "/v1/pools")
+	Retire("/v1/scale-node-pool", "/v1/pools")
+
+	// Volumes.
+	Retire("/v1/get-volumes", "/v1/volumes")
+	Retire("/v1/get-volume", "/v1/volumes")
+	Retire("/v1/create-volume", "/v1/volumes")
+	Retire("/v1/delete-volume", "/v1/volumes")
+	Retire("/v1/attach-volume", "/v1/volumes")
+	Retire("/v1/detach-volume", "/v1/volumes")
+	Retire("/v1/resize-volume", "/v1/volumes")
+
+	// The four that were state changes wearing verbs. Each is a property of the
+	// thing it changes: a session's status, a record's block.
+	Retire("/v1/start-session", "/v1/sessions")
+	Retire("/v1/stop-session", "/v1/sessions")
+	Retire("/v1/commit-record", "/v1/records")
+	Retire("/v1/query-record", "/v1/records")
+
+	// The caller's own account, and the deployment's branding. Each was the only
+	// thing at its address, so the address is simply the thing.
+	Retire("/v1/get-account", "/v1/account")
+	Retire("/v1/get-whitelabel", "/v1/whitelabel")
 }
 
 // NOT RETIRED, AND THE REASON IS MEASURED.

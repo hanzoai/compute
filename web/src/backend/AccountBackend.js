@@ -15,7 +15,7 @@
 import * as Setting from "../Setting";
 
 export function getAccount() {
-  return fetch(`${Setting.ServerUrl}/v1/get-account`, {
+  return fetch(`${Setting.ServerUrl}/v1/account`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());

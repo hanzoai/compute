@@ -57,14 +57,14 @@ var apiContract = []route{
 
 	{"POST", "/v1/signin", "Signin"},
 	{"POST", "/v1/signout", "Signout"},
-	{"GET", "/v1/get-account", "GetAccount"},
+	{"GET", "/v1/account", "GetAccount"},
 	{"GET", "/v1/records", "GetRecords"},
 	{"GET", "/v1/records/:owner/:name", "GetRecord"},
 	{"PUT", "/v1/records/:owner/:name", "UpdateRecord"},
 	{"POST", "/v1/records", "AddRecord"},
 	{"DELETE", "/v1/records/:owner/:name", "DeleteRecord"},
-	{"POST", "/v1/commit-record", "CommitRecord"},
-	{"GET", "/v1/query-record", "QueryRecord"},
+	{"PUT", "/v1/records/:owner/:name/block", "CommitRecord"},
+	{"GET", "/v1/records/:owner/:name/block", "QueryRecord"},
 	{"GET", "/v1/assets", "GetAssets"},
 	{"GET", "/v1/assets/:owner/:name", "GetAsset"},
 	{"PUT", "/v1/assets/:owner/:name", "UpdateAsset"},
@@ -108,29 +108,29 @@ var apiContract = []route{
 	{"PUT", "/v1/sessions/:owner/:name", "UpdateSession"},
 	{"POST", "/v1/sessions", "AddSession"},
 	{"DELETE", "/v1/sessions/:owner/:name", "DeleteSession"},
-	{"POST", "/v1/start-session", "StartSession"},
-	{"POST", "/v1/stop-session", "StopSession"},
+	{"PUT", "/v1/sessions/:owner/:name/status", "StartSession"},
+	{"DELETE", "/v1/sessions/:owner/:name/status", "StopSession"},
 	{"POST", "/v1/assets/:owner/:name/sessions", "AddAssetTunnel"},
 	{"GET", "/v1/sessions/:owner/:name/connection", "GetAssetTunnel"},
-	{"GET", "/v1/get-node-pools", "GetNodePools"},
-	{"GET", "/v1/get-node-pool", "GetNodePool"},
-	{"POST", "/v1/create-node-pool", "CreateNodePool"},
-	{"POST", "/v1/update-node-pool", "UpdateNodePool"},
-	{"POST", "/v1/delete-node-pool", "DeleteNodePool"},
-	{"POST", "/v1/scale-node-pool", "ScaleNodePool"},
+	{"GET", "/v1/pools", "GetNodePools"},
+	{"GET", "/v1/pools/:owner/:name", "GetNodePool"},
+	{"POST", "/v1/pools", "CreateNodePool"},
+	{"PUT", "/v1/pools/:owner/:name", "UpdateNodePool"},
+	{"DELETE", "/v1/pools/:owner/:name", "DeleteNodePool"},
+	{"PUT", "/v1/pools/:owner/:name/size", "ScaleNodePool"},
 	{"GET", "/v1/plans", "GetPlans"},
 	{"GET", "/v1/plans/:owner/:name", "GetPlan"},
 	{"POST", "/v1/plans", "AddPlan"},
 	{"PUT", "/v1/plans/:owner/:name", "UpdatePlan"},
 	{"DELETE", "/v1/plans/:owner/:name", "DeletePlan"},
-	{"GET", "/v1/get-whitelabel", "GetWhitelabel"},
-	{"GET", "/v1/get-volumes", "GetVolumes"},
-	{"GET", "/v1/get-volume", "GetVolume"},
-	{"POST", "/v1/create-volume", "CreateVolume"},
-	{"POST", "/v1/delete-volume", "DeleteVolume"},
-	{"POST", "/v1/attach-volume", "AttachVolume"},
-	{"POST", "/v1/detach-volume", "DetachVolume"},
-	{"POST", "/v1/resize-volume", "ResizeVolume"},
+	{"GET", "/v1/whitelabel", "GetWhitelabel"},
+	{"GET", "/v1/volumes", "GetVolumes"},
+	{"GET", "/v1/volumes/:owner/:name", "GetVolume"},
+	{"POST", "/v1/volumes", "CreateVolume"},
+	{"DELETE", "/v1/volumes/:owner/:name", "DeleteVolume"},
+	{"PUT", "/v1/volumes/:owner/:name/attachment", "AttachVolume"},
+	{"DELETE", "/v1/volumes/:owner/:name/attachment", "DetachVolume"},
+	{"PUT", "/v1/volumes/:owner/:name/size", "ResizeVolume"},
 }
 
 // key renders a route as "METHOD path" for set comparison.
@@ -234,7 +234,17 @@ func TestAPIContractVerbMix(t *testing.T) {
 	// GET does not move: reading a collection and reading an item were both GET
 	// before and are both GET now. A number here that changes WITHOUT a family
 	// moving is the thing this test is for.
-	want := map[string]int{"GET": 33, "POST": 27, "DELETE": 8, "PUT": 6}
+	// Volumes, node pools and the four state changes moved, and the shape moved
+	// with them. Ten POSTs became PUTs or DELETEs — because writing a property
+	// (a pool's size, a volume's attachment, a session's status, a record's
+	// block) is PUT, and removing one is DELETE.
+	//
+	//	POST 27 -> 17    PUT 6 -> 12    DELETE 8 -> 12    GET 33 unchanged
+	//
+	// GET stays put across every family: reading a collection and reading an item
+	// were both GET before and are both GET now. A number that moves WITHOUT a
+	// family moving is what this test is for.
+	want := map[string]int{"GET": 33, "POST": 17, "DELETE": 12, "PUT": 12}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

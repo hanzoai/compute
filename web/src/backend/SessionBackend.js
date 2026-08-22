@@ -55,14 +55,14 @@ export function deleteSession(session) {
 }
 
 export function connect(sessionId) {
-  return fetch(`${Setting.ServerUrl}/v1/start-session?id=${sessionId}`, {
+  return fetch(`${Setting.ServerUrl}/v1/sessions/${sessionId}/status`, {
     method: "POST",
     credentials: "include",
   }).then(res => res.json());
 }
 
 export function disconnect(sessionId) {
-  return fetch(`${Setting.ServerUrl}/v1/stop-session?id=${sessionId}`, {
+  return fetch(`${Setting.ServerUrl}/v1/sessions/${sessionId}/status`, {
     method: "POST",
     credentials: "include",
   }).then(res => res.json());

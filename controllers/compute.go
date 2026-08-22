@@ -61,7 +61,16 @@ import (
 // the Ctx. Two ways to obtain the same two strings is fine; two answers to
 // "whose org is this" would not be.
 func (c *ApiController) resolveComputeOrg() string {
-	_, org := principal(c.Ctx.Header("Authorization"), c.Ctx.Query("owner"))
+	// The address first, for the same reason everything else reads it first: a
+	// resource names its owner in the path, and the authorization seam — which
+	// runs as middleware and cannot see route parameters — reads that same
+	// segment. Owner in the query and owner in the path must not be able to
+	// disagree, so there is one place that decides which is which.
+	owner := c.Ctx.Param("owner")
+	if owner == "" {
+		owner = c.Ctx.Query("owner")
+	}
+	_, org := principal(c.Ctx.Header("Authorization"), owner)
 	return org
 }
 

@@ -57,7 +57,7 @@ export function deleteRecord(record) {
 
 export function commitRecord(record) {
   const newRecord = Setting.deepCopy(record);
-  return fetch(`${Setting.ServerUrl}/v1/commit-record`, {
+  return fetch(`${Setting.ServerUrl}/v1/records`, {
     method: "POST",
     credentials: "include",
     body: JSON.stringify(newRecord),
@@ -65,7 +65,7 @@ export function commitRecord(record) {
 }
 
 export function queryRecord(owner, name) {
-  return fetch(`${Setting.ServerUrl}/v1/query-record?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${Setting.ServerUrl}/v1/records/${owner}/${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());

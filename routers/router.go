@@ -136,7 +136,7 @@ func registerAgent(app *zip.App) {
 func registerAPI(app *zip.App) {
 	app.Post("/v1/signin", h((*controllers.ApiController).Signin))
 	app.Post("/v1/signout", h((*controllers.ApiController).Signout))
-	app.Get("/v1/get-account", h((*controllers.ApiController).GetAccount))
+	app.Get("/v1/account", h((*controllers.ApiController).GetAccount))
 
 	app.Get("/v1/records", h((*controllers.ApiController).GetRecords))
 	app.Get("/v1/records/:owner/:name", h((*controllers.ApiController).GetRecord))
@@ -144,8 +144,10 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/records", h((*controllers.ApiController).AddRecord))
 	app.Delete("/v1/records/:owner/:name", h((*controllers.ApiController).DeleteRecord))
 
-	app.Post("/v1/commit-record", h((*controllers.ApiController).CommitRecord))
-	app.Get("/v1/query-record", h((*controllers.ApiController).QueryRecord))
+	// Committing a record writes its BLOCK on the chain (object.Record.Block);
+	// querying reads it back. One noun, written and read.
+	app.Put("/v1/records/:owner/:name/block", h((*controllers.ApiController).CommitRecord))
+	app.Get("/v1/records/:owner/:name/block", h((*controllers.ApiController).QueryRecord))
 
 	// An asset is a resource. The collection lists and creates; the item, named
 	// by its (owner, name) key, is read, replaced and removed.
@@ -207,8 +209,10 @@ func registerAPI(app *zip.App) {
 	app.Put("/v1/sessions/:owner/:name", h((*controllers.ApiController).UpdateSession))
 	app.Post("/v1/sessions", h((*controllers.ApiController).AddSession))
 	app.Delete("/v1/sessions/:owner/:name", h((*controllers.ApiController).DeleteSession))
-	app.Post("/v1/start-session", h((*controllers.ApiController).StartSession))
-	app.Post("/v1/stop-session", h((*controllers.ApiController).StopSession))
+	// Starting and stopping both write the session's STATUS — connected, or
+	// disconnected. One address, because it is one property.
+	app.Put("/v1/sessions/:owner/:name/status", h((*controllers.ApiController).StartSession))
+	app.Delete("/v1/sessions/:owner/:name/status", h((*controllers.ApiController).StopSession))
 
 	// Neither of these is a tunnel on an asset, which is what they were called.
 	//
@@ -223,12 +227,14 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/assets/:owner/:name/sessions", h((*controllers.ApiController).AddAssetTunnel))
 	app.Get("/v1/sessions/:owner/:name/connection", h((*controllers.ApiController).GetAssetTunnel))
 
-	app.Get("/v1/get-node-pools", h((*controllers.ApiController).GetNodePools))
-	app.Get("/v1/get-node-pool", h((*controllers.ApiController).GetNodePool))
-	app.Post("/v1/create-node-pool", h((*controllers.ApiController).CreateNodePool))
-	app.Post("/v1/update-node-pool", h((*controllers.ApiController).UpdateNodePool))
-	app.Post("/v1/delete-node-pool", h((*controllers.ApiController).DeleteNodePool))
-	app.Post("/v1/scale-node-pool", h((*controllers.ApiController).ScaleNodePool))
+	app.Get("/v1/pools", h((*controllers.ApiController).GetNodePools))
+	app.Post("/v1/pools", h((*controllers.ApiController).CreateNodePool))
+	app.Get("/v1/pools/:owner/:name", h((*controllers.ApiController).GetNodePool))
+	app.Put("/v1/pools/:owner/:name", h((*controllers.ApiController).UpdateNodePool))
+	app.Delete("/v1/pools/:owner/:name", h((*controllers.ApiController).DeleteNodePool))
+	// How many nodes the pool runs is a property of the pool, so scaling is
+	// writing that property — not a verb of its own.
+	app.Put("/v1/pools/:owner/:name/size", h((*controllers.ApiController).ScaleNodePool))
 
 	app.Get("/v1/plans", h((*controllers.ApiController).GetPlans))
 	app.Get("/v1/plans/:owner/:name", h((*controllers.ApiController).GetPlan))
@@ -236,13 +242,16 @@ func registerAPI(app *zip.App) {
 	app.Put("/v1/plans/:owner/:name", h((*controllers.ApiController).UpdatePlan))
 	app.Delete("/v1/plans/:owner/:name", h((*controllers.ApiController).DeletePlan))
 
-	app.Get("/v1/get-whitelabel", h((*controllers.ApiController).GetWhitelabel))
+	app.Get("/v1/whitelabel", h((*controllers.ApiController).GetWhitelabel))
 
-	app.Get("/v1/get-volumes", h((*controllers.ApiController).GetVolumes))
-	app.Get("/v1/get-volume", h((*controllers.ApiController).GetVolume))
-	app.Post("/v1/create-volume", h((*controllers.ApiController).CreateVolume))
-	app.Post("/v1/delete-volume", h((*controllers.ApiController).DeleteVolume))
-	app.Post("/v1/attach-volume", h((*controllers.ApiController).AttachVolume))
-	app.Post("/v1/detach-volume", h((*controllers.ApiController).DetachVolume))
-	app.Post("/v1/resize-volume", h((*controllers.ApiController).ResizeVolume))
+	app.Get("/v1/volumes", h((*controllers.ApiController).GetVolumes))
+	app.Post("/v1/volumes", h((*controllers.ApiController).CreateVolume))
+	app.Get("/v1/volumes/:owner/:name", h((*controllers.ApiController).GetVolume))
+	app.Delete("/v1/volumes/:owner/:name", h((*controllers.ApiController).DeleteVolume))
+	// Which machine a volume is attached to is a RELATION, and a relation the
+	// volume has one of: writing it attaches, removing it detaches.
+	app.Put("/v1/volumes/:owner/:name/attachment", h((*controllers.ApiController).AttachVolume))
+	app.Delete("/v1/volumes/:owner/:name/attachment", h((*controllers.ApiController).DetachVolume))
+	// How large the volume is, written.
+	app.Put("/v1/volumes/:owner/:name/size", h((*controllers.ApiController).ResizeVolume))
 }
