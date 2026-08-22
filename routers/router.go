@@ -67,6 +67,7 @@ func Route(app *zip.App) {
 	// path outside /v1/ falls to the SPA fallback and comes back 200, so the
 	// probe measured the file server rather than the service.
 	registerHealth(app)
+	registerGone(app)
 
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
