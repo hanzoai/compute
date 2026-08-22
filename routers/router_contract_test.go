@@ -123,13 +123,19 @@ var apiContract = []route{
 	{"POST", "/v1/update-plan", "UpdatePlan"},
 	{"POST", "/v1/delete-plan", "DeletePlan"},
 	{"GET", "/v1/get-whitelabel", "GetWhitelabel"},
-	{"GET", "/v1/get-volumes", "GetVolumes"},
-	{"GET", "/v1/get-volume", "GetVolume"},
-	{"POST", "/v1/create-volume", "CreateVolume"},
-	{"POST", "/v1/delete-volume", "DeleteVolume"},
-	{"POST", "/v1/attach-volume", "AttachVolume"},
-	{"POST", "/v1/detach-volume", "DetachVolume"},
-	{"POST", "/v1/resize-volume", "ResizeVolume"},
+	// A VOLUME — seven TYPED ops (see registerVolume), so like health and the
+	// agent these rows name package functions. One noun at one address with the
+	// method carrying the verb; the attachment is a sub-resource because detach
+	// has to be sayable without a sentinel. The seven verb-in-the-path addresses
+	// they replaced are retired, not deleted, and are deliberately outside this
+	// table — see registeredRoutes and gone_volumes_test.go.
+	{"GET", "/v1/volumes", "ListVolumes"},
+	{"POST", "/v1/volumes", "CreateVolume"},
+	{"GET", "/v1/volumes/:id", "GetVolume"},
+	{"PATCH", "/v1/volumes/:id", "ResizeVolume"},
+	{"DELETE", "/v1/volumes/:id", "DeleteVolume"},
+	{"PUT", "/v1/volumes/:id/attachment", "AttachVolume"},
+	{"DELETE", "/v1/volumes/:id/attachment", "DetachVolume"},
 }
 
 // key renders a route as "METHOD path" for set comparison.
@@ -144,11 +150,24 @@ func (r route) key() string { return r.method + " " + r.path }
 // Route). Calling only registerAPI here would leave a served route outside the
 // contract, which is the exact gap this test exists to close. The filter chain
 // itself is omitted: Use-handlers are not routes.
+//
+// RETIRED addresses are read off the router too and then dropped, because they
+// are the one thing visor serves that is deliberately not part of its contract:
+// a 410 naming its successor, answering EVERY method because 410 is a statement
+// about the target resource. Counting them would put eight dead operations per
+// retired address into the table a customer reads. They are pinned instead by
+// the retirement tests, which assert both halves — that the address still
+// answers, and that it reaches no declaration.
 func registeredRoutes(t *testing.T) map[string]bool {
 	t.Helper()
 	app := zip.New(zip.Config{})
 	registerHealth(app)
 	registerAPI(app)
+
+	declared := make(map[string]bool)
+	for _, r := range app.Declaration().Routes {
+		declared[r.Method+" "+r.Pattern] = true
+	}
 
 	got := make(map[string]bool)
 	for _, r := range app.Fiber().GetRoutes(true) {
@@ -157,7 +176,11 @@ func registeredRoutes(t *testing.T) map[string]bool {
 		if r.Method == "HEAD" {
 			continue
 		}
-		got[r.Method+" "+r.Path] = true
+		key := r.Method + " " + r.Path
+		if !declared[key] {
+			continue
+		}
+		got[key] = true
 	}
 	return got
 }
@@ -214,7 +237,7 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	want := map[string]int{"GET": 33, "POST": 33, "DELETE": 5, "PUT": 2, "PATCH": 1}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

@@ -122,6 +122,43 @@ is what makes the break safe. `controllers/agent_wire_test.go` pins those
 answers; the fake vm in cloud's `apps/visor/bots_http_test.go` is written to
 match it.
 
+A VOLUME is the third — seven ops in `controllers/volume.go`, registered by
+`routers.registerVolume` (`routers/volume.go`):
+
+| Method | Path | Was |
+|--------|------|-----|
+| GET | `/v1/volumes` | `GET /v1/get-volumes` |
+| POST | `/v1/volumes` | `POST /v1/create-volume` |
+| GET | `/v1/volumes/:id` | `GET /v1/get-volume?name=` |
+| PATCH | `/v1/volumes/:id` | `POST /v1/resize-volume?volume=&size=` |
+| DELETE | `/v1/volumes/:id` | `POST /v1/delete-volume?name=` |
+| PUT | `/v1/volumes/:id/attachment` | `POST /v1/attach-volume?volume=&machine=` |
+| DELETE | `/v1/volumes/:id/attachment` | `POST /v1/detach-volume?volume=` |
+
+ATTACHMENT is a sub-resource and SIZE is a field, and the measurement that
+separates them is detach: as a field the relation is `machine`, so removing it
+has to be spelled as a sentinel — an empty string in a partial update, which is
+indistinguishable from not mentioning the field. As a sub-resource it exists or
+it does not. Size has no such problem, so it stays a field and PATCH carries it
+rather than a `/size` address minted for one scalar.
+
+`:id` is the volume's NAME within the org (the row's own key), and the provider
+and the cloud's id are read from that row — so `?provider=` is gone from every
+write. It had to be: `?name=` meant the row's name on the read and the CLOUD's
+id on the writes, one spelling addressing two things depending on the verb. The
+write surface is also NARROWER for it, reaching only volumes visor recorded
+where a raw cloud id could reach anything in the org's account.
+
+Nothing else called these — `hanzoai/cloud`'s `apps/visor` has no volume client,
+and neither does the web build — so this noun dropped the envelope with no
+caller to land beside it.
+
+The seven verb-in-the-path addresses are RETIRED rather than deleted
+(`routers/gone_volumes.go`, mechanism in `pkg/gone`): 410 with `Deprecation`,
+`Sunset` and a `Link` naming the successor, all three rendered from one table
+row, registered on `zip.Undeclared` so they serve without entering
+`App.Declaration` and therefore any projection built from it.
+
 An op declares the identity it reads — `header:"Authorization"` plus
 `url:"owner"` on the embedded `caller` — because a typed handler is given a
 `context.Context` and no request to reach into. `principal()` is the ONE rule
@@ -144,7 +181,8 @@ Order to do it in:
    name) — the socket it needs now exists. No visor change required. NOT DONE.
 2. Convert visor's routes to typed ops noun by noun (machines, k8s, node-pools,
    volumes, plans), each with its cloud caller, dropping the envelope as each
-   lands. Started: agent DONE.
+   lands. Started: agent DONE, volumes DONE (which had no cloud caller to land
+   beside — measured, not assumed).
 3. `pkg/visor/embed.go`'s fiber→`http.Handler` adaptor goes when step 1 lands.
 
 Step 2 before step 1 costs one thing, and it is paid: while the migration runs,

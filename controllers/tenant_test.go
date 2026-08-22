@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -42,13 +43,18 @@ func tenantWire(t *testing.T) *zip.App {
 		return func(c *zip.Ctx) error { fn(New(c)); return nil }
 	}
 	app.Post("/v1/launch-machine", handler((*ApiController).LaunchMachine))
-	app.Get("/v1/get-volumes", handler((*ApiController).GetVolumes))
-	app.Get("/v1/get-volume", handler((*ApiController).GetVolume))
-	app.Post("/v1/create-volume", handler((*ApiController).CreateVolume))
-	app.Post("/v1/delete-volume", handler((*ApiController).DeleteVolume))
-	app.Post("/v1/attach-volume", handler((*ApiController).AttachVolume))
-	app.Post("/v1/detach-volume", handler((*ApiController).DetachVolume))
-	app.Post("/v1/resize-volume", handler((*ApiController).ResizeVolume))
+	// The volume ops are TYPED, so they are registered as ops rather than
+	// through the controller bridge. What they read is the same two inputs the
+	// bridge fed the old handlers — the forwarded Bearer and ?owner — declared
+	// on the input type instead of fetched from the request behind the
+	// document's back, which is the whole point of the conversion.
+	zip.Get(app, "/v1/volumes", ListVolumes)
+	zip.Post(app, "/v1/volumes", CreateVolume)
+	zip.Get(app, "/v1/volumes/:id", GetVolume)
+	zip.Patch(app, "/v1/volumes/:id", ResizeVolume)
+	zip.Delete(app, "/v1/volumes/:id", DeleteVolume)
+	zip.Put(app, "/v1/volumes/:id/attachment", AttachVolume)
+	zip.Delete(app, "/v1/volumes/:id/attachment", DetachVolume)
 	return app
 }
 
@@ -92,24 +98,54 @@ func TestLaunchMachineUsesTheSignedOrgNotTheQuery(t *testing.T) {
 // Every volume WRITE takes its tenant from the token too. Each fails on the
 // missing provider, and the org named in that failure is the proof: it is the
 // caller's, never the query's.
+//
+// The write now resolves the volume ROW before it resolves a provider, so the
+// row seeded here is the caller's own and the provider named on it is looked up
+// in the caller's org. That is a second lock on the same door: a volume the
+// caller does not own is not there to address (see the 404 below), and one it
+// does own carries the only provider the call can reach.
 func TestVolumeWritesUseTheSignedOrgNotTheQuery(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := tenantWire(t)
+	storedVolume(t, "attackervol", "vol-1")
 
-	for name, path := range map[string]string{
-		"create": "/v1/create-volume?owner=victimvol&provider=platformdo",
-		"delete": "/v1/delete-volume?owner=victimvol&provider=platformdo&name=vol-1",
-		"attach": "/v1/attach-volume?owner=victimvol&provider=platformdo&volume=vol-1&machine=m-1",
-		"detach": "/v1/detach-volume?owner=victimvol&provider=platformdo&volume=vol-1",
-		"resize": "/v1/resize-volume?owner=victimvol&provider=platformdo&volume=vol-1&size=200",
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"create": {http.MethodPost, "/v1/volumes?owner=victimvol&provider=platformdo", `{"name":"vol-2","size":100}`},
+		"delete": {http.MethodDelete, "/v1/volumes/vol-1?owner=victimvol", ``},
+		"attach": {http.MethodPut, "/v1/volumes/vol-1/attachment?owner=victimvol", `{"machine":"m-1"}`},
+		"detach": {http.MethodDelete, "/v1/volumes/vol-1/attachment?owner=victimvol", ``},
+		"resize": {http.MethodPatch, "/v1/volumes/vol-1?owner=victimvol", `{"size":200}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			body := post(t, app, path, mint("attackervol"), `{"owner":"attackervol","name":"vol-1","sizeGb":100}`)
+			_, body := send(t, app, tc.method, tc.path, mint("attackervol"), tc.body)
 			if !strings.Contains(body, "attackervol") {
 				t.Fatalf("%s must resolve the provider in the CALLER's org, got %s", name, body)
 			}
 			if strings.Contains(body, "victimvol") {
 				t.Fatalf("%s reached another org's provider credentials: %s", name, body)
+			}
+		})
+	}
+}
+
+// A volume another org owns is not addressable at all: the id in the path is
+// resolved against the CALLER's org, so it names nothing and the request stops
+// at 404 without a provider ever being looked up.
+func TestVolumeWritesCannotAddressAnotherOrgsVolume(t *testing.T) {
+	mint := signer(t, "https://test.id")
+	app := tenantWire(t)
+	storedVolume(t, "victimvolreach", "secret-disk")
+
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"delete": {http.MethodDelete, "/v1/volumes/secret-disk?owner=victimvolreach", ``},
+		"attach": {http.MethodPut, "/v1/volumes/secret-disk/attachment?owner=victimvolreach", `{"machine":"m-1"}`},
+		"detach": {http.MethodDelete, "/v1/volumes/secret-disk/attachment?owner=victimvolreach", ``},
+		"resize": {http.MethodPatch, "/v1/volumes/secret-disk?owner=victimvolreach", `{"size":200}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := send(t, app, tc.method, tc.path, mint("attackervolreach"), tc.body)
+			if status != http.StatusNotFound {
+				t.Fatalf("%s of another org's volume = %d %s, want 404", name, status, body)
 			}
 		})
 	}
@@ -124,7 +160,7 @@ func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 	storedVolume(t, "victimvolread", "secret-disk")
 	storedVolume(t, "attackervolread", "own-disk")
 
-	list := get(t, app, "/v1/get-volumes?owner=victimvolread&id=attackervolread/own-disk", mint("attackervolread"))
+	list := get(t, app, "/v1/volumes?owner=victimvolread&id=attackervolread/own-disk", mint("attackervolread"))
 	if strings.Contains(list, "secret-disk") || strings.Contains(list, "victimvolread") {
 		t.Fatalf("another org's volumes were listed: %s", list)
 	}
@@ -132,39 +168,38 @@ func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 		t.Fatalf("the caller must still see its OWN volumes: %s", list)
 	}
 
-	one := get(t, app, "/v1/get-volume?owner=victimvolread&name=secret-disk", mint("attackervolread"))
-	if strings.Contains(one, "secret-disk") || strings.Contains(one, "victimvolread") {
-		t.Fatalf("another org's volume was readable: %s", one)
+	status, one := send(t, app, http.MethodGet, "/v1/volumes/secret-disk?owner=victimvolread", mint("attackervolread"), "")
+	if status != http.StatusNotFound {
+		t.Fatalf("another org's volume was readable: %d %s", status, one)
+	}
+	if strings.Contains(one, "victimvolread") {
+		t.Fatalf("the refusal named the other org: %s", one)
 	}
 }
 
 // No bearer and no service credential means no tenant, and a tenant-less
 // provision is a configured cloud account waiting to happen.
+// Each body below is COMPLETE, so nothing is refused for being malformed and
+// the missing tenant is the only thing left to refuse it.
 func TestMachineAndVolumeWritesFailClosedWithoutAnOrg(t *testing.T) {
 	app := tenantWire(t)
-	for name, tc := range map[string]struct{ path, body string }{
-		"launch": {"/v1/launch-machine?provider=do", `{"name":"m1"}`},
-		"create": {"/v1/create-volume?provider=do", `{"name":"v1","sizeGb":10}`},
-		"delete": {"/v1/delete-volume?provider=do&name=v1", ``},
-		"attach": {"/v1/attach-volume?provider=do&volume=v1&machine=m1", ``},
-		"detach": {"/v1/detach-volume?provider=do&volume=v1", ``},
-		"resize": {"/v1/resize-volume?provider=do&volume=v1&size=20", ``},
-	} {
-		t.Run(name, func(t *testing.T) {
-			body := post(t, app, tc.path, "", tc.body)
-			if !strings.Contains(body, "no org context") {
-				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
-			}
-		})
+	if body := post(t, app, "/v1/launch-machine?provider=do", "", `{"name":"m1"}`); !strings.Contains(body, "no org context") {
+		t.Fatalf("a tenant-less launch must be refused, got %s", body)
 	}
 
-	for name, path := range map[string]string{
-		"list": "/v1/get-volumes",
-		"get":  "/v1/get-volume?name=v1",
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"create": {http.MethodPost, "/v1/volumes?provider=do", `{"name":"v1","size":10}`},
+		"delete": {http.MethodDelete, "/v1/volumes/v1", ``},
+		"attach": {http.MethodPut, "/v1/volumes/v1/attachment", `{"machine":"m1"}`},
+		"detach": {http.MethodDelete, "/v1/volumes/v1/attachment", ``},
+		"resize": {http.MethodPatch, "/v1/volumes/v1", `{"size":20}`},
+		"list":   {http.MethodGet, "/v1/volumes", ``},
+		"get":    {http.MethodGet, "/v1/volumes/v1", ``},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if body := get(t, app, path, ""); !strings.Contains(body, "no org context") {
-				t.Fatalf("a tenant-less %s must be refused, got %s", name, body)
+			status, body := send(t, app, tc.method, tc.path, "", tc.body)
+			if status != http.StatusForbidden || !strings.Contains(body, "no org context") {
+				t.Fatalf("a tenant-less %s must be refused, got %d %s", name, status, body)
 			}
 		})
 	}

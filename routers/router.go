@@ -222,11 +222,6 @@ func registerAPI(app *zip.App) {
 
 	app.Get("/v1/get-whitelabel", h((*controllers.ApiController).GetWhitelabel))
 
-	app.Get("/v1/get-volumes", h((*controllers.ApiController).GetVolumes))
-	app.Get("/v1/get-volume", h((*controllers.ApiController).GetVolume))
-	app.Post("/v1/create-volume", h((*controllers.ApiController).CreateVolume))
-	app.Post("/v1/delete-volume", h((*controllers.ApiController).DeleteVolume))
-	app.Post("/v1/attach-volume", h((*controllers.ApiController).AttachVolume))
-	app.Post("/v1/detach-volume", h((*controllers.ApiController).DetachVolume))
-	app.Post("/v1/resize-volume", h((*controllers.ApiController).ResizeVolume))
+	registerVolume(app)
+	registerGoneVolumes(app)
 }
