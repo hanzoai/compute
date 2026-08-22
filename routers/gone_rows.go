@@ -38,4 +38,47 @@ func init() {
 	Retire("/v1/add-provider", "/v1/providers")
 	Retire("/v1/update-provider", "/v1/providers")
 	Retire("/v1/delete-provider", "/v1/providers")
+
+	// Records.
+	Retire("/v1/get-records", "/v1/records")
+	Retire("/v1/get-record", "/v1/records")
+	Retire("/v1/add-record", "/v1/records")
+	Retire("/v1/update-record", "/v1/records")
+	Retire("/v1/delete-record", "/v1/records")
+
+	// Sessions.
+	Retire("/v1/get-sessions", "/v1/sessions")
+	Retire("/v1/get-session", "/v1/sessions")
+	Retire("/v1/add-session", "/v1/sessions")
+	Retire("/v1/update-session", "/v1/sessions")
+	Retire("/v1/delete-session", "/v1/sessions")
+
+	// Plans.
+	Retire("/v1/get-plans", "/v1/plans")
+	Retire("/v1/get-plan", "/v1/plans")
+	Retire("/v1/add-plan", "/v1/plans")
+	Retire("/v1/update-plan", "/v1/plans")
+	Retire("/v1/delete-plan", "/v1/plans")
 }
+
+// NOT RETIRED, AND THE REASON IS MEASURED.
+//
+// Volumes and node pools keep their verb addresses. Their identity is
+// (organization from the PRINCIPAL, provider, name) — controllers/volume.go
+// reads ?name= and ?provider=, and node_pool.go composes poolId(resolveComputeOrg(),
+// name). No owner is addressed, so an item address has one segment, and
+// pathTarget reads the first segment after the kind as the OWNER:
+//
+//	/v1/volumes/vol-1   -> owner="vol-1"  name=""
+//	/v1/pools/gpu       -> owner="gpu"    name=""
+//	/v1/plans/acme/pro  -> owner="acme"   name="pro"
+//
+// So the seam would compare a subject against a VOLUME NAME. subOwner ==
+// "vol-1" is false for every subject, which denies everyone — the same shape as
+// the empty-owner failure the path grammar exists to prevent, reached from the
+// other direction.
+//
+// Giving them the grammar means deciding whether the provider belongs in the
+// address and whether the org should be named rather than inferred. That is a
+// change to what these endpoints ARE, so it lands with their callers, not in a
+// rename.

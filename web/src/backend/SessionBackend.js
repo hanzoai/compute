@@ -16,14 +16,14 @@ import * as Setting from "../Setting";
 import {Connected} from "../SessionListPage";
 
 export function getSessions(owner, page = "", pageSize = "", field = "", value = "", sortField = "", sortOrder = "", status = Connected) {
-  return fetch(`${Setting.ServerUrl}/v1/get-sessions?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}&status=${status}`, {
+  return fetch(`${Setting.ServerUrl}/v1/sessions?owner=${owner}&p=${page}&pageSize=${pageSize}&field=${field}&value=${value}&sortField=${sortField}&sortOrder=${sortOrder}&status=${status}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
 }
 
 export function getSession(owner, name) {
-  return fetch(`${Setting.ServerUrl}/v1/get-session?id=${owner}/${encodeURIComponent(name)}`, {
+  return fetch(`${Setting.ServerUrl}/v1/sessions/${owner}/${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
   }).then(res => res.json());
@@ -31,8 +31,8 @@ export function getSession(owner, name) {
 
 export function updateSession(owner, name, session) {
   const newSession = Setting.deepCopy(session);
-  return fetch(`${Setting.ServerUrl}/v1/update-session?id=${owner}/${encodeURIComponent(name)}`, {
-    method: "POST",
+  return fetch(`${Setting.ServerUrl}/v1/sessions/${owner}/${encodeURIComponent(name)}`, {
+    method: "PUT",
     credentials: "include",
     body: JSON.stringify(newSession),
   }).then(res => res.json());
@@ -47,8 +47,8 @@ export function addAssetTunnel(assetId, mode = "guacd") {
 
 export function deleteSession(session) {
   const newSession = Setting.deepCopy(session);
-  return fetch(`${Setting.ServerUrl}/v1/delete-session`, {
-    method: "POST",
+  return fetch(`${Setting.ServerUrl}/v1/sessions`, {
+    method: "DELETE",
     credentials: "include",
     body: JSON.stringify(newSession),
   }).then(res => res.json());

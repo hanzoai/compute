@@ -138,11 +138,11 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/signout", h((*controllers.ApiController).Signout))
 	app.Get("/v1/get-account", h((*controllers.ApiController).GetAccount))
 
-	app.Get("/v1/get-records", h((*controllers.ApiController).GetRecords))
-	app.Get("/v1/get-record", h((*controllers.ApiController).GetRecord))
-	app.Post("/v1/update-record", h((*controllers.ApiController).UpdateRecord))
-	app.Post("/v1/add-record", h((*controllers.ApiController).AddRecord))
-	app.Post("/v1/delete-record", h((*controllers.ApiController).DeleteRecord))
+	app.Get("/v1/records", h((*controllers.ApiController).GetRecords))
+	app.Get("/v1/records/:owner/:name", h((*controllers.ApiController).GetRecord))
+	app.Put("/v1/records/:owner/:name", h((*controllers.ApiController).UpdateRecord))
+	app.Post("/v1/records", h((*controllers.ApiController).AddRecord))
+	app.Delete("/v1/records/:owner/:name", h((*controllers.ApiController).DeleteRecord))
 
 	app.Post("/v1/commit-record", h((*controllers.ApiController).CommitRecord))
 	app.Get("/v1/query-record", h((*controllers.ApiController).QueryRecord))
@@ -202,11 +202,11 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
 	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
 
-	app.Get("/v1/get-sessions", h((*controllers.ApiController).GetSessions))
-	app.Get("/v1/get-session", h((*controllers.ApiController).GetConnSession))
-	app.Post("/v1/update-session", h((*controllers.ApiController).UpdateSession))
-	app.Post("/v1/add-session", h((*controllers.ApiController).AddSession))
-	app.Post("/v1/delete-session", h((*controllers.ApiController).DeleteSession))
+	app.Get("/v1/sessions", h((*controllers.ApiController).GetSessions))
+	app.Get("/v1/sessions/:owner/:name", h((*controllers.ApiController).GetConnSession))
+	app.Put("/v1/sessions/:owner/:name", h((*controllers.ApiController).UpdateSession))
+	app.Post("/v1/sessions", h((*controllers.ApiController).AddSession))
+	app.Delete("/v1/sessions/:owner/:name", h((*controllers.ApiController).DeleteSession))
 	app.Post("/v1/start-session", h((*controllers.ApiController).StartSession))
 	app.Post("/v1/stop-session", h((*controllers.ApiController).StopSession))
 
@@ -220,11 +220,11 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/delete-node-pool", h((*controllers.ApiController).DeleteNodePool))
 	app.Post("/v1/scale-node-pool", h((*controllers.ApiController).ScaleNodePool))
 
-	app.Get("/v1/get-plans", h((*controllers.ApiController).GetPlans))
-	app.Get("/v1/get-plan", h((*controllers.ApiController).GetPlan))
-	app.Post("/v1/add-plan", h((*controllers.ApiController).AddPlan))
-	app.Post("/v1/update-plan", h((*controllers.ApiController).UpdatePlan))
-	app.Post("/v1/delete-plan", h((*controllers.ApiController).DeletePlan))
+	app.Get("/v1/plans", h((*controllers.ApiController).GetPlans))
+	app.Get("/v1/plans/:owner/:name", h((*controllers.ApiController).GetPlan))
+	app.Post("/v1/plans", h((*controllers.ApiController).AddPlan))
+	app.Put("/v1/plans/:owner/:name", h((*controllers.ApiController).UpdatePlan))
+	app.Delete("/v1/plans/:owner/:name", h((*controllers.ApiController).DeletePlan))
 
 	app.Get("/v1/get-whitelabel", h((*controllers.ApiController).GetWhitelabel))
 

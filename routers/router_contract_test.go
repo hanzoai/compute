@@ -58,11 +58,11 @@ var apiContract = []route{
 	{"POST", "/v1/signin", "Signin"},
 	{"POST", "/v1/signout", "Signout"},
 	{"GET", "/v1/get-account", "GetAccount"},
-	{"GET", "/v1/get-records", "GetRecords"},
-	{"GET", "/v1/get-record", "GetRecord"},
-	{"POST", "/v1/update-record", "UpdateRecord"},
-	{"POST", "/v1/add-record", "AddRecord"},
-	{"POST", "/v1/delete-record", "DeleteRecord"},
+	{"GET", "/v1/records", "GetRecords"},
+	{"GET", "/v1/records/:owner/:name", "GetRecord"},
+	{"PUT", "/v1/records/:owner/:name", "UpdateRecord"},
+	{"POST", "/v1/records", "AddRecord"},
+	{"DELETE", "/v1/records/:owner/:name", "DeleteRecord"},
 	{"POST", "/v1/commit-record", "CommitRecord"},
 	{"GET", "/v1/query-record", "QueryRecord"},
 	{"GET", "/v1/assets", "GetAssets"},
@@ -103,11 +103,11 @@ var apiContract = []route{
 	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
 	{"GET", "/v1/images", "ListImages"},
 	{"POST", "/v1/images", "CreateImage"},
-	{"GET", "/v1/get-sessions", "GetSessions"},
-	{"GET", "/v1/get-session", "GetConnSession"},
-	{"POST", "/v1/update-session", "UpdateSession"},
-	{"POST", "/v1/add-session", "AddSession"},
-	{"POST", "/v1/delete-session", "DeleteSession"},
+	{"GET", "/v1/sessions", "GetSessions"},
+	{"GET", "/v1/sessions/:owner/:name", "GetConnSession"},
+	{"PUT", "/v1/sessions/:owner/:name", "UpdateSession"},
+	{"POST", "/v1/sessions", "AddSession"},
+	{"DELETE", "/v1/sessions/:owner/:name", "DeleteSession"},
 	{"POST", "/v1/start-session", "StartSession"},
 	{"POST", "/v1/stop-session", "StopSession"},
 	{"POST", "/v1/add-asset-tunnel", "AddAssetTunnel"},
@@ -118,11 +118,11 @@ var apiContract = []route{
 	{"POST", "/v1/update-node-pool", "UpdateNodePool"},
 	{"POST", "/v1/delete-node-pool", "DeleteNodePool"},
 	{"POST", "/v1/scale-node-pool", "ScaleNodePool"},
-	{"GET", "/v1/get-plans", "GetPlans"},
-	{"GET", "/v1/get-plan", "GetPlan"},
-	{"POST", "/v1/add-plan", "AddPlan"},
-	{"POST", "/v1/update-plan", "UpdatePlan"},
-	{"POST", "/v1/delete-plan", "DeletePlan"},
+	{"GET", "/v1/plans", "GetPlans"},
+	{"GET", "/v1/plans/:owner/:name", "GetPlan"},
+	{"POST", "/v1/plans", "AddPlan"},
+	{"PUT", "/v1/plans/:owner/:name", "UpdatePlan"},
+	{"DELETE", "/v1/plans/:owner/:name", "DeletePlan"},
 	{"GET", "/v1/get-whitelabel", "GetWhitelabel"},
 	{"GET", "/v1/get-volumes", "GetVolumes"},
 	{"GET", "/v1/get-volume", "GetVolume"},
@@ -234,7 +234,7 @@ func TestAPIContractVerbMix(t *testing.T) {
 	// GET does not move: reading a collection and reading an item were both GET
 	// before and are both GET now. A number here that changes WITHOUT a family
 	// moving is the thing this test is for.
-	want := map[string]int{"GET": 33, "POST": 33, "DELETE": 5, "PUT": 3}
+	want := map[string]int{"GET": 33, "POST": 27, "DELETE": 8, "PUT": 6}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {
