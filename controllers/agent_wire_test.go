@@ -218,7 +218,7 @@ func TestListIsScopedToTheCallerOrg(t *testing.T) {
 	}
 }
 
-// TestNoOrgContextIsRefused pins the closed door: with neither a Bearer nor an
+// TestNoOrgContextIsRefused pins the refusal: with neither a Bearer nor an
 // ?owner there is no tenant, and the ops must refuse rather than read whatever
 // the empty org happens to hold.
 func TestNoOrgContextIsRefused(t *testing.T) {

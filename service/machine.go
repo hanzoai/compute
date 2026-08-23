@@ -54,7 +54,7 @@ func NewMachineClient(c Credential) (MachineClientInterface, error) {
 	// Every other cloud builds its own transport, so it would authenticate from
 	// a token held HERE. Under a carrier that is exactly the thing being removed,
 	// so it is refused rather than quietly bypassing egress — a credential that
-	// escapes the door is worse than a cloud that is briefly unavailable.
+	// escapes egress is worse than a cloud that is briefly unavailable.
 	if carrierRegistered() {
 		return nil, fmt.Errorf("provider %s cannot route through the carrier yet: it would hold the credential directly", c.Provider)
 	}

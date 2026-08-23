@@ -22,7 +22,7 @@
  * The host does not exist and never did — clicking sign in landed the user on
  * a browser error page. Nothing reported it, because the e2e check for this
  * surface asserted `url.includes('login') || /sign in|login|hanzo|visor/` and
- * then bailed out on `chrome-error`, so a dead front door read as green.
+ * then bailed out on `chrome-error`, so a dead sign-in read as green.
  *
  * `hanzo-visor` is a REAL application in IAM (`admin/hanzo-visor`, org `hanzo`,
  * "Hanzo Visor"), it grants `authorization_code`, and its allow-list already
