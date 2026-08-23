@@ -16,8 +16,8 @@ package authz
 
 import "testing"
 
-// The demo-mode door is ONE address. A suffix match would open the collection
-// too, which creates a session against any asset — a different permission.
+// Demo mode admits ONE address. A suffix match would open the collection too,
+// which creates a session against any asset — a different permission.
 func TestAssetSessionsIsOneAddress(t *testing.T) {
 	for path, want := range map[string]bool{
 		"/v1/assets/acme/db-1/sessions": true,
