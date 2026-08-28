@@ -7,7 +7,7 @@
     "@ant-design/icons": "4.6.2",
     "@craco/craco": "6.4.5",
     "antd": "5.2.3",
-    "@hanzo/iam-js-sdk": "^0.19.1",
+    "@hanzo/iam-js-sdk": "0.19.1",
     "codemirror": "^5.61.1",
     "craco-less": "2.0.0",
     "guacamole-common-js": "1.4.0-a",
