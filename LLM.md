@@ -483,13 +483,13 @@ A build never deploys itself: it publishes an image, and `crs/visor.yaml` in
 `hanzoai/universe` names which tag is live.
 
 ### Build pipeline
-`.hanzo/workflows/build.yml` calls the shared `hanzoai/.github` docker-build
-workflow. Native per-arch build (no QEMU): amd64 on the `hanzo-build-linux-amd64`
-runner, arm64 on spark's arcd (`self-hosted,linux,arm64`); a multi-arch manifest
-is composed from the per-arch tags. `build.sh` cross-compiles via
-`GOOS=linux GOARCH=${TARGETARCH}` (CGO_ENABLED=0), so each arch builds natively.
-Requires `id-token: write` (cosign/SBOM), else the reusable workflow fails at
-startup.
+`.hanzo/workflows/cicd.yml` calls `hanzoai/ci/.hanzo/workflows/build.yml@v1`;
+every knob lives in `/hanzo.yml`. amd64-only on the `hanzo-build-linux-amd64`
+pool — DOKS has no arm64 droplets, so there is no arm64 deploy target and a
+queued arm64 job would block the manifest step behind a runner that never claims
+it. `build.sh` cross-compiles via `GOOS=linux GOARCH=${TARGETARCH}`
+(CGO_ENABLED=0). The build pushes to `ghcr.io/hanzoai/visor` and copies the same
+tag set to `oci.hanzo.ai` server-side, no rebuild.
 
 ### Base images — ghcr.io/hanzoai/* (NOT Docker Hub / ECR)
 The Dockerfile pulls golang/node/alpine/guacd from `ghcr.io/hanzoai/*` (mirrored
