@@ -126,12 +126,12 @@ func nodePoolFromGodo(pool *godo.KubernetesNodePool) *NodePool {
 	return np
 }
 
-func (c *DOKSClient) ListNodePools() ([]*NodePool, error) {
+func (c *DOKSClient) ListNodePools(ctx context.Context, clusterID string) ([]*NodePool, error) {
 	opt := &godo.ListOptions{Page: 1, PerPage: 200}
 	var allPools []*NodePool
 
 	for {
-		pools, resp, err := c.Client.Kubernetes.ListNodePools(context.TODO(), c.ClusterID, opt)
+		pools, resp, err := c.Client.Kubernetes.ListNodePools(ctx, clusterID, opt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list node pools: %w", err)
 		}
@@ -149,8 +149,8 @@ func (c *DOKSClient) ListNodePools() ([]*NodePool, error) {
 	return allPools, nil
 }
 
-func (c *DOKSClient) GetNodePool(poolID string) (*NodePool, error) {
-	pool, _, err := c.Client.Kubernetes.GetNodePool(context.TODO(), c.ClusterID, poolID)
+func (c *DOKSClient) GetNodePool(ctx context.Context, clusterID, poolID string) (*NodePool, error) {
+	pool, _, err := c.Client.Kubernetes.GetNodePool(ctx, clusterID, poolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node pool %s: %w", poolID, err)
 	}
@@ -158,7 +158,7 @@ func (c *DOKSClient) GetNodePool(poolID string) (*NodePool, error) {
 	return nodePoolFromGodo(pool), nil
 }
 
-func (c *DOKSClient) CreateNodePool(spec *CreateNodePoolSpec) (*NodePool, error) {
+func (c *DOKSClient) CreateNodePool(ctx context.Context, clusterID string, spec *CreateNodePoolSpec) (*NodePool, error) {
 	req := &godo.KubernetesNodePoolCreateRequest{
 		Name:      spec.Name,
 		Size:      spec.Size,
@@ -170,7 +170,7 @@ func (c *DOKSClient) CreateNodePool(spec *CreateNodePoolSpec) (*NodePool, error)
 		Labels:    spec.Labels,
 	}
 
-	pool, _, err := c.Client.Kubernetes.CreateNodePool(context.TODO(), c.ClusterID, req)
+	pool, _, err := c.Client.Kubernetes.CreateNodePool(ctx, clusterID, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node pool: %w", err)
 	}
@@ -178,27 +178,22 @@ func (c *DOKSClient) CreateNodePool(spec *CreateNodePoolSpec) (*NodePool, error)
 	return nodePoolFromGodo(pool), nil
 }
 
-func (c *DOKSClient) UpdateNodePool(poolID string, spec *CreateNodePoolSpec) (*NodePool, error) {
-	req := &godo.KubernetesNodePoolUpdateRequest{
-		Name:      spec.Name,
-		Count:     &spec.Count,
-		MinNodes:  &spec.MinNodes,
-		MaxNodes:  &spec.MaxNodes,
-		AutoScale: &spec.AutoScale,
-		Tags:      spec.Tags,
-		Labels:    spec.Labels,
-	}
-
-	pool, _, err := c.Client.Kubernetes.UpdateNodePool(context.TODO(), c.ClusterID, poolID, req)
+// ScaleNodePool sets how many nodes a pool runs. Only the count is sent: every
+// other field of DO's update request is a pointer, and a nil one leaves the
+// pool's own value alone — so a scale cannot silently rewrite a pool's autoscale
+// bounds or labels back to whatever the caller last read.
+func (c *DOKSClient) ScaleNodePool(ctx context.Context, clusterID, poolID string, count int) (*NodePool, error) {
+	pool, _, err := c.Client.Kubernetes.UpdateNodePool(ctx, clusterID, poolID,
+		&godo.KubernetesNodePoolUpdateRequest{Count: &count})
 	if err != nil {
-		return nil, fmt.Errorf("failed to update node pool %s: %w", poolID, err)
+		return nil, fmt.Errorf("failed to scale node pool %s: %w", poolID, err)
 	}
 
 	return nodePoolFromGodo(pool), nil
 }
 
-func (c *DOKSClient) DeleteNodePool(poolID string) error {
-	_, err := c.Client.Kubernetes.DeleteNodePool(context.TODO(), c.ClusterID, poolID)
+func (c *DOKSClient) DeleteNodePool(ctx context.Context, clusterID, poolID string) error {
+	_, err := c.Client.Kubernetes.DeleteNodePool(ctx, clusterID, poolID)
 	if err != nil {
 		return fmt.Errorf("failed to delete node pool %s: %w", poolID, err)
 	}
@@ -206,12 +201,12 @@ func (c *DOKSClient) DeleteNodePool(poolID string) error {
 	return nil
 }
 
-func (c *DOKSClient) RecycleNodePoolNodes(poolID string, nodeIDs []string) error {
+func (c *DOKSClient) RecycleNodePoolNodes(ctx context.Context, clusterID, poolID string, nodeIDs []string) error {
 	req := &godo.KubernetesNodePoolRecycleNodesRequest{
 		Nodes: nodeIDs,
 	}
 
-	_, err := c.Client.Kubernetes.RecycleNodePoolNodes(context.TODO(), c.ClusterID, poolID, req)
+	_, err := c.Client.Kubernetes.RecycleNodePoolNodes(ctx, clusterID, poolID, req)
 	if err != nil {
 		return fmt.Errorf("failed to recycle nodes in pool %s: %w", poolID, err)
 	}
@@ -404,7 +399,7 @@ func (c *DOKSClient) NodeMachines(ctx context.Context) ([]*Machine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get kubernetes cluster %s: %w", c.ClusterID, err)
 	}
-	pools, err := c.ListNodePools()
+	pools, err := c.ListNodePools(ctx, c.ClusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -537,3 +532,29 @@ func (c *DOKSClient) DeleteCluster(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// GetCredentials asks DigitalOcean to mint a short-lived credential for one
+// cluster's apiserver. The token DO returns expires (an hour is the longest it
+// will sign for), which is exactly why the caller re-asks rather than storing it.
+//
+// The account token never travels: what comes back reaches this one cluster and
+// nothing else on the account.
+func (c *DOKSClient) GetCredentials(ctx context.Context, clusterID string) (*ClusterCredentials, error) {
+	expiry := credentialSeconds
+	creds, _, err := c.Client.Kubernetes.GetCredentials(ctx, clusterID,
+		&godo.KubernetesClusterCredentialsGetRequest{ExpirySeconds: &expiry})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get credentials for kubernetes cluster %s: %w", clusterID, err)
+	}
+	return &ClusterCredentials{
+		Endpoint: creds.Server,
+		CAData:   creds.CertificateAuthorityData,
+		Token:    creds.Token,
+		Expiry:   creds.ExpiresAt,
+	}, nil
+}
+
+// credentialSeconds is how long a minted apiserver credential lives. An hour is
+// DigitalOcean's ceiling and long enough that a refresh is rare, short enough
+// that a leaked one is worth little.
+const credentialSeconds = 3600

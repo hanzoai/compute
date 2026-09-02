@@ -96,6 +96,7 @@ var apiContract = []route{
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
 	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},
 	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
+	{"GET", "/v1/k8s/clusters/:id/credentials", "GetComputeKubernetesCredentials"},
 	{"GET", "/v1/images", "ListImages"},
 	{"POST", "/v1/images", "CreateImage"},
 	{"GET", "/v1/sessions", "GetSessions"},
@@ -207,7 +208,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 69
+	const wantRoutes = 70
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -246,7 +247,12 @@ func TestAPIContractVerbMix(t *testing.T) {
 	//
 	// GET falls for the first time in this migration, and only here — two
 	// addresses answered the same question and one of them is gone.
-	want := map[string]int{"GET": 31, "POST": 13, "DELETE": 12, "PUT": 13}
+	// Reaching a managed cluster is a READ of how to reach it — a minted,
+	// hour-long apiserver credential — so it is the one address the estate was
+	// missing and it is a GET.
+	//
+	//	GET 31 -> 32
+	want := map[string]int{"GET": 32, "POST": 13, "DELETE": 12, "PUT": 13}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

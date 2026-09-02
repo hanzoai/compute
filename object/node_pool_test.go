@@ -15,6 +15,7 @@
 package object
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,12 +29,14 @@ import (
 )
 
 type fakeNodePoolDeleter struct {
-	err    error
-	called bool
+	err     error
+	called  bool
+	cluster string
 }
 
-func (f *fakeNodePoolDeleter) DeleteNodePool(poolID string) error {
+func (f *fakeNodePoolDeleter) DeleteNodePool(_ context.Context, clusterID, poolID string) error {
 	f.called = true
+	f.cluster = clusterID
 	return f.err
 }
 
@@ -66,7 +69,10 @@ func TestConfirmCloudPoolDeleted(t *testing.T) {
 	}
 	for _, tc := range cases {
 		client := &fakeNodePoolDeleter{err: tc.err}
-		err := confirmCloudPoolDeleted(client, "pool-123")
+		err := confirmCloudPoolDeleted(client, "cl-1", "pool-123")
+		if client.cluster != "cl-1" {
+			t.Errorf("%s: pool delete reached cluster %q, want cl-1", tc.name, client.cluster)
+		}
 		if !client.called {
 			t.Errorf("%s: expected DeleteNodePool to be invoked on the provider", tc.name)
 		}

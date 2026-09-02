@@ -20,7 +20,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/digitalocean/godo"
 )
@@ -126,7 +128,18 @@ func TestClusterDetailFromGodo(t *testing.T) {
 type doksTestServer struct {
 	clusters map[string]*godo.KubernetesCluster
 	created  *godo.KubernetesClusterCreateRequest
+	// What the cluster-scoped ops were asked for: which cluster minted a
+	// credential and for how long, and which cluster the pool ops landed on.
+	credsFor    string
+	credsExpiry string
+	poolCluster string
+	poolUpdate  *godo.KubernetesNodePoolUpdateRequest
+	poolDeleted string
 }
+
+// credentialDeadline is the expiry the fake DO signs its tokens until — a fixed
+// instant so the mapping is checked against a value, not against "roughly now".
+var credentialDeadline = time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 
 func newDOKSTestClient(t *testing.T, srv *doksTestServer) *DOKSClient {
 	t.Helper()
@@ -152,11 +165,57 @@ func newDOKSTestClient(t *testing.T, srv *doksTestServer) *DOKSClient {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})
-	// Trailing-path handler for /clusters/{id} (Get + Delete).
+	// Trailing-path handler for /clusters/{id}: Get, Delete, the credentials mint,
+	// and the pool ops that hang off a cluster.
 	mux.HandleFunc("/v2/kubernetes/clusters/", func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Path[len("/v2/kubernetes/clusters/"):]
+		rest := r.URL.Path[len("/v2/kubernetes/clusters/"):]
+		id, tail, _ := strings.Cut(rest, "/")
 		c, ok := srv.clusters[id]
 		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "not_found", "message": "cluster not found"})
+			return
+		}
+		switch {
+		case tail == "credentials":
+			srv.credsFor = id
+			srv.credsExpiry = r.URL.Query().Get("expiry_seconds")
+			_ = json.NewEncoder(w).Encode(godo.KubernetesClusterCredentials{
+				Server:                   "https://" + id + ".k8s.example:443",
+				CertificateAuthorityData: []byte("ca-of-" + id),
+				Token:                    "minted-for-" + id,
+				ExpiresAt:                credentialDeadline,
+			})
+			return
+		case strings.HasPrefix(tail, "node_pools"):
+			poolID := strings.TrimPrefix(strings.TrimPrefix(tail, "node_pools"), "/")
+			srv.poolCluster = id
+			switch r.Method {
+			case http.MethodPost:
+				var req godo.KubernetesNodePoolCreateRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(map[string]any{"node_pool": &godo.KubernetesNodePool{
+					ID: "p-new", Name: req.Name, Size: req.Size, Count: req.Count}})
+			case http.MethodPut:
+				var req godo.KubernetesNodePoolUpdateRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				srv.poolUpdate = &req
+				count := 0
+				if req.Count != nil {
+					count = *req.Count
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"node_pool": &godo.KubernetesNodePool{
+					ID: poolID, Name: "workers", Size: "s-4vcpu-8gb", Count: count}})
+			case http.MethodDelete:
+				srv.poolDeleted = poolID
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			}
+			return
+		}
+		if tail != "" {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "not_found", "message": "cluster not found"})
 			return
@@ -282,5 +341,90 @@ func TestDeleteClusterRoundTrip(t *testing.T) {
 	err := c.DeleteCluster(context.Background(), "cl-1")
 	if err == nil || !IsNotFound(err) {
 		t.Fatalf("deleting an absent cluster must surface an IsNotFound error, got %v", err)
+	}
+}
+
+// GetCredentials maps DO's minted credential onto the shape every cloud answers
+// in — where the apiserver is, who signed it, the bearer, and when it dies — and
+// asks for the hour the constant names. Nothing about the ACCOUNT is in it.
+func TestGetCredentialsMapsTheMintedCredential(t *testing.T) {
+	srv := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{
+		"cl-1": {ID: "cl-1", Name: "acme", Tags: []string{"hanzo-org:acme"}},
+	}}
+	c := newDOKSTestClient(t, srv)
+
+	creds, err := c.GetCredentials(context.Background(), "cl-1")
+	if err != nil {
+		t.Fatalf("GetCredentials: %v", err)
+	}
+	if creds.Endpoint != "https://cl-1.k8s.example:443" {
+		t.Errorf("endpoint = %q", creds.Endpoint)
+	}
+	if string(creds.CAData) != "ca-of-cl-1" {
+		t.Errorf("caData = %q", creds.CAData)
+	}
+	if creds.Token != "minted-for-cl-1" {
+		t.Errorf("token = %q", creds.Token)
+	}
+	if !creds.Expiry.Equal(credentialDeadline) {
+		t.Errorf("expiry = %v, want %v", creds.Expiry, credentialDeadline)
+	}
+	if srv.credsExpiry != "3600" {
+		t.Errorf("asked DO for expiry_seconds=%q, want 3600", srv.credsExpiry)
+	}
+	if srv.credsFor != "cl-1" {
+		t.Errorf("minted against cluster %q, want cl-1", srv.credsFor)
+	}
+}
+
+// A credential for a cluster that is not there is DO's 404, which IsNotFound
+// classifies — never an empty credential that a caller would try to dial.
+func TestGetCredentialsOnAnAbsentClusterIsNotFound(t *testing.T) {
+	c := newDOKSTestClient(t, &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}})
+	if _, err := c.GetCredentials(context.Background(), "nope"); err == nil || !IsNotFound(err) {
+		t.Fatalf("want an IsNotFound error, got %v", err)
+	}
+}
+
+// The pool ops name their cluster in the CALL. One client serves every cluster
+// on the account, so a pool op can never land on whichever cluster the client
+// happened to be built with.
+func TestPoolOpsActOnTheClusterTheyAreGiven(t *testing.T) {
+	srv := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{
+		"cl-a": {ID: "cl-a", Name: "a"},
+		"cl-b": {ID: "cl-b", Name: "b"},
+	}}
+	c := newDOKSTestClient(t, srv)
+	ctx := context.Background()
+
+	if _, err := c.CreateNodePool(ctx, "cl-a", &CreateNodePoolSpec{Name: "workers", Size: "s-4vcpu-8gb", Count: 2}); err != nil {
+		t.Fatalf("CreateNodePool: %v", err)
+	}
+	if srv.poolCluster != "cl-a" {
+		t.Fatalf("create landed on cluster %q, want cl-a", srv.poolCluster)
+	}
+
+	pool, err := c.ScaleNodePool(ctx, "cl-b", "p-1", 7)
+	if err != nil {
+		t.Fatalf("ScaleNodePool: %v", err)
+	}
+	if srv.poolCluster != "cl-b" || pool.Count != 7 {
+		t.Fatalf("scale landed on %q at %d nodes, want cl-b at 7", srv.poolCluster, pool.Count)
+	}
+	// Only the count is sent: a scale must not rewrite bounds or labels back to
+	// whatever the caller last read.
+	u := srv.poolUpdate
+	if u == nil || u.Count == nil || *u.Count != 7 {
+		t.Fatalf("scale request did not carry the count: %+v", u)
+	}
+	if u.MinNodes != nil || u.MaxNodes != nil || u.AutoScale != nil || u.Name != "" || u.Tags != nil || u.Labels != nil {
+		t.Fatalf("a scale sent more than the count: %+v", u)
+	}
+
+	if err := c.DeleteNodePool(ctx, "cl-a", "p-9"); err != nil {
+		t.Fatalf("DeleteNodePool: %v", err)
+	}
+	if srv.poolCluster != "cl-a" || srv.poolDeleted != "p-9" {
+		t.Fatalf("delete landed on %q/%q, want cl-a/p-9", srv.poolCluster, srv.poolDeleted)
 	}
 }

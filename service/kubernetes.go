@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // KubernetesClientInterface is the one Kubernetes expression Visor coordinates
@@ -34,7 +35,31 @@ type KubernetesClientInterface interface {
 	GetCluster(ctx context.Context, id string) (*KubernetesClusterDetail, error)
 	CreateCluster(ctx context.Context, spec *CreateClusterSpec, tags []string) (*KubernetesCluster, error)
 	DeleteCluster(ctx context.Context, id string) error
+	// The pool operations name their cluster in the CALL. A pool belongs to a
+	// cluster, not to a client, so a client bound to one cluster could only ever
+	// serve the single-cluster case — and the cluster operations above already
+	// address by id.
+	CreateNodePool(ctx context.Context, clusterID string, spec *CreateNodePoolSpec) (*NodePool, error)
+	ScaleNodePool(ctx context.Context, clusterID, poolID string, count int) (*NodePool, error)
+	DeleteNodePool(ctx context.Context, clusterID, poolID string) error
+	// GetCredentials returns what it takes to REACH the cluster's apiserver, for
+	// as long as the provider says. Every managed cloud mints short-lived
+	// credentials, so this is a call and not a stored field: the answer expires.
+	GetCredentials(ctx context.Context, clusterID string) (*ClusterCredentials, error)
 	NodeMachines(ctx context.Context) ([]*Machine, error)
+}
+
+// ClusterCredentials is how to reach one cluster's apiserver: where it is, who
+// signed its certificate, a bearer token, and when that token dies.
+//
+// It carries NO provider key. A caller holding these can talk to this one
+// cluster until Expiry and nothing else — which is why it is safe to hand to
+// cloud, and why the cloud account's own token never leaves visor.
+type ClusterCredentials struct {
+	Endpoint string    `json:"endpoint"`
+	CAData   []byte    `json:"caData"`
+	Token    string    `json:"token"`
+	Expiry   time.Time `json:"expiry"`
 }
 
 // KubernetesCapable is a provider client that ALSO speaks Kubernetes. Not every

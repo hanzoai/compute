@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +31,9 @@ type fakeK8s struct {
 	clusters []*KubernetesCluster
 	err      error
 	deleted  []string
+	pooled   []string
+	scaled   []string
+	dropped  []string
 }
 
 func (f *fakeK8s) Provider() string { return f.provider }
@@ -66,6 +70,49 @@ func (f *fakeK8s) DeleteCluster(_ context.Context, id string) error {
 	}
 	f.deleted = append(f.deleted, id)
 	return nil
+}
+
+func (f *fakeK8s) CreateNodePool(_ context.Context, clusterID string, spec *CreateNodePoolSpec) (*NodePool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.pooled = append(f.pooled, clusterID+"/"+spec.Name)
+	return &NodePool{ID: "p-" + spec.Name, Name: spec.Name, Size: spec.Size, Count: spec.Count}, nil
+}
+
+func (f *fakeK8s) ScaleNodePool(_ context.Context, clusterID, poolID string, count int) (*NodePool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.scaled = append(f.scaled, fmt.Sprintf("%s/%s=%d", clusterID, poolID, count))
+	return &NodePool{ID: poolID, Count: count}, nil
+}
+
+func (f *fakeK8s) DeleteNodePool(_ context.Context, clusterID, poolID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.dropped = append(f.dropped, clusterID+"/"+poolID)
+	return nil
+}
+
+func (f *fakeK8s) GetCredentials(_ context.Context, clusterID string) (*ClusterCredentials, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if _, ok := f.byID(clusterID); !ok {
+		return nil, nil
+	}
+	return &ClusterCredentials{Endpoint: "https://" + clusterID + ".example", CAData: []byte("ca"), Token: "tok-" + clusterID}, nil
+}
+
+func (f *fakeK8s) byID(id string) (*KubernetesCluster, bool) {
+	for _, c := range f.clusters {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return nil, false
 }
 
 func (f *fakeK8s) NodeMachines(context.Context) ([]*Machine, error) { return nil, f.err }
@@ -363,5 +410,36 @@ func TestACarriedClientHoldsNoToken(t *testing.T) {
 	}
 	if saw.Secret != "" {
 		t.Errorf("a secret reached the carrier; under egress there is none to send")
+	}
+}
+
+// A credential is minted only for a cluster carrying the caller's own hanzo-org
+// tag. Another org's cluster — and one that is nowhere — both resolve to nothing,
+// which the controller renders as "not found": guessing an id must never hand
+// anyone a bearer token to somebody else's apiserver.
+func TestCredentialsAreMintedOnlyForTheOwningOrg(t *testing.T) {
+	cloud := &fakeK8s{provider: "Live", clusters: []*KubernetesCluster{
+		{ID: "cl-acme", Name: "acme", Tags: []string{orgTag("acme")}},
+		{ID: "cl-other", Name: "other", Tags: []string{orgTag("other")}},
+	}}
+	clients := []KubernetesClientInterface{cloud}
+	ctx := context.Background()
+
+	creds, err := mintCredentials(ctx, clients, "acme", "cl-acme")
+	if err != nil {
+		t.Fatalf("mintCredentials: %v", err)
+	}
+	if creds == nil || creds.Token != "tok-cl-acme" {
+		t.Fatalf("the owning org got no credential: %+v", creds)
+	}
+
+	for _, id := range []string{"cl-other", "cl-nowhere"} {
+		creds, err := mintCredentials(ctx, clients, "acme", id)
+		if err != nil {
+			t.Fatalf("mintCredentials(%s): %v", id, err)
+		}
+		if creds != nil {
+			t.Fatalf("minted a credential for %s, which is not acme's: %+v", id, creds)
+		}
 	}
 }

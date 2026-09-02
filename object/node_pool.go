@@ -339,7 +339,7 @@ func SyncNodePoolsCloud(owner string) (bool, error) {
 			return false, fmt.Errorf("failed to create DOKS client for provider %s: %w", provider.Name, err)
 		}
 
-		servicePools, err := client.ListNodePools()
+		servicePools, err := client.ListNodePools(context.Background(), provider.ClusterID)
 		if err != nil {
 			return false, fmt.Errorf("failed to list node pools from provider %s: %w", provider.Name, err)
 		}
@@ -439,7 +439,7 @@ func CreateNodePoolCloud(owner, providerName, clusterID string, spec *service.Cr
 // by a test fake. It is what makes "a refused pool reaches no upstream" a
 // property a test can observe rather than a claim about a code path.
 type cloudNodePoolCreator interface {
-	CreateNodePool(spec *service.CreateNodePoolSpec) (*service.NodePool, error)
+	CreateNodePool(ctx context.Context, clusterID string, spec *service.CreateNodePoolSpec) (*service.NodePool, error)
 }
 
 // createNodePoolMetered is the ONE metered node-pool provision: authorize the org
@@ -462,7 +462,7 @@ func createNodePoolMetered(client cloudNodePoolCreator, rate int64, owner, proje
 	var pool *NodePool
 	err := service.Provision(context.Background(), owner, project,
 		rate*int64(authorizedNodes(spec)), rate*int64(spec.Count), spec.Size, func() (string, error) {
-			servicePool, err := client.CreateNodePool(spec)
+			servicePool, err := client.CreateNodePool(context.Background(), clusterID, spec)
 			if err != nil {
 				return "", fmt.Errorf("failed to create node pool in DOKS: %w", err)
 			}
@@ -562,7 +562,7 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DOKS client: %w", err)
 	}
-	current, err := client.GetNodePool(poolID)
+	current, err := client.GetNodePool(context.Background(), cid, poolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current node pool: %w", err)
 	}
@@ -572,7 +572,7 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 	// with a nil error, so zero unambiguously means UNPRICED, and only the growing
 	// path treats that as fatal.
 	rate, _ := service.HourlyCents(current.Size)
-	return scaleNodePoolMetered(client, current, rate, owner, provider.Project, poolID, count)
+	return scaleNodePoolMetered(client, current, rate, owner, provider.Project, cid, poolID, count)
 }
 
 // cloudNodePoolScaler is the minimal cloud surface a metered scale WRITES to.
@@ -580,7 +580,7 @@ func ScaleNodePoolCloud(owner, providerName, clusterID, poolID string, count int
 // same reason — a gate is only proven by an upstream that stays untouched when it
 // refuses.
 type cloudNodePoolScaler interface {
-	UpdateNodePool(poolID string, spec *service.CreateNodePoolSpec) (*service.NodePool, error)
+	ScaleNodePool(ctx context.Context, clusterID, poolID string, count int) (*service.NodePool, error)
 }
 
 // scaleNodePoolMetered is the ONE metered scale: a scale UP is a provision and
@@ -590,21 +590,10 @@ type cloudNodePoolScaler interface {
 // catalog — would keep the meter running on nodes the customer asked to release.
 //
 // rate is the per-node hourly price, or 0 when the slug has no price.
-func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool, rate int64, owner, project, poolID string, count int) (*NodePool, error) {
-	spec := &service.CreateNodePoolSpec{
-		Name:      current.Name,
-		Size:      current.Size,
-		Count:     count,
-		MinNodes:  current.MinNodes,
-		MaxNodes:  current.MaxNodes,
-		AutoScale: current.AutoScale,
-		Tags:      current.Tags,
-		Labels:    current.Labels,
-	}
-
+func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool, rate int64, owner, project, clusterID, poolID string, count int) (*NodePool, error) {
 	var updatedPool *service.NodePool
 	scale := func() (string, error) {
-		p, err := client.UpdateNodePool(poolID, spec)
+		p, err := client.ScaleNodePool(context.Background(), clusterID, poolID, count)
 		if err != nil {
 			return "", fmt.Errorf("failed to scale node pool: %w", err)
 		}
@@ -629,8 +618,11 @@ func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool,
 		return nil, err
 	}
 
-	// Update DB record
-	dbPool, err := getNodePool(owner, updatedPool.Name)
+	// The row to re-stamp is the one for the pool we scaled. Its name is what we
+	// READ before scaling, never what the upstream echoes back: an echo that
+	// arrives thin or renamed would look up a row that does not exist and read as
+	// "the pool has no billable row".
+	dbPool, err := getNodePool(owner, current.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +636,7 @@ func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool,
 		if err != nil {
 			return nil, err
 		}
-		_, err = engine.ID(schemas.PK{owner, updatedPool.Name}).AllCols().Update(dbPool)
+		_, err = engine.ID(schemas.PK{owner, current.Name}).AllCols().Update(dbPool)
 		if err != nil {
 			return nil, err
 		}
@@ -654,21 +646,21 @@ func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool,
 		return dbPool, nil
 	}
 
-	return nil, fmt.Errorf("node pool %q not found in DB", updatedPool.Name)
+	return nil, fmt.Errorf("node pool %q not found in DB", current.Name)
 }
 
 // cloudNodePoolDeleter is the minimal cloud-client surface needed to delete a
 // node pool. It is satisfied by *service.DOKSClient and by test fakes.
 type cloudNodePoolDeleter interface {
-	DeleteNodePool(poolID string) error
+	DeleteNodePool(ctx context.Context, clusterID, poolID string) error
 }
 
 // confirmCloudPoolDeleted asks the provider to delete the pool and reports
 // whether it is now gone. A nil error means it was deleted; a provider 404 means
 // it was already gone. Any other error (e.g. a 422 while the pool is still
 // provisioning) is returned so the caller can retry without dropping the DB row.
-func confirmCloudPoolDeleted(client cloudNodePoolDeleter, poolID string) error {
-	err := client.DeleteNodePool(poolID)
+func confirmCloudPoolDeleted(client cloudNodePoolDeleter, clusterID, poolID string) error {
+	err := client.DeleteNodePool(context.Background(), clusterID, poolID)
 	if err == nil || service.IsNotFound(err) {
 		return nil
 	}
@@ -736,7 +728,7 @@ func DeleteNodePoolCloud(pool *NodePool) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if err := confirmCloudPoolDeleted(client, stored.PoolID); err != nil {
+		if err := confirmCloudPoolDeleted(client, stored.ClusterID, stored.PoolID); err != nil {
 			return false, err
 		}
 	}

@@ -517,6 +517,36 @@ func GetOrgKubernetesCluster(org, id string) (*KubernetesClusterDetail, error) {
 	return detail, nil
 }
 
+// OrgKubernetesCredentials mints a short-lived credential for one of org's own
+// clusters. Isolation is the SAME hanzo-org tag GetOrgKubernetesCluster reads —
+// a cluster owned by another org, or no cluster at all, resolves to (nil, nil)
+// and the controller renders "not found". Guessing an id must not hand anyone a
+// token to somebody else's apiserver.
+func OrgKubernetesCredentials(ctx context.Context, org, id string) (*ClusterCredentials, error) {
+	if org == "" {
+		return nil, fmt.Errorf("org is required")
+	}
+	clients, _ := kubernetesClients()
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("no cloud provider is configured")
+	}
+	return mintCredentials(ctx, clients, org, id)
+}
+
+// mintCredentials is the isolation itself: find the cluster across the clouds,
+// and mint only if it carries org's tag. It is the twin of locate — same pairing,
+// same reason, so the rule can be checked without a cloud registry.
+func mintCredentials(ctx context.Context, clients []KubernetesClientInterface, org, id string) (*ClusterCredentials, error) {
+	client, detail, err := locate(ctx, clients, id)
+	if err != nil {
+		return nil, err
+	}
+	if detail == nil || !clusterHasTag(detail.Tags, orgTag(org)) {
+		return nil, nil
+	}
+	return client.GetCredentials(ctx, id)
+}
+
 // clusterCreator is the minimal cloud surface a metered cluster create needs. It
 // is satisfied by *DOKSClient and by a test fake, which is what makes "refused
 // requests provision NOTHING" a property a test can observe rather than a claim.

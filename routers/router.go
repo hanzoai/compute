@@ -187,6 +187,9 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/k8s/clusters", h((*controllers.ApiController).CreateComputeKubernetesCluster))
 	app.Get("/v1/k8s/clusters/:id", h((*controllers.ApiController).GetComputeKubernetesCluster))
 	app.Delete("/v1/k8s/clusters/:id", h((*controllers.ApiController).DeleteComputeKubernetesCluster))
+	// Reaching a cluster is a READ of how to reach it, minted fresh each time and
+	// good for an hour. The cloud account's own key is never part of the answer.
+	app.Get("/v1/k8s/clusters/:id/credentials", h((*controllers.ApiController).GetComputeKubernetesCredentials))
 	// The worker NODES are a TYPED op. Every other line in this table registers a
 	// handler and nothing else: the route exists on the wire and in none of the
 	// projections, so the OpenAPI document, the MCP tool list, the CLI and the

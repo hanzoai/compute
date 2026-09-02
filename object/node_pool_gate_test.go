@@ -15,6 +15,7 @@
 package object
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -75,18 +76,21 @@ func TestPoolNodesFloorsWhatIsProvisioned(t *testing.T) {
 // proven by an upstream that stays untouched when it refuses.
 type fakeCloudPool struct {
 	created *service.CreateNodePoolSpec
-	updated *service.CreateNodePoolSpec
+	cluster string
+	scaled  int
 }
 
-func (f *fakeCloudPool) CreateNodePool(spec *service.CreateNodePoolSpec) (*service.NodePool, error) {
+func (f *fakeCloudPool) CreateNodePool(_ context.Context, clusterID string, spec *service.CreateNodePoolSpec) (*service.NodePool, error) {
 	f.created = spec
+	f.cluster = clusterID
 	return &service.NodePool{ID: "p-new", Name: spec.Name, Size: spec.Size, Count: spec.Count,
 		MinNodes: spec.MinNodes, MaxNodes: spec.MaxNodes, AutoScale: spec.AutoScale}, nil
 }
 
-func (f *fakeCloudPool) UpdateNodePool(poolID string, spec *service.CreateNodePoolSpec) (*service.NodePool, error) {
-	f.updated = spec
-	return &service.NodePool{ID: poolID, Name: spec.Name, Size: spec.Size, Count: spec.Count}, nil
+func (f *fakeCloudPool) ScaleNodePool(_ context.Context, clusterID, poolID string, count int) (*service.NodePool, error) {
+	f.cluster = clusterID
+	f.scaled = count
+	return &service.NodePool{ID: poolID, Count: count}, nil
 }
 
 // commerce stands up a fake commerce in one of two moods and reports what it was
@@ -298,13 +302,13 @@ func TestScaleNodePoolMeteredRefusedReachesNoUpstream(t *testing.T) {
 
 	current := &service.NodePool{ID: "p-1", Name: "gpu", Size: "gpu-h100x8-640gb", Count: 2}
 	cloud := &fakeCloudPool{}
-	_, err := scaleNodePoolMetered(cloud, current, rateH100, "acme", "", "p-1", 8)
+	_, err := scaleNodePoolMetered(cloud, current, rateH100, "acme", "", "cl-1", "p-1", 8)
 
 	if err == nil {
 		t.Fatal("an unfunded org must not be able to grow a pool")
 	}
-	if cloud.updated != nil {
-		t.Fatalf("REFUSED BUT SCALED: upstream received %+v", cloud.updated)
+	if cloud.scaled != 0 {
+		t.Fatalf("REFUSED BUT SCALED: upstream was asked for %d nodes", cloud.scaled)
 	}
 	if reads, debits, _ := c.state(); reads == 0 || debits != 0 {
 		t.Fatalf("the gate must read the balance (%d reads) and bill nothing (%d debits)", reads, debits)
@@ -326,12 +330,15 @@ func TestScaleNodePoolMeteredDownIsNeverBlocked(t *testing.T) {
 	current := &service.NodePool{ID: "p-1", Name: "gpu", Size: "a-slug-the-upstream-delisted", Count: 8}
 	cloud := &fakeCloudPool{}
 
-	pool, err := scaleNodePoolMetered(cloud, current, 0, "acme", "", "p-1", 2)
+	pool, err := scaleNodePoolMetered(cloud, current, 0, "acme", "", "cl-1", "p-1", 2)
 	if err != nil {
 		t.Fatalf("a scale DOWN must never be blocked: %v", err)
 	}
-	if cloud.updated == nil || cloud.updated.Count != 2 {
-		t.Fatalf("the upstream must be asked to shrink, got %+v", cloud.updated)
+	if cloud.scaled != 2 {
+		t.Fatalf("the upstream must be asked to shrink, got %d", cloud.scaled)
+	}
+	if cloud.cluster != "cl-1" {
+		t.Fatalf("the scale must name its cluster, got %q", cloud.cluster)
 	}
 	if pool.Count != 2 {
 		t.Fatalf("the row must follow the pool down, got count=%d", pool.Count)

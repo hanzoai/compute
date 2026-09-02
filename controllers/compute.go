@@ -401,6 +401,33 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 	c.ResponseOk(cluster)
 }
 
+// GetComputeKubernetesCredentials
+// @Title GetComputeKubernetesCredentials
+// @Tag Compute API
+// @Description mint a short-lived apiserver credential for one of the caller org's clusters
+// @router /k8s/clusters/:id/credentials [get]
+func (c *ApiController) GetComputeKubernetesCredentials() {
+	org := c.resolveComputeOrg()
+	if org == "" {
+		c.ResponseError(refuseNoOrg)
+		return
+	}
+	if !service.KubernetesConfigured() {
+		c.ResponseError(refuseNoProvider)
+		return
+	}
+	creds, err := service.OrgKubernetesCredentials(context.Background(), org, c.Ctx.Param("id"))
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if creds == nil {
+		c.ResponseError("cluster not found")
+		return
+	}
+	c.ResponseOk(creds)
+}
+
 // DeleteComputeKubernetesCluster
 // @Title DeleteComputeKubernetesCluster
 // @Tag Compute API
