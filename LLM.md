@@ -299,13 +299,45 @@ Two things used to violate this and are gone:
   `k8s/rbac.yaml` is now a bare ServiceAccount: visor holds no cluster permissions.
 
 ### Provider Adapters (all fully implemented)
-| Provider | Machine | Volume | File |
-|----------|---------|--------|------|
-| Hetzner | Yes | Yes | `service/hetzner.go`, `service/volume_hetzner.go` |
-| Lightsail | Yes | — | `service/lightsail.go` |
-| DigitalOcean | Yes | Yes | `service/digitalocean.go`, `service/volume_digitalocean.go` |
+| Provider | Machine | Volume | Kubernetes | File |
+|----------|---------|--------|------------|------|
+| Hetzner | Yes | Yes | — | `service/hetzner.go`, `service/volume_hetzner.go` |
+| Lightsail | Yes | — | — | `service/lightsail.go` |
+| DigitalOcean | Yes | Yes | DOKS | `service/digitalocean.go`, `service/volume_digitalocean.go`, `service/doks.go` |
+| AWS | Yes | — | EKS | `service/aws.go`, `service/eks.go` |
+| Google Cloud | Yes | — | GKE | `service/gcp.go`, `service/gke.go` |
 
 Factory pattern in `service/` dispatches to provider via `MachineClientInterface`.
+A cloud that sells managed Kubernetes asserts `KubernetesCapable` on that same
+client (`Kubernetes()`), so `NewMachineClient` is the one registry and there is
+no second list of clouds for clusters. Tags travel as `key:value` to the clouds
+that key their tags (AWS tags, GKE resource labels) and back through
+`tagMap`/`tagList`, so the `hanzo-org:<org>` tag scopes a cluster identically
+everywhere; `IsNotFound` reads each cloud's own not-found.
+
+What each managed cloud does differently, and where the code says so:
+- **EKS** (`service/eks.go`): pools are managed nodegroups. Two IAM roles per
+  account (`hanzo-visor-eks-cluster`, `hanzo-visor-eks-node`) are ensured on
+  create, tolerating what exists; placement is the default VPC's per-zone
+  subnets unless `CreateClusterSpec.SubnetIDs` names its own. A nodegroup
+  cannot exist before the control plane is ACTIVE (ten minutes or so), so
+  `CreateCluster` returns the cluster CREATING and `seed` creates the pool in
+  the background once it can; `DeleteCluster` removes nodegroups first for the
+  same reason and drops the cluster once they are gone. `GetCredentials` is
+  what `aws eks get-token` produces: a presigned `sts:GetCallerIdentity` with
+  `x-k8s-aws-id` as a signed header, `k8s-aws-v1.` + base64url, ~14 min.
+- **GKE** (`service/gke.go`): one project and one location (zone or region)
+  per credential; clusters and pools are addressed by name within it. A zero
+  node count is force-sent, because an omitted count is three nodes. The
+  service account's OAuth bearer is the apiserver token (~1 h). Nodes are the
+  compute instances labelled `goog-k8s-cluster-name`.
+- Live EKS/GKE creates need real credentials and are not unit-tested; the
+  request builders, role/subnet ensure, scaling, token shape and the wire (an
+  httptest container API) are. Two prerequisites stand before a live create:
+  `HourlyCents` prices the seed pool from the DigitalOcean resale catalog, so
+  an EKS/GKE instance type not in it fails closed; and `Provider.ClientSecret`
+  is `mediumtext` now (a GCP service-account JSON is ~2 KB), widened by
+  `Adapter.widen` on postgres/mysql because Sync2 never alters a column.
 
 ### Plan Catalog
 11 tiers from $5/mo (Starter) to $3,999/mo (Ultra), defined in `object/plan_seed.go`.
@@ -392,11 +424,18 @@ swap and not an SDK rewrite.
     requirement.
 
 **A cloud that builds its own transport cannot be carried, and under a carrier
-is REFUSED** (`NewMachineClient`, fail-closed). DigitalOcean and Hetzner take
-our client; AWS/Azure/GCP/Aliyun/VMware/KVM/PVE build their own. Silently
-falling back would put the credential back in the process the carrier exists to
-empty — worse than the cloud being unavailable. `TestACloudThatCannotBeCarriedIsRefused`
+is REFUSED** (`NewMachineClient`, fail-closed). DigitalOcean, Hetzner, AWS and
+Google Cloud take our client (`config.WithHTTPClient`, `option.WithHTTPClient`);
+Lightsail/Azure/Aliyun/VMware/KVM/PVE build their own. Silently falling back
+would put the credential back in the process the carrier exists to empty —
+worse than the cloud being unavailable. `TestACloudThatCannotBeCarriedIsRefused`
 pins it; egress refuses the same providers for the same reason.
+
+Carried, AWS sends unsigned (`aws.AnonymousCredentials`) and GCP sends the bare
+carried client; egress signs or attaches the bearer. The one thing a carried
+account cannot do is mint an apiserver token — an STS presign and an OAuth
+bearer are signed with the key, and the key is not here — so `GetCredentials`
+on a carried EKS/GKE client says so rather than handing out an unsigned URL.
 
 `TestNoUnboundedClient` fails the build on any `http.Client{}` or
 `http.DefaultClient` in `service/`: an outbound call with no deadline holds an
