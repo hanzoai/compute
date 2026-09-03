@@ -75,6 +75,10 @@ var apiContract = []route{
 	{"PUT", "/v1/providers/:owner/:name", "UpdateProvider"},
 	{"POST", "/v1/providers", "AddProvider"},
 	{"DELETE", "/v1/providers/:owner/:name", "DeleteProvider"},
+	{"POST", "/v1/providers/:owner/:name/keys", "AddProviderKey"},
+	{"PUT", "/v1/providers/:owner/:name/keys/:keyName", "RotateProviderKey"},
+	{"DELETE", "/v1/providers/:owner/:name/keys/:keyName", "DeleteProviderKey"},
+	{"POST", "/v1/providers/:owner/:name/verify", "VerifyProvider"},
 	{"GET", "/v1/machines", "ListMachines"},
 	{"GET", "/v1/machines/:owner/:name", "GetMachine"},
 	{"PUT", "/v1/machines/:owner/:name", "UpdateMachine"},
@@ -208,7 +212,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 70
+	const wantRoutes = 74
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -252,7 +256,13 @@ func TestAPIContractVerbMix(t *testing.T) {
 	// missing and it is a GET.
 	//
 	//	GET 31 -> 32
-	want := map[string]int{"GET": 32, "POST": 13, "DELETE": 12, "PUT": 13}
+	//
+	// A provider's rotation keys and its verify dry-run add four writes: two POSTs
+	// (add a key, verify), one PUT (rotate a key), one DELETE (remove a key). None
+	// is a GET — reading a provider was and stays the existing GET.
+	//
+	//	POST 13 -> 15    PUT 13 -> 14    DELETE 12 -> 13    GET 32 unchanged
+	want := map[string]int{"GET": 32, "POST": 15, "DELETE": 13, "PUT": 14}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

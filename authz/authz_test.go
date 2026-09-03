@@ -96,3 +96,38 @@ func TestAdminOwnedObjectIsNotEveryonesObject(t *testing.T) {
 		t.Fatal("a customer must not reach another customer's objects")
 	}
 }
+
+// A provider row holds a cloud credential, so writing one is platform-privileged:
+// admitted only for the reserved SuperAdmin org, denied for a plain org member
+// even on their OWN org's provider (which the subOwner == objOwner self-service
+// clause would otherwise allow). Reads are unaffected.
+func TestProviderWriteRequiresSuperAdmin(t *testing.T) {
+	InitAuthz()
+
+	customer := &iamsdk.User{Owner: "acme", Name: "alice"}
+	superadmin := &iamsdk.User{Owner: "admin", Name: "z"}
+
+	writes := []struct{ method, path string }{
+		{"POST", "/v1/providers"},
+		{"PUT", "/v1/providers/acme/aws"},
+		{"DELETE", "/v1/providers/acme/aws"},
+		{"POST", "/v1/providers/acme/aws/keys"},
+		{"PUT", "/v1/providers/acme/aws/keys/k1"},
+		{"DELETE", "/v1/providers/acme/aws/keys/k1"},
+		{"POST", "/v1/providers/acme/aws/verify"},
+	}
+	for _, w := range writes {
+		if IsAllowed(customer, "acme", "alice", w.method, w.path, "acme", "aws") {
+			t.Fatalf("%s %s: an org member must NOT write a provider", w.method, w.path)
+		}
+		if !IsAllowed(superadmin, "admin", "z", w.method, w.path, "acme", "aws") {
+			t.Fatalf("%s %s: the SuperAdmin org must be allowed", w.method, w.path)
+		}
+	}
+
+	// A read of the same provider is not gated by this branch — a member still
+	// reads its own org's providers (masked).
+	if !IsAllowed(customer, "acme", "alice", "GET", "/v1/providers/acme/aws", "acme", "aws") {
+		t.Fatal("an org member must still READ its own provider")
+	}
+}

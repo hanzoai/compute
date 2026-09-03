@@ -1,3 +1,5 @@
+c2sp.org/CCTV/age v0.0.0-20251208015420-e9274a7bdbfd h1:ZLsPO6WdZ5zatV4UfVpr7oAwLGRZ+sebTUruuM4Ra3M=
+c2sp.org/CCTV/age v0.0.0-20251208015420-e9274a7bdbfd/go.mod h1:SrHC2C7r5GkDk8R+NFVzYy/sdj0Ypg9htaPXQq5Cqeo=
 cloud.google.com/go/auth v0.23.2 h1:pxSCpfiji41hpzpPdMCftEUCezpgpqmmDdYiAjCKXxo=
 cloud.google.com/go/auth v0.23.2/go.mod h1:4DhBRcqvtljQN3dJ57qtqbib5ZGCYE5f2crfiiC2EM0=
 cloud.google.com/go/auth/oauth2adapt v0.2.8 h1:keo8NaayQZ6wimpNSmW5OPc283g65QNIiLpZnkHRbnc=
@@ -7,6 +9,8 @@ cloud.google.com/go/compute/metadata v0.9.0/go.mod h1:E0bWwX5wTnLPedCKqk3pJmVgCB
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 filippo.io/edwards25519 v1.2.0 h1:crnVqOiS4jqYleHd9vaKZ+HKtHfllngJIiOpNpoJsjo=
 filippo.io/edwards25519 v1.2.0/go.mod h1:xzAOLCNug/yB62zG1bQ8uziwrIqIuxhctzJT18Q77mc=
+filippo.io/hpke v0.4.0 h1:p575VVQ6ted4pL+it6M00V/f2qTZITO0zgmdKCkd5+A=
+filippo.io/hpke v0.4.0/go.mod h1:EmAN849/P3qdeK+PCMkDpDm83vRHM5cDipBJ8xbQLVY=
 gitea.com/xorm/sqlfiddle v0.0.0-20180821085327-62ce714f951a h1:lSA0F4e9A2NcQSqGqTOXqu2aRi/XEQxDCBwM8yJtE6s=
 gitea.com/xorm/sqlfiddle v0.0.0-20180821085327-62ce714f951a/go.mod h1:EXuID2Zs0pAQhH8yz+DNjUbjppKQzKFAn28TMYPB6IU=
 github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0 h1:fou+2+WFTib47nS+nz/ozhEBnvU96bKHy6LjRsY4E28=
@@ -224,6 +228,8 @@ github.com/hanzoai/ha v0.2.0 h1:zgIbr3mjeuFfF26lkIKf/47ZM5kYBubWIPjEA24Yu7g=
 github.com/hanzoai/ha v0.2.0/go.mod h1:7G+gwkCWNpVsioNpKpK+x6ECoUYY2N/m/rlgPbxCqrA=
 github.com/hanzoai/iamsdk/v2 v2.2.3 h1:RfxD5if/ZHImderZ65yHGWOT/C5AU5NneE+jKZYAscI=
 github.com/hanzoai/iamsdk/v2 v2.2.3/go.mod h1:zoQ1SfWeHxwdQ/T2Mfe1H/W0ptUEdz/0EPTLCr/KnA0=
+github.com/hanzoai/kms/sdk/go v1.1.1 h1:9elbRriuO7GYa90MHpTNnuoFhxgW5nhkZyXog5xc8hU=
+github.com/hanzoai/kms/sdk/go v1.1.1/go.mod h1:JQbWayXqfTgOeHg8SxY0L4TdakPLO6uwHKo/XRK+Zh0=
 github.com/hanzoai/money v0.2.5 h1:rNtrr9rtcGSf48zFpB/xKVgyhgn7cQIt9f5PiKldcw4=
 github.com/hanzoai/money v0.2.5/go.mod h1:V1/RwypNNDjOArVFkkbNrgUXNUKorAiV1WtDNqfx95Q=
 github.com/hanzoai/orm v0.6.30 h1:Ke1RnvQcB3fQb/jG1iMpp2sUtNUgtZiCdQ6whEJ6KQg=
@@ -280,6 +286,8 @@ github.com/luthermonson/go-proxmox v0.4.0 h1:LKXpG9d64zTaQF79wV0kfOnnSwIcdG39m7s
 github.com/luthermonson/go-proxmox v0.4.0/go.mod h1:U6dAkJ+iiwaeb1g/LMWpWuWN4nmvWeXhmoMuYJMumS4=
 github.com/luxfi/accel v1.2.4 h1:5VbIHyEvvfobn2zBiTFODxDw1CeqxCepZOLlvkuf9yQ=
 github.com/luxfi/accel v1.2.4/go.mod h1:ISIwAX+ZfsL/S5nsP2JvfldXN6Nc+QzoWf6Jtaq+xsQ=
+github.com/luxfi/age v1.6.0 h1:KMD8gSOP4NVCb7NWSlRcgBZNV2xm2a+qQWPyPmiX6f4=
+github.com/luxfi/age v1.6.0/go.mod h1:7cu9CIyikgyAvr5MlXFapEDQ15yBaHOSdKkK5lG04WE=
 github.com/luxfi/crypto v1.20.2 h1:L81WEsU/hs2A76F5PWBusG0yU74QqkDdUqqgexWUxh4=
 github.com/luxfi/crypto v1.20.2/go.mod h1:qYHOM0lO4PRh7LEaObxFQUIMjmT1/paVm/WgZkobT1k=
 github.com/luxfi/log v1.6.0 h1:BbV7kOAK9nrUcrpr4/yCw0ODaBtQOLR5Cjj/NLWwZqo=

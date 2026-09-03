@@ -111,6 +111,11 @@ func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	// Providers owned by platformOwner. Unset registers nothing and service
 	// falls back to the single configured DigitalOcean token, which is what a
 	// deployment that has not been told where its accounts live did before.
+	// Seal provider secrets in KMS when the deployment is wired for it (VISOR_KMS_*):
+	// the vault is unlocked once here, so credential reads below resolve from KMS
+	// instead of the plaintext column. No KMS env keeps the plaintext path.
+	object.ConfigureKMS(strings.TrimSpace(conf.GetConfigString("platformOwner")))
+
 	object.RegisterCloudCredentials(strings.TrimSpace(conf.GetConfigString("platformOwner")))
 
 	// And how those accounts are reached: through hanzoai/egress when it is

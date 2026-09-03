@@ -49,8 +49,10 @@ func RegisterCloudCredentials(owner string) {
 				Provider: p.Type,
 				Name:     p.Name,
 				KeyID:    p.ClientId,
-				Secret:   p.ClientSecret,
-				Region:   p.Region,
+				// Resolve from KMS instead of reading the plaintext column; a legacy
+				// plaintext row resolves to itself (dual-read).
+				Secret: openSecret(p.ClientSecret),
+				Region: p.Region,
 			})
 		}
 		return out

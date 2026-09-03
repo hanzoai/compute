@@ -165,6 +165,15 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/providers/:owner/:name", h((*controllers.ApiController).GetProvider))
 	app.Put("/v1/providers/:owner/:name", h((*controllers.ApiController).UpdateProvider))
 	app.Delete("/v1/providers/:owner/:name", h((*controllers.ApiController).DeleteProvider))
+	// A provider's rotation keys are a sub-collection: add one, and rotate or
+	// remove one by name. Rotation is a PUT — setting the key's secret and/or its
+	// state (active|revoked) is writing the key's own properties, not a verb of its
+	// own. Verify is a POST that reads: it tests the stored credential against the
+	// cloud and creates nothing. All are SuperAdmin-gated (authz.isProviderWrite).
+	app.Post("/v1/providers/:owner/:name/keys", h((*controllers.ApiController).AddProviderKey))
+	app.Put("/v1/providers/:owner/:name/keys/:keyName", h((*controllers.ApiController).RotateProviderKey))
+	app.Delete("/v1/providers/:owner/:name/keys/:keyName", h((*controllers.ApiController).DeleteProviderKey))
+	app.Post("/v1/providers/:owner/:name/verify", h((*controllers.ApiController).VerifyProvider))
 
 	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
 	// per-org machines over the configured cloud account (controllers/compute.go).

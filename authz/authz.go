@@ -97,6 +97,17 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 		return true
 	}
 
+	// A provider row holds a cloud credential, so writing one — create, update,
+	// key add/rotate/revoke, delete, or the verify dry-run — is a platform-
+	// privileged action, not org self-service. It is admitted ONLY for the
+	// reserved SuperAdmin org, checked ahead of the subOwner == objOwner clause
+	// below that would otherwise let any org member (even their own org's admin)
+	// write a credential. Per-org isAdmin is deliberately NOT consulted: trusting
+	// it here would be a privilege escalation across the tenant boundary.
+	if isProviderWrite(method, urlPath) {
+		return isSuperAdminOrg(subOwner)
+	}
+
 	if user != nil {
 		if user.IsDeleted {
 			return false
@@ -169,6 +180,32 @@ func isResellComputePath(method string, urlPath string) bool {
 		return method == "GET" || method == "DELETE"
 	}
 	return false
+}
+
+// isProviderWrite reports whether (method, urlPath) mutates a provider or its
+// keys, or runs the verify dry-run. It matches the live path prefix (not a route
+// template) because the authz seam runs as middleware, where urlPath is the
+// concrete request path. Every write verb under /v1/providers is covered, so a
+// new provider sub-resource is gated by default rather than by remembering to add
+// it here.
+func isProviderWrite(method string, urlPath string) bool {
+	if !strings.HasPrefix(urlPath, "/v1/providers") {
+		return false
+	}
+	switch method {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	}
+	return false
+}
+
+// isSuperAdminOrg reports whether an org is the reserved platform-admin org. Two
+// slugs name it in this codebase: "admin" (the human SuperAdmin org, per the
+// object-owner rule and the platform SuperAdmin predicate) and "built-in" (the
+// system principal the static policy grants blanket allow). Either is the
+// platform scope; a tenant org is not.
+func isSuperAdminOrg(owner string) bool {
+	return owner == "admin" || owner == "built-in"
 }
 
 func isAllowedInDemoMode(method string, urlPath string) bool {

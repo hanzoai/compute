@@ -307,6 +307,13 @@ func ListGPUSizes() ([]SizeInfo, error) {
 // SizeBySlug returns the resale size for a slug, or nil if unknown. Used to
 // price launch quotes.
 func SizeBySlug(slug string) (*SizeInfo, error) {
+	// EKS and GKE worker types resolve from the static managed-Kubernetes
+	// supplement first — deterministically and without a network call — because
+	// they are not DigitalOcean slugs and would otherwise miss the catalog and
+	// price nothing.
+	if si, ok := managedK8sSize(slug); ok {
+		return &si, nil
+	}
 	sizes, err := ListSizes()
 	if err != nil {
 		return nil, err

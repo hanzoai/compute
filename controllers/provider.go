@@ -17,6 +17,7 @@ package controllers
 import (
 	"encoding/json"
 
+	"github.com/hanzoai/visor/logs"
 	"github.com/hanzoai/visor/object"
 	"github.com/hanzoai/visor/util"
 )
@@ -142,4 +143,100 @@ func (c *ApiController) DeleteProvider() {
 
 	c.Data["json"] = wrapActionResponse(object.DeleteProvider(&provider))
 	c.ServeJSON()
+}
+
+// AddProviderKey
+// @Title AddProviderKey
+// @Tag Provider API
+// @Description add a rotation key to a provider
+// @Param   owner   path   string           true   "The provider owner"
+// @Param   name    path   string           true   "The provider name"
+// @Param   body    body   object.ProviderKey  true   "The rotation key"
+// @Success 200 {object} controllers.Response The Response object
+// @router /providers/{owner}/{name}/keys [post]
+func (c *ApiController) AddProviderKey() {
+	id := c.Id()
+
+	var key object.ProviderKey
+	if err := json.Unmarshal(c.Ctx.Body(), &key); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	affected, err := object.AddProviderKey(id, key)
+	if err == nil {
+		logs.Info("audit: provider %s key %q added by %s", id, key.Name, c.GetSessionUsername())
+	}
+	c.Data["json"] = wrapActionResponse(affected, err)
+	c.ServeJSON()
+}
+
+// RotateProviderKey
+// @Title RotateProviderKey
+// @Tag Provider API
+// @Description rotate a provider rotation key's secret, or set its state
+// @Param   owner    path   string           true   "The provider owner"
+// @Param   name     path   string           true   "The provider name"
+// @Param   keyName  path   string           true   "The rotation key name"
+// @Param   body     body   object.ProviderKey  true   "The new secret and/or state"
+// @Success 200 {object} controllers.Response The Response object
+// @router /providers/{owner}/{name}/keys/{keyName} [put]
+func (c *ApiController) RotateProviderKey() {
+	id := c.Id()
+	keyName := c.Ctx.Param("keyName")
+
+	var in object.ProviderKey
+	if err := json.Unmarshal(c.Ctx.Body(), &in); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	affected, err := object.RotateProviderKey(id, keyName, in)
+	if err == nil {
+		logs.Info("audit: provider %s key %q rotated (state=%q) by %s", id, keyName, in.State, c.GetSessionUsername())
+	}
+	c.Data["json"] = wrapActionResponse(affected, err)
+	c.ServeJSON()
+}
+
+// DeleteProviderKey
+// @Title DeleteProviderKey
+// @Tag Provider API
+// @Description remove a rotation key from a provider
+// @Param   owner    path   string   true   "The provider owner"
+// @Param   name     path   string   true   "The provider name"
+// @Param   keyName  path   string   true   "The rotation key name"
+// @Success 200 {object} controllers.Response The Response object
+// @router /providers/{owner}/{name}/keys/{keyName} [delete]
+func (c *ApiController) DeleteProviderKey() {
+	id := c.Id()
+	keyName := c.Ctx.Param("keyName")
+
+	affected, err := object.DeleteProviderKey(id, keyName)
+	if err == nil {
+		logs.Info("audit: provider %s key %q removed by %s", id, keyName, c.GetSessionUsername())
+	}
+	c.Data["json"] = wrapActionResponse(affected, err)
+	c.ServeJSON()
+}
+
+// VerifyProvider
+// @Title VerifyProvider
+// @Tag Provider API
+// @Description dry-run validate a provider's stored credential (creates nothing)
+// @Param   owner    path   string   true   "The provider owner"
+// @Param   name     path   string   true   "The provider name"
+// @Param   keyName  query  string   false  "Rotation key to test; omit for the row's own credential"
+// @Success 200 {object} controllers.Response The Response object
+// @router /providers/{owner}/{name}/verify [post]
+func (c *ApiController) VerifyProvider() {
+	id := c.Id()
+	account := c.Ctx.Query("keyName")
+
+	ok, detail, err := object.VerifyProvider(id, account)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(map[string]interface{}{"ok": ok, "detail": detail})
 }

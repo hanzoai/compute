@@ -36,6 +36,7 @@ require (
 	github.com/hanzoai/commerce/metering v0.1.6
 	github.com/hanzoai/egress/spend v0.1.0
 	github.com/hanzoai/ha v0.2.0
+	github.com/hanzoai/kms/sdk/go v1.1.1
 	github.com/hanzoai/money v0.2.5
 	github.com/hanzoai/orm v0.6.30
 	github.com/hanzoai/sqlite v0.5.8
@@ -57,6 +58,7 @@ require (
 	cloud.google.com/go/auth v0.23.2 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.1 // indirect
@@ -88,6 +90,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/luxfi/accel v1.2.4 // indirect
+	github.com/luxfi/age v1.6.0 // indirect
 	github.com/luxfi/crypto v1.20.2 // indirect
 	github.com/luxfi/log v1.6.0 // indirect
 	github.com/luxfi/mdns v0.1.1 // indirect

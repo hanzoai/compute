@@ -36,7 +36,7 @@ type Provider struct {
 	Category string `xorm:"varchar(100)" json:"category"`
 	Type     string `xorm:"varchar(100)" json:"type"`
 
-	ClientId     string `xorm:"varchar(100)" json:"clientId"`
+	ClientId string `xorm:"varchar(100)" json:"clientId"`
 	// ClientSecret is a token on most clouds and a whole service-account JSON
 	// (about 2 KB) on Google Cloud, so it is text and not varchar(100).
 	ClientSecret string `xorm:"mediumtext" json:"clientSecret"`
@@ -196,9 +196,12 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 		return false, nil
 	}
 
-	if provider.ClientSecret == "***" {
-		provider.ClientSecret = p.ClientSecret
-	}
+	// A masked read round-trips "***" back on save; restore each masked secret —
+	// the row's own AND every rotation key's — from the stored row so a save never
+	// writes the literal mask over a live credential. Then seal any genuinely new
+	// value: a value already sealed or restored passes through untouched.
+	restoreMaskedSecrets(provider, p)
+	sealProviderSecrets(provider)
 
 	engine, err := EngineFor(owner)
 	if err != nil {
@@ -213,6 +216,10 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 }
 
 func AddProvider(provider *Provider) (bool, error) {
+	// Seal the credential(s) before the row is written, so KMS holds the secret
+	// and the row holds only a reference. A no-op when KMS is unconfigured.
+	sealProviderSecrets(provider)
+
 	engine, err := EngineFor(provider.Owner)
 	if err != nil {
 		return false, err
@@ -329,8 +336,12 @@ func (p *Provider) LaunchCredentials() []LaunchCredential {
 		out = append(out, LaunchCredential{
 			KeyName: "",
 			KeyID:   p.ClientId,
-			Secret:  p.ClientSecret,
-			Region:  p.Region,
+			// Resolve the secret from KMS here, at the one chokepoint every launch
+			// and every credential read passes through, so the plaintext lives in
+			// this slice for the length of a call and never in the row. A legacy
+			// plaintext row resolves to itself (dual-read).
+			Secret: openSecret(p.ClientSecret),
+			Region: p.Region,
 		})
 	}
 	for _, k := range p.Keys {
@@ -347,7 +358,7 @@ func (p *Provider) LaunchCredentials() []LaunchCredential {
 		out = append(out, LaunchCredential{
 			KeyName: k.Name,
 			KeyID:   k.KeyID,
-			Secret:  k.Secret,
+			Secret:  openSecret(k.Secret),
 			Region:  region,
 		})
 	}
