@@ -21,7 +21,9 @@ import (
 	"net/http"
 	"strings"
 
+	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/digitalocean/godo"
+	"google.golang.org/api/googleapi"
 )
 
 type NodeInfo struct {
@@ -214,14 +216,20 @@ func (c *DOKSClient) RecycleNodePoolNodes(ctx context.Context, clusterID, poolID
 	return nil
 }
 
-// IsNotFound reports whether err wraps a DigitalOcean 404 response, meaning the
-// resource is already gone. Callers treat this as success when deleting.
+// IsNotFound reports whether err says the resource is already gone, in the words
+// of whichever cloud answered. Callers treat this as success when deleting and
+// as "ask the next cloud" when locating.
 func IsNotFound(err error) bool {
 	var doErr *godo.ErrorResponse
 	if errors.As(err, &doErr) && doErr.Response != nil {
 		return doErr.Response.StatusCode == http.StatusNotFound
 	}
-	return false
+	var eksErr *ekstypes.ResourceNotFoundException
+	if errors.As(err, &eksErr) {
+		return true
+	}
+	var gErr *googleapi.Error
+	return errors.As(err, &gErr) && gErr.Code == http.StatusNotFound
 }
 
 // KubernetesCluster is a DOKS cluster in the shape visor surfaces: identity,
@@ -422,6 +430,9 @@ type CreateClusterSpec struct {
 	// required once there are several, because guessing puts a customer's
 	// cluster on a cloud they did not choose.
 	Provider string `json:"provider,omitempty"`
+	// SubnetIDs places the cluster on a VPC, for the clouds that ask (EKS).
+	// Empty means the account's default VPC, one subnet per zone.
+	SubnetIDs []string `json:"subnetIds,omitempty"`
 }
 
 // CreateClusterNodePool is the initial worker pool of a new cluster: its instance

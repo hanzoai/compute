@@ -157,6 +157,25 @@ func (a *Adapter) createTable() {
 			panic(err)
 		}
 	}
+	a.widen()
+}
+
+// widen grows the one column Sync2 will not. Sync2 adds columns and never alters
+// one, and provider.client_secret was varchar(100) until a Google service-account
+// JSON had to fit in it. SQLite has no column widths, so there is nothing to do there.
+func (a *Adapter) widen() {
+	var stmt string
+	switch a.driverName {
+	case "postgres":
+		stmt = "ALTER TABLE provider ALTER COLUMN client_secret TYPE text"
+	case "mysql":
+		stmt = "ALTER TABLE provider MODIFY client_secret mediumtext"
+	default:
+		return
+	}
+	if _, err := a.engine.Exec(stmt); err != nil {
+		panic(err)
+	}
 }
 
 func GetSession(owner string, offset, limit int, field, value, sortField, sortOrder string) *relational.Session {

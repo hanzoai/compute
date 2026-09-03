@@ -37,7 +37,9 @@ type Provider struct {
 	Type     string `xorm:"varchar(100)" json:"type"`
 
 	ClientId     string `xorm:"varchar(100)" json:"clientId"`
-	ClientSecret string `xorm:"varchar(100)" json:"clientSecret"`
+	// ClientSecret is a token on most clouds and a whole service-account JSON
+	// (about 2 KB) on Google Cloud, so it is text and not varchar(100).
+	ClientSecret string `xorm:"mediumtext" json:"clientSecret"`
 	Region       string `xorm:"varchar(100)" json:"region"`
 	Network      string `xorm:"varchar(100)" json:"network"`
 	Chain        string `xorm:"varchar(100)" json:"chain"`

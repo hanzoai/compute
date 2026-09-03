@@ -44,11 +44,17 @@ func NewMachineClient(c Credential) (MachineClientInterface, error) {
 
 	switch c.Provider {
 	// Clouds whose SDK takes our http.Client, so the call can be carried by
-	// egress and this process need never hold the key.
+	// egress and this process need never hold the key. AWS signs with the key
+	// it is handed and skips signing when handed none (egress signs then); GCP
+	// layers its token source over the carried transport the same way.
 	case "DigitalOcean":
 		return newMachineDigitalOceanClient(secret, id, region, hc)
 	case "Hetzner":
 		return newMachineHetznerClient(secret, id, region, hc)
+	case "AWS":
+		return newMachineAwsClient(id, secret, region, hc)
+	case "Google Cloud":
+		return newMachineGcpClient(id, secret, region, hc)
 	}
 
 	// Every other cloud builds its own transport, so it would authenticate from
@@ -71,10 +77,6 @@ func NewMachineClient(c Credential) (MachineClientInterface, error) {
 		res, err = newMachineKvmClient(id, secret)
 	case "PVE":
 		res, err = newMachinePveClient(id, secret)
-	case "Google Cloud":
-		res, err = newMachineGcpClient(id, secret, region)
-	case "AWS":
-		res, err = newMachineAwsClient(id, secret, region)
 	case "AWS Lightsail":
 		res, err = newMachineLightsailClient(id, secret, region)
 	default:

@@ -373,15 +373,15 @@ func TestACloudThatCannotBeCarriedIsRefused(t *testing.T) {
 	t.Cleanup(func() { RegisterCarrier(nil) })
 	RegisterCarrier(func(Credential) (*http.Client, error) { return &http.Client{}, nil })
 
-	// AWS builds its own transport, so it cannot be carried yet.
-	if _, err := NewMachineClient(Credential{Provider: "AWS", KeyID: "k", Secret: "s", Region: "us-east-1"}); err == nil {
-		t.Fatal("AWS was built under a carrier it cannot use — the token would be held here")
+	// Lightsail builds its own transport, so it cannot be carried yet.
+	if _, err := NewMachineClient(Credential{Provider: "AWS Lightsail", KeyID: "k", Secret: "s", Region: "us-east-1"}); err == nil {
+		t.Fatal("Lightsail was built under a carrier it cannot use — the token would be held here")
 	} else if !strings.Contains(err.Error(), "credential directly") {
 		t.Errorf("refusal does not say why: %v", err)
 	}
-	// DigitalOcean and Hetzner take our transport, so they are carried.
-	for _, p := range []string{providerDigitalOcean, "Hetzner"} {
-		if _, err := NewMachineClient(Credential{Provider: p}); err != nil {
+	// These take our transport, so they are carried.
+	for _, p := range []string{providerDigitalOcean, "Hetzner", providerAWS, providerGCP} {
+		if _, err := NewMachineClient(Credential{Provider: p, Region: "us-east-1"}); err != nil {
 			t.Errorf("%s should be carried, got: %v", p, err)
 		}
 	}

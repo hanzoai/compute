@@ -17,34 +17,59 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 type MachineAwsClient struct {
 	Client *ec2.Client
+	cfg    aws.Config
 	region string
+	// carried is true when this process holds no key: the carrier signs, so the
+	// SDK sends unsigned, and anything that needs the key HERE (an STS presign)
+	// says so instead of producing an unsigned URL.
+	carried bool
 }
 
-func newMachineAwsClient(accessKeyId string, accessKeySecret string, region string) (MachineAwsClient, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
+// newMachineAwsClient builds every AWS client over the carried transport. With a
+// key it signs here; with none it sends anonymously and egress signs.
+func newMachineAwsClient(accessKeyId string, accessKeySecret string, region string, hc *http.Client) (MachineAwsClient, error) {
+	carried := accessKeyId == "" && accessKeySecret == ""
+	var creds aws.CredentialsProvider = aws.AnonymousCredentials{}
+	if !carried {
+		creds = aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+			return aws.Credentials{AccessKeyID: accessKeyId, SecretAccessKey: accessKeySecret}, nil
+		})
+	}
+	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(region),
-		config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-			return aws.Credentials{
-				AccessKeyID:     accessKeyId,
-				SecretAccessKey: accessKeySecret,
-			}, nil
-		})),
+		config.WithHTTPClient(hc),
+		config.WithCredentialsProvider(creds),
 	)
 	if err != nil {
 		return MachineAwsClient{}, err
 	}
+	return MachineAwsClient{Client: ec2.NewFromConfig(cfg), cfg: cfg, region: region, carried: carried}, nil
+}
 
-	client := ec2.NewFromConfig(cfg)
-	return MachineAwsClient{Client: client, region: region}, nil
+// Kubernetes is EKS over the SAME config this machine client signs with: one
+// credential, one transport, two nouns — the rule DigitalOcean set.
+func (c MachineAwsClient) Kubernetes() KubernetesClientInterface {
+	return &EKSClient{
+		eks:     eks.NewFromConfig(c.cfg),
+		iam:     iam.NewFromConfig(c.cfg),
+		ec2:     c.Client,
+		sts:     sts.NewPresignClient(sts.NewFromConfig(c.cfg)),
+		region:  c.region,
+		carried: c.carried,
+	}
 }
 
 func getMachineFromAwsInstance(instance ec2Types.Instance) *Machine {

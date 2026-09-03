@@ -24,17 +24,39 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/container/v1"
+	"google.golang.org/api/option"
 )
 
 const (
 	computeBaseURL = "https://compute.googleapis.com/compute/v1"
 	computeScope   = "https://www.googleapis.com/auth/compute"
+	// platformScope is what GKE's API accepts; it covers compute as well.
+	platformScope = "https://www.googleapis.com/auth/cloud-platform"
 )
 
 type MachineGcpClient struct {
 	httpClient *http.Client
 	projectID  string
 	zone       string
+	// ts mints the bearer this process attaches; nil when the carrier does.
+	ts  oauth2.TokenSource
+	gke *container.Service
+	// compute is the compute API base; empty means computeBaseURL.
+	compute string
+}
+
+func (c MachineGcpClient) computeURL() string {
+	if c.compute != "" {
+		return c.compute
+	}
+	return computeBaseURL
+}
+
+// Kubernetes is GKE over the SAME authenticated transport and project: one
+// credential, one transport, two nouns.
+func (c MachineGcpClient) Kubernetes() KubernetesClientInterface {
+	return &GKEClient{svc: c.gke, vm: c, project: c.projectID, location: c.zone, ts: c.ts}
 }
 
 // computeInstance is the subset of the compute REST instance resource this
@@ -80,22 +102,37 @@ type computeInstanceList struct {
 // (in-cluster workload identity). No gRPC is involved.
 func gcpTokenSource(ctx context.Context, credentialsJSON string) (oauth2.TokenSource, error) {
 	if credentialsJSON != "" {
-		cfg, err := google.JWTConfigFromJSON([]byte(credentialsJSON), computeScope)
+		cfg, err := google.JWTConfigFromJSON([]byte(credentialsJSON), computeScope, platformScope)
 		if err != nil {
 			return nil, err
 		}
 		return cfg.TokenSource(ctx), nil
 	}
-	return google.DefaultTokenSource(ctx, computeScope)
+	return google.DefaultTokenSource(ctx, computeScope, platformScope)
 }
 
-func newMachineGcpClient(projectID string, credentialsJSON string, zone string) (MachineGcpClient, error) {
-	ctx := context.Background()
-	ts, err := gcpTokenSource(ctx, credentialsJSON)
+// newMachineGcpClient builds the authenticated transport once, over the carried
+// client, and hands it to both the compute REST calls and the GKE service. With
+// no credential under a carrier the bearer is egress's to attach, so the carried
+// client is used bare.
+func newMachineGcpClient(projectID string, credentialsJSON string, zone string, hc *http.Client) (MachineGcpClient, error) {
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, hc)
+	client, c := hc, MachineGcpClient{projectID: projectID, zone: zone}
+	if credentialsJSON != "" || !carrierRegistered() {
+		ts, err := gcpTokenSource(ctx, credentialsJSON)
+		if err != nil {
+			return MachineGcpClient{}, err
+		}
+		c.ts = ts
+		client = oauth2.NewClient(ctx, ts)
+		client.Timeout = providerTimeout
+	}
+	gke, err := container.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return MachineGcpClient{}, err
 	}
-	return MachineGcpClient{httpClient: oauth2.NewClient(ctx, ts), projectID: projectID, zone: zone}, nil
+	c.httpClient, c.gke = client, gke
+	return c, nil
 }
 
 // do issues an authenticated JSON request and decodes a 2xx body into out
@@ -124,7 +161,7 @@ func (client MachineGcpClient) do(ctx context.Context, method string, endpoint s
 }
 
 func (client MachineGcpClient) instancesURL() string {
-	return fmt.Sprintf("%s/projects/%s/zones/%s/instances", computeBaseURL, client.projectID, client.zone)
+	return fmt.Sprintf("%s/projects/%s/zones/%s/instances", client.computeURL(), client.projectID, client.zone)
 }
 
 func getMachineFromComputeInstance(instance *computeInstance) *Machine {

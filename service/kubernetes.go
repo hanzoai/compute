@@ -62,6 +62,32 @@ type ClusterCredentials struct {
 	Expiry   time.Time `json:"expiry"`
 }
 
+// tagMap and tagList carry visor's "key:value" tag vocabulary (orgTag, the
+// managed-by mark) to a cloud that keys its tags — AWS tags, GKE resource
+// labels — and back, so clusterHasTag reads every cloud's tags the same way.
+// A tag with no ":" is a bare key; an empty value comes back as one.
+func tagMap(tags []string) map[string]string {
+	m := make(map[string]string, len(tags))
+	for _, t := range tags {
+		k, v, _ := strings.Cut(t, ":")
+		m[k] = v
+	}
+	return m
+}
+
+func tagList(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		if v == "" {
+			out = append(out, k)
+			continue
+		}
+		out = append(out, k+":"+v)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // KubernetesCapable is a provider client that ALSO speaks Kubernetes. Not every
 // cloud sells managed clusters, so this is an assertion on the one provider
 // client, never a second registry of clouds — NewMachineClient is the registry,
