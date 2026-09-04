@@ -19,7 +19,7 @@ import (
 )
 
 // MeterLease is a single-flight lease for the hourly compute-metering sweep.
-// Its whole purpose is a MONEY-SAFETY invariant: the visor Deployment runs
+// Its whole purpose is a MONEY-SAFETY invariant: the compute Deployment runs
 // replicas: 2 with no leader election, so without a lease BOTH replicas would run
 // service.MeterRunningMachines every hour and debit every running machine twice
 // (the per-machine hour-bucketed RequestID is only a dedup HINT — commerce's

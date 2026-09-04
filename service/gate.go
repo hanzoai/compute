@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // gate.go is the compute money gate: ONE price resolver, ONE pre-provision
-// balance check, ONE debit. Every compute resource visor provisions rides
+// balance check, ONE debit. Every compute resource compute provisions rides
 // through it — droplet launch, DOKS cluster create, node pool create, node pool
 // scale — so there is a single answer to "what does this cost?" and a single
 // answer to "is this org good for it?".
@@ -34,8 +34,8 @@ import (
 	"sync"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // ErrPriceUnavailable reports that a size's price could not be RESOLVED. It is
@@ -159,10 +159,10 @@ func RecordCompute(ctx context.Context, org, project string, cents int64, model,
 // lands before the next read. It is per ORG, so one tenant's provision never
 // waits on another's.
 //
-// It is a PROCESS lease, and that is exactly as wide as visor's money safety
+// It is a PROCESS lease, and that is exactly as wide as compute's money safety
 // already is: the hourly meter's exactly-once rests on this Deployment running
 // `replicas: 1` (object/coordinator.go's ha.Static, paired with the replica count
-// in universe charts/app/values/hanzo/visor.yaml), because under the Base backend
+// in universe charts/app/values/hanzo/compute.yaml), because under the Base backend
 // the shared coord is pod-local and no insert-once PK spans pods. Raising
 // replicas requires a real membership source AND a cross-pod hold, in the same
 // change — the same coupling, stated in the same terms, for the same reason.
@@ -201,7 +201,7 @@ func holdOrg(org string) func() {
 	}
 }
 
-// Provision is the ONE metered provision, and every compute resource visor
+// Provision is the ONE metered provision, and every compute resource compute
 // creates rides it: a droplet launch, a DOKS cluster, a node pool, a scale-up.
 // Under the org's hold it authorizes, provisions, and debits — in that order, so
 // the money moves before the next request reads the balance.
@@ -212,7 +212,7 @@ func holdOrg(org string) func() {
 //	authorize — the CEILING the org must be good for. For an autoscaling pool
 //	            that is the quantity it is ALLOWED to reach, because nothing
 //	            gates the growth: the upstream adds nodes on its own and no
-//	            request reaches visor, so the balance has to cover the ceiling
+//	            request reaches compute, so the balance has to cover the ceiling
 //	            up front or it never gets asked again.
 //	debit     — what the org actually OWES right now, which is the resource it
 //	            actually got. Charging the ceiling here bills sixteen nodes for

@@ -26,10 +26,10 @@ import (
 	"github.com/hanzoai/egress/spend"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
-// stub is a stand-in for egress on the ZAP address visor dials. It records what
+// stub is a stand-in for egress on the ZAP address compute dials. It records what
 // it was asked for and answers with what a cloud would have said.
 type stub struct {
 	asked  atomic.Value // spend.Fetch
@@ -81,7 +81,7 @@ func (d *stub) fetch(t *testing.T) spend.Fetch {
 }
 
 // The whole point, end to end: a real DigitalOcean SDK client, built by the one
-// provider registry, makes its calls through egress. Visor holds no cloud
+// provider registry, makes its calls through egress. Compute holds no cloud
 // credential — the Credential here carries no secret at all — and the call still
 // reaches the cloud, because the key is attached at egress.
 func TestTheSDKCallsThroughEgress(t *testing.T) {
@@ -91,7 +91,7 @@ func TestTheSDKCallsThroughEgress(t *testing.T) {
 	t.Cleanup(func() { service.RegisterCarrier(nil) })
 	service.RegisterCarrier(func(c service.Credential) (*http.Client, error) {
 		return spend.Client(spend.Config{
-			Network: "tcp", Address: addr, Token: "visor-own-token",
+			Network: "tcp", Address: addr, Token: "compute-own-token",
 			Provider: c.Provider, Account: c.Name,
 		}), nil
 	})
@@ -121,8 +121,8 @@ func TestTheSDKCallsThroughEgress(t *testing.T) {
 	if asked.Method != "GET" {
 		t.Errorf("method = %q", asked.Method)
 	}
-	if got := d.bearer.Load(); got != "Bearer visor-own-token" {
-		t.Errorf("egress got Authorization %v — visor did not identify itself", got)
+	if got := d.bearer.Load(); got != "Bearer compute-own-token" {
+		t.Errorf("egress got Authorization %v — compute did not identify itself", got)
 	}
 	if len(machines) != 1 {
 		t.Fatalf("the SDK could not read the cloud's answer: %+v", machines)
@@ -151,13 +151,13 @@ func TestDial(t *testing.T) {
 
 // carry() is the operator contract, and each of its three states matters.
 func TestCarry(t *testing.T) {
-	t.Run("unset, visor calls clouds itself", func(t *testing.T) {
+	t.Run("unset, compute calls clouds itself", func(t *testing.T) {
 		t.Setenv("egressAddress", "")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 		service.RegisterCarrier(nil)
 
 		if err := carry(); err != nil {
-			t.Fatalf("an unconfigured visor must start: %v", err)
+			t.Fatalf("an unconfigured compute must start: %v", err)
 		}
 		// AWS builds its own transport, so it is refused ONLY under a carrier.
 		// Building here is what proves none was registered.
@@ -177,7 +177,7 @@ func TestCarry(t *testing.T) {
 
 		err := carry()
 		if err == nil {
-			t.Fatal("visor started with an address and no identity — every cloud call would be a 401")
+			t.Fatal("compute started with an address and no identity — every cloud call would be a 401")
 		}
 		if !strings.Contains(err.Error(), "IAM identity") {
 			t.Errorf("the refusal does not name what is missing: %v", err)
@@ -186,7 +186,7 @@ func TestCarry(t *testing.T) {
 
 	t.Run("both, and the cloud keys are egress's", func(t *testing.T) {
 		t.Setenv("egressAddress", "tcp://egress.hanzo.ai:9653")
-		t.Setenv("clientId", "visor")
+		t.Setenv("clientId", "compute")
 		t.Setenv("clientSecret", "shh")
 		t.Setenv("iamEndpoint", "https://hanzo.id")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })

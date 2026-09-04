@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-// KubernetesClientInterface is the one Kubernetes expression Visor coordinates
+// KubernetesClientInterface is the one Kubernetes expression Compute coordinates
 // across k8s-native clouds, the same shape MachineClientInterface has beside it.
 // A cloud gains clusters by implementing KubernetesCapable on the provider client
 // NewMachineClient already builds — never by being named in a second registry.
@@ -54,7 +54,7 @@ type KubernetesClientInterface interface {
 //
 // It carries NO provider key. A caller holding these can talk to this one
 // cluster until Expiry and nothing else — which is why it is safe to hand to
-// cloud, and why the cloud account's own token never leaves visor.
+// cloud, and why the cloud account's own token never leaves compute.
 type ClusterCredentials struct {
 	Endpoint string    `json:"endpoint"`
 	CAData   []byte    `json:"caData"`
@@ -62,7 +62,7 @@ type ClusterCredentials struct {
 	Expiry   time.Time `json:"expiry"`
 }
 
-// tagMap and tagList carry visor's "key:value" tag vocabulary (orgTag, the
+// tagMap and tagList carry compute's "key:value" tag vocabulary (orgTag, the
 // managed-by mark) to a cloud that keys its tags — AWS tags, GKE resource
 // labels — and back, so clusterHasTag reads every cloud's tags the same way.
 // A tag with no ":" is a bare key; an empty value comes back as one.
@@ -138,7 +138,7 @@ type ProviderStatus struct {
 }
 
 // cloudProvider is one platform-account cloud: its provider name and the credentials
-// Visor holds for it.
+// Compute holds for it.
 type cloudProvider struct {
 	provider string
 	name     string
@@ -227,7 +227,7 @@ func kubernetesClients() ([]KubernetesClientInterface, []ProviderStatus) {
 	var clients []KubernetesClientInterface
 	var status []ProviderStatus
 	for _, b := range cloudProviders() {
-		// ONE registry. A cloud reaches visor exactly once, through the same
+		// ONE registry. A cloud reaches compute exactly once, through the same
 		// factory the machine plane uses, so there is never a second way to DO.
 		mc, err := NewMachineClient(Credential{Provider: b.provider, Name: b.name, KeyID: b.keyID, Secret: b.secret, Region: b.region})
 		if err != nil {

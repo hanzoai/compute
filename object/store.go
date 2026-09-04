@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/compute/conf"
 
 	"github.com/hanzoai/orm/relational"
 )
@@ -58,7 +58,7 @@ func sharedModels() []interface{} {
 	}
 }
 
-// models is visor's full table registry -- the union of per-org and shared
+// models is compute's full table registry -- the union of per-org and shared
 // tables, defined in exactly one place. The Postgres adapter (Adapter.createTable)
 // hosts every table and syncs this full set; the Base backend syncs only
 // perOrgModels into each org DB and leaves sharedModels on Postgres.
@@ -66,7 +66,7 @@ func models() []interface{} {
 	return append(perOrgModels(), sharedModels()...)
 }
 
-// engineProvider resolves the *relational.Engine(s) that serve visor's tables. It is
+// engineProvider resolves the *relational.Engine(s) that serve compute's tables. It is
 // the ONE seam between the shared-Postgres backend (a single engine for every
 // owner) and the Base backend (one per-org SQLite engine plus a shared Postgres
 // coordination engine). Query and model code is identical on either side; only
@@ -136,7 +136,7 @@ func InitStore() {
 // query works unchanged on either backend.
 func EngineFor(owner string) (*relational.Engine, error) {
 	if store == nil {
-		return nil, fmt.Errorf("visor: store not initialised (call InitAdapter first)")
+		return nil, fmt.Errorf("compute: store not initialised (call InitAdapter first)")
 	}
 	return store.EngineFor(owner)
 }
@@ -172,7 +172,7 @@ func Shared() *relational.Engine {
 	return store.Shared()
 }
 
-// Ready reports whether visor can still reach the store every route depends on.
+// Ready reports whether compute can still reach the store every route depends on.
 // It is the question a readiness probe asks, answered in the ONE package that
 // can answer it: the backend is chosen here and `store` is unexported, so no
 // caller outside object could form the answer without a second copy of the
@@ -184,16 +184,16 @@ func Shared() *relational.Engine {
 // health check whose cost grows with the customer list is an outage waiting for
 // a big enough customer list.
 //
-// A nil store is unready rather than an error to shout about: it is what visor
+// A nil store is unready rather than an error to shout about: it is what compute
 // looks like between process start and InitAdapter, which is exactly the window
 // a readiness probe exists to keep traffic out of.
 func Ready() error {
 	if store == nil {
-		return fmt.Errorf("visor: store not initialised")
+		return fmt.Errorf("compute: store not initialised")
 	}
 	e := store.Shared()
 	if e == nil {
-		return fmt.Errorf("visor: no shared engine")
+		return fmt.Errorf("compute: no shared engine")
 	}
 	return e.Ping()
 }
@@ -203,7 +203,7 @@ func Ready() error {
 // under Base.
 func allEngines() ([]*relational.Engine, error) {
 	if store == nil {
-		return nil, fmt.Errorf("visor: store not initialised (call InitAdapter first)")
+		return nil, fmt.Errorf("compute: store not initialised (call InitAdapter first)")
 	}
 	return store.AllEngines()
 }
@@ -213,7 +213,7 @@ func allEngines() ([]*relational.Engine, error) {
 // row-merge from the `_global` snapshot under Base.
 func pullSharedLeases() error {
 	if store == nil {
-		return fmt.Errorf("visor: store not initialised (call InitAdapter first)")
+		return fmt.Errorf("compute: store not initialised (call InitAdapter first)")
 	}
 	return store.PullSharedLeases()
 }
@@ -222,7 +222,7 @@ func pullSharedLeases() error {
 // the claim is durable before money moves. No-op under Postgres.
 func pushShared() error {
 	if store == nil {
-		return fmt.Errorf("visor: store not initialised (call InitAdapter first)")
+		return fmt.Errorf("compute: store not initialised (call InitAdapter first)")
 	}
 	return store.PushShared()
 }
@@ -235,11 +235,11 @@ func dataRoot() string {
 	return "/data"
 }
 
-// DBPath is the HIP-0302 per-org SQLite path for a visor org DB. It mirrors the
+// DBPath is the HIP-0302 per-org SQLite path for a compute org DB. It mirrors the
 // layout hanzo/cloud uses (orgs/<org>/<service>.db) so every Hanzo service that
 // moves onto Base shares one on-disk convention.
 //
-//	DBPath("/data", "acme")  ->  /data/orgs/acme/visor.db
+//	DBPath("/data", "acme")  ->  /data/orgs/acme/compute.db
 //
 // The empty owner (catalog / cluster-global rows that no org owns) routes to the
 // _global sentinel, matching hanzo/cloud's fail-loud migration bucket.
@@ -247,5 +247,5 @@ func DBPath(root, owner string) string {
 	if owner == "" {
 		owner = "_global"
 	}
-	return filepath.Join(root, "orgs", owner, "visor.db")
+	return filepath.Join(root, "orgs", owner, "compute.db")
 }

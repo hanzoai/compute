@@ -18,7 +18,7 @@ import (
 	"github.com/zap-proto/zip"
 	"github.com/zap-proto/zip/middleware"
 
-	"github.com/hanzoai/visor/controllers"
+	"github.com/hanzoai/compute/controllers"
 )
 
 // h adapts a controller method to a zip.Handler: it binds a fresh controller to
@@ -32,7 +32,7 @@ func h(fn func(*controllers.ApiController)) zip.Handler {
 }
 
 // corsPolicy is what a browser is told it may send, and the header list is the
-// load-bearing part of it. Visor authenticates with a Bearer token, so leaving
+// load-bearing part of it. Compute authenticates with a Bearer token, so leaving
 // Authorization out of the preflight answer does not merely reject the header —
 // the browser refuses to send the request at all and reports it as a CORS
 // failure, which reads like a network fault and hides that the API was reachable
@@ -46,7 +46,7 @@ var corsPolicy = middleware.CORSConfig{
 	AllowCreds:    true,
 }
 
-// Route mounts the whole visor HTTP surface on app: the ambient filter chain
+// Route mounts the whole compute HTTP surface on app: the ambient filter chain
 // (recover, CORS, static, tenant, authz, record) followed by the /v1 API. The
 // filter order is load-bearing — static short-circuits before the authz seam, so
 // an asset is never gated; every /v1 route registered after the chain is
@@ -84,7 +84,7 @@ func Route(app *zip.App) {
 // none of those.
 func registerHealth(app *zip.App) {
 	zip.Get[Ping, Health](app, "/v1/health", health,
-		zip.WithSummary("Report whether visor can reach its store"),
+		zip.WithSummary("Report whether compute can reach its store"),
 		zip.WithOperationID("health"),
 		zip.WithTags("Health"),
 	)

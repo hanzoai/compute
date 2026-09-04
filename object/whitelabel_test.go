@@ -23,10 +23,10 @@ func TestGetWhitelabelConfig_KnownHosts(t *testing.T) {
 		wantOrg   string
 		wantColor string
 	}{
-		{"visor.hanzo.ai", "Hanzo Visor", "", "#ffffff"},
-		{"visor.lux.network", "Lux Visor", "lux", "#0066ff"},
-		{"visor.zoo.ngo", "Zoo Visor", "zoo", "#00cc66"},
-		{"visor.pars.network", "Pars Visor", "pars", "#ff6600"},
+		{"compute.hanzo.ai", "Hanzo Compute", "", "#ffffff"},
+		{"compute.lux.network", "Lux Compute", "lux", "#0066ff"},
+		{"compute.zoo.ngo", "Zoo Compute", "zoo", "#00cc66"},
+		{"compute.pars.network", "Pars Compute", "pars", "#ff6600"},
 	}
 
 	for _, tt := range tests {
@@ -44,16 +44,16 @@ func TestGetWhitelabelConfig_KnownHosts(t *testing.T) {
 }
 
 func TestGetWhitelabelConfig_StripsPort(t *testing.T) {
-	cfg := GetWhitelabelConfig("visor.lux.network:443")
-	if cfg.AppName != "Lux Visor" {
-		t.Errorf("expected Lux Visor with port suffix, got %q", cfg.AppName)
+	cfg := GetWhitelabelConfig("compute.lux.network:443")
+	if cfg.AppName != "Lux Compute" {
+		t.Errorf("expected Lux Compute with port suffix, got %q", cfg.AppName)
 	}
 }
 
 func TestGetWhitelabelConfig_DefaultFallback(t *testing.T) {
 	cfg := GetWhitelabelConfig("unknown.example.com")
-	if cfg.AppName != "Hanzo Visor" {
-		t.Errorf("expected default Hanzo Visor for unknown host, got %q", cfg.AppName)
+	if cfg.AppName != "Hanzo Compute" {
+		t.Errorf("expected default Hanzo Compute for unknown host, got %q", cfg.AppName)
 	}
 	if cfg.OrgFilter != "" {
 		t.Errorf("expected empty OrgFilter for default, got %q", cfg.OrgFilter)
@@ -62,8 +62,8 @@ func TestGetWhitelabelConfig_DefaultFallback(t *testing.T) {
 
 func TestGetWhitelabelConfig_Localhost(t *testing.T) {
 	cfg := GetWhitelabelConfig("localhost:19000")
-	if cfg.AppName != "Hanzo Visor" {
-		t.Errorf("expected default Hanzo Visor for localhost, got %q", cfg.AppName)
+	if cfg.AppName != "Hanzo Compute" {
+		t.Errorf("expected default Hanzo Compute for localhost, got %q", cfg.AppName)
 	}
 }
 

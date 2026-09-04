@@ -17,7 +17,7 @@
 
 package routers
 
-// The addresses visor used to serve, and the resource that replaced each.
+// The addresses compute used to serve, and the resource that replaced each.
 //
 // The successor is a COLLECTION or an ITEM a caller can dereference, never a
 // router pattern: RFC 8288 wants a URI reference in a Link, and "/v1/assets/

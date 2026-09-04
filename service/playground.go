@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/compute/conf"
 )
 
 // playground.go — a launched bot IS a playground node. registerPlaygroundNode
@@ -30,10 +30,10 @@ import (
 // (<playground>/v1/nodes) at launch so it appears there attributed to its org —
 // the same registry the bot's own @hanzo/bot runtime heartbeats into once up.
 //
-// visor is the org-attribution AUTHORITY: it resolved the org from the fleet
-// launch (server-injected, never trusted from the client body), so it is visor
+// compute is the org-attribution AUTHORITY: it resolved the org from the fleet
+// launch (server-injected, never trusted from the client body), so it is compute
 // — not the external @hanzo/bot runtime — that stamps the node's org. The
-// runtime keeps the node live via heartbeats; visor registers it, already
+// runtime keeps the node live via heartbeats; compute registers it, already
 // scoped to the right org, the moment the machine is created. This is why a bot
 // appears in its org's space immediately, independent of what token (if any)
 // the runtime later presents to the gateway.

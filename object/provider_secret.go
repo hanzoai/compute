@@ -20,8 +20,8 @@ import (
 	"strings"
 
 	"github.com/hanzoai/orm/relational/schemas"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object/kms"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object/kms"
 )
 
 // providerSecretKey is the KMS key a provider credential is sealed under. The
@@ -127,7 +127,7 @@ func saveProvider(p *Provider) (bool, error) {
 }
 
 // ConfigureKMS wires the KMS vault from the environment and, when
-// VISOR_KMS_BACKFILL is set, seals owner's existing plaintext provider secrets
+// COMPUTE_KMS_BACKFILL is set, seals owner's existing plaintext provider secrets
 // once. Dual-read (openSecret resolving either a reference or a plaintext) makes
 // the backfill safe to run once and safe to leave un-run — a deployment with no
 // KMS env keeps storing plaintext exactly as before.
@@ -136,7 +136,7 @@ func ConfigureKMS(owner string) {
 		logs.Warning("kms: not configured, provider secrets stay plaintext: %v", err)
 		return
 	}
-	if !kms.Configured() || strings.TrimSpace(os.Getenv("VISOR_KMS_BACKFILL")) == "" {
+	if !kms.Configured() || strings.TrimSpace(os.Getenv("COMPUTE_KMS_BACKFILL")) == "" {
 		return
 	}
 	n, err := BackfillProviderSecrets(owner)

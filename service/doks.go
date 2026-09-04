@@ -232,7 +232,7 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &gErr) && gErr.Code == http.StatusNotFound
 }
 
-// KubernetesCluster is a DOKS cluster in the shape visor surfaces: identity,
+// KubernetesCluster is a DOKS cluster in the shape compute surfaces: identity,
 // region, status and tags. Tags carry ownership (hanzo-org:<org>) used to scope a
 // platform-account cluster to the org that owns it.
 type KubernetesCluster struct {
@@ -264,8 +264,8 @@ func clusterFromGodo(c *godo.KubernetesCluster) *KubernetesCluster {
 // count that charges is the count that exists — not the count anybody asked for.
 //
 // The node list is preferred over the declared Count because an autoscaling pool
-// grows and shrinks without a request reaching visor: nothing writes the new
-// number down anywhere visor controls, and the nodes are the only ground truth.
+// grows and shrinks without a request reaching compute: nothing writes the new
+// number down anywhere compute controls, and the nodes are the only ground truth.
 // Count is the fallback for a pool the provider returned without node detail, so
 // a missing list is never read as "free".
 func liveNodes(p *NodePool) int {
@@ -275,7 +275,7 @@ func liveNodes(p *NodePool) int {
 	return p.Count
 }
 
-// poolsFromGodo maps DO node pools to visor NodePools via the ONE pool mapper, so
+// poolsFromGodo maps DO node pools to compute NodePools via the ONE pool mapper, so
 // pools sourced from a cluster Get expand identically to those from ListNodePools.
 func poolsFromGodo(gpools []*godo.KubernetesNodePool) []*NodePool {
 	pools := make([]*NodePool, 0, len(gpools))

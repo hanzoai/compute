@@ -25,8 +25,8 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 // A batch launched with count=N is just N machines named "<name>-000",

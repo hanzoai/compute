@@ -58,7 +58,7 @@ func TestBaseBackendPerOrgIsolation(t *testing.T) {
 		t.Fatalf("AddMachine org-b: %v", err)
 	}
 
-	// Each org got its own on-disk visor.db, and org-a's file was created by the
+	// Each org got its own on-disk compute.db, and org-a's file was created by the
 	// asset write (not org-b's).
 	for _, org := range []string{"org-a", "org-b"} {
 		if _, err := os.Stat(DBPath(bs.root, org)); err != nil {
@@ -157,7 +157,7 @@ func TestBaseBackendSharedTables(t *testing.T) {
 	// for an hour wins, a second claim for the same hour loses. Claiming needs an
 	// elected owner, so this test states that precondition rather than inheriting
 	// one — the claim gate fails closed when the replica set is unknown.
-	withMembership(t, stubMembership{id: "visor-only", set: []ha.Member{{ID: "visor-only"}}})
+	withMembership(t, stubMembership{id: "compute-only", set: []ha.Member{{ID: "compute-only"}}})
 
 	now := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
 	if !ClaimMeterHour(now) {
@@ -217,10 +217,10 @@ func TestModelRegistrySplit(t *testing.T) {
 }
 
 func TestDBPath(t *testing.T) {
-	if got, want := DBPath("/data", "acme"), "/data/orgs/acme/visor.db"; got != want {
+	if got, want := DBPath("/data", "acme"), "/data/orgs/acme/compute.db"; got != want {
 		t.Fatalf("DBPath = %q, want %q", got, want)
 	}
-	if got, want := DBPath("/data", ""), "/data/orgs/_global/visor.db"; got != want {
+	if got, want := DBPath("/data", ""), "/data/orgs/_global/compute.db"; got != want {
 		t.Fatalf("DBPath empty owner = %q, want %q", got, want)
 	}
 }

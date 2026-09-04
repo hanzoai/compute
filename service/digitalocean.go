@@ -52,7 +52,7 @@ func (c MachineDigitalOceanClient) LoadBalancers() LoadBalancerClientInterface {
 	return &LoadBalancerDigitalOceanClient{Client: c.Client, region: c.region}
 }
 
-// doAPITimeout bounds every call visor makes to DigitalOcean.
+// doAPITimeout bounds every call compute makes to DigitalOcean.
 //
 // An HTTP client with no timeout waits for as long as the socket stays open, and
 // a provision waits UNDER the org's provisioning hold (service.Provision). So one
@@ -62,7 +62,7 @@ func (c MachineDigitalOceanClient) LoadBalancers() LoadBalancerClientInterface {
 // hold.
 //
 // newDOClient is the ONE DigitalOcean client constructor: token auth, bounded.
-// Every DO surface visor drives — droplets, volumes, managed Kubernetes, cost —
+// Every DO surface compute drives — droplets, volumes, managed Kubernetes, cost —
 // builds through it, so "a DigitalOcean call cannot hang forever" is one
 // statement in one place rather than four that have to agree.
 // newDOClient builds the godo client over the carried transport. When the token
@@ -291,7 +291,7 @@ func (client MachineDigitalOceanClient) DeleteMachine(name string) error {
 
 // buildDropletTags creates DO tags from the spec metadata.
 func buildDropletTags(spec *CreateMachineSpec) []string {
-	tags := []string{"managed-by:hanzo-visor"}
+	tags := []string{managedByTag()}
 
 	// display-name/os are client-controlled too, so they get the SAME read-back
 	// guard as free-form tags: a value with a "," / ":" could smuggle a second
@@ -366,7 +366,7 @@ func buildBotUserData(spec *CreateMachineSpec) string {
 	}
 	// org is the authoritative attribution tag LaunchOrgMachine injected before
 	// CreateMachine — surfaced to the runtime so the bot gateway connection
-	// and playground heartbeats are scoped to the SAME org visor registered the
+	// and playground heartbeats are scoped to the SAME org compute registered the
 	// node under (registerPlaygroundNode). Empty for a non-org launch.
 	org := spec.Tags[orgTagKey]
 

@@ -16,7 +16,7 @@ package object
 
 // coordinator.go answers ONE money-safety question, identically on every replica:
 // "may THIS replica claim a billing lease right now?" It is the single-writer gate
-// that makes hourly metering EXACTLY-ONCE under the multi-replica visor Deployment.
+// that makes hourly metering EXACTLY-ONCE under the multi-replica compute Deployment.
 //
 // WHY THIS EXISTS. The billing leases (MeterLease, BillingLease, CostCursor) live on
 // the `_global` coordination DB. Under the Base backend that DB is a POD-LOCAL SQLite
@@ -37,7 +37,7 @@ package object
 // every replica computes the same owner from the same live membership set.
 //
 // WHERE THE MEMBERSHIP COMES FROM. Election needs the live replica set, and this
-// binary does not link a Kubernetes client to get it: visor is the MULTI-CLOUD VM
+// binary does not link a Kubernetes client to get it: compute is the MULTI-CLOUD VM
 // path, and cluster access belongs to the cluster controllers. So membership is a
 // registration seam over ha.Membership — the interface hanzoai/ha already defines for
 // exactly this, reused rather than re-declared. An operator that can enumerate
@@ -56,7 +56,7 @@ import (
 	"time"
 
 	"github.com/hanzoai/ha"
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // coordKey is the single coordination resource every replica elects an owner for:
@@ -76,7 +76,7 @@ var (
 )
 
 // RegisterMembership installs the live replica-set source election runs over. It is
-// the ONE seam by which a deployment that can enumerate visor's replicas (a cluster
+// the ONE seam by which a deployment that can enumerate compute's replicas (a cluster
 // controller, an operator sidecar) teaches this process who its peers are. A
 // single-process deployment registers ha.Static(id): the sole process is the sole
 // writer, so it correctly elects itself.
@@ -140,7 +140,7 @@ var unavailableOnce sync.Once
 func (u unavailableMembership) Self() string { return SelfID() }
 
 func (u unavailableMembership) Members(context.Context) ([]ha.Member, error) {
-	unavailableOnce.Do(func() { logs.Warning("visor billing: %s", u.reason) })
+	unavailableOnce.Do(func() { logs.Warning("compute billing: %s", u.reason) })
 	return nil, &membershipUnavailableError{reason: u.reason}
 }
 
@@ -150,7 +150,7 @@ func (u unavailableMembership) Members(context.Context) ([]ha.Member, error) {
 type membershipUnavailableError struct{ reason string }
 
 func (e *membershipUnavailableError) Error() string {
-	return "visor: replica membership unavailable: " + e.reason
+	return "compute: replica membership unavailable: " + e.reason
 }
 
 // SelfID is this replica's stable identity for HRW weighting: POD_NAME (Downward API)

@@ -39,7 +39,7 @@ func TestEgressIdentityIsMintedFromIAM(t *testing.T) {
 	defer srv.Close()
 
 	who := &identity{
-		endpoint: srv.URL, id: "visor", secret: "shh",
+		endpoint: srv.URL, id: "compute", secret: "shh",
 		audience: "hanzo-egress", client: srv.Client(),
 	}
 
@@ -56,8 +56,8 @@ func TestEgressIdentityIsMintedFromIAM(t *testing.T) {
 	if gotPath != "/v1/iam/oauth/token" {
 		t.Errorf("minted at %q, want /v1/iam/oauth/token", gotPath)
 	}
-	if gotUser != "visor" || gotPass != "shh" {
-		t.Errorf("basic auth = %q/%q, want visor/shh — the identity must be the client credential", gotUser, gotPass)
+	if gotUser != "compute" || gotPass != "shh" {
+		t.Errorf("basic auth = %q/%q, want compute/shh — the identity must be the client credential", gotUser, gotPass)
 	}
 	if gotGrant != "client_credentials" {
 		t.Errorf("grant_type = %q, want client_credentials", gotGrant)
@@ -90,12 +90,12 @@ func TestEgressIdentityRefusalNamesTheClient(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	who := &identity{endpoint: srv.URL, id: "visor", secret: "wrong", client: srv.Client()}
+	who := &identity{endpoint: srv.URL, id: "compute", secret: "wrong", client: srv.Client()}
 	_, err := who.token()
 	if err == nil {
 		t.Fatal("a refused exchange must not yield a token")
 	}
-	for _, want := range []string{"visor", "401", "invalid_client"} {
+	for _, want := range []string{"compute", "401", "invalid_client"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}

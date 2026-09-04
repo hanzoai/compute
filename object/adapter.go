@@ -19,8 +19,8 @@ import (
 	"runtime"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/util"
 	_ "github.com/lib/pq"
 
 	"github.com/hanzoai/orm/relational"
@@ -42,7 +42,7 @@ func InitAdapter() {
 	if ConfiguredBackend() == BackendBase {
 		bs, err := newBaseStore(dataRoot())
 		if err != nil {
-			panic(fmt.Errorf("visor: init base store: %w", err))
+			panic(fmt.Errorf("compute: init base store: %w", err))
 		}
 		store = bs
 		// Legacy `adapter.engine` references (pre-seam call sites, createDatabase)

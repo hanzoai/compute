@@ -29,9 +29,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/util"
 )
 
 // poolId resolves a request into the fully-qualified `owner/name` node-pool id it
@@ -240,7 +240,7 @@ func (c *ApiController) ScaleNodePool() {
 		return
 	}
 	// The address names the pool; the provider, the cluster and the upstream pool
-	// id are on the row visor already keeps. A caller that has to repeat them can
+	// id are on the row compute already keeps. A caller that has to repeat them can
 	// contradict them.
 	name := strings.TrimSpace(c.Ctx.Param("name"))
 	countStr := c.Ctx.Query("count")

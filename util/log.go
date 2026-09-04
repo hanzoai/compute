@@ -17,7 +17,7 @@ package util
 import (
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // LogInfo writes a request-scoped info line prefixed with the caller IP, read

@@ -20,13 +20,13 @@ package controllers
 import (
 	"strings"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 // A machine is a machine, wherever it runs.
 //
-// There were two collections. One read a table visor rebuilds from the
+// There were two collections. One read a table compute rebuilds from the
 // organization's OWN provider credentials; the other read the cloud API on the
 // house account. A caller wanting "the machines I have" had to ask both and
 // join them — hanzoai/cloud did exactly that, into variables named registry and
@@ -39,7 +39,7 @@ import (
 // only the source differed — which is a property of a machine, not a reason for
 // a second address.
 //
-// Source says which. Registry wins a collision, because a machine visor has a
+// Source says which. Registry wins a collision, because a machine compute has a
 // row for is one it knows more about than the cloud listing does.
 const (
 	sourceRegistry = "registry"

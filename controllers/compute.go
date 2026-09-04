@@ -40,18 +40,18 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 // resolveComputeOrg returns the org that owns this request, IAM-native and
 // spoof-proof:
 //  1. an authenticated user's org (Owner claim) is authoritative and a
 //     client-supplied owner is ignored for real users; or
-//  2. for a trusted service call (authenticated as the visor app via ApiFilter,
+//  2. for a trusted service call (authenticated as the compute app via ApiFilter,
 //     e.g. the console proxy), the explicit owner query param is honored — the
 //     same model the PaaS proxy uses (PAAS_ORG_ID). Only a caller holding the
-//     KMS-held visor client secret reaches this branch.
+//     KMS-held compute client secret reaches this branch.
 //
 // Empty result means "no org context" and the caller fails closed.
 //
@@ -215,7 +215,7 @@ func (c *ApiController) ListComputeMachines() {
 // unionMachines merges machine lists from independent sources into ONE deduped
 // slice: a machine is claimed by provider id OR name, and the FIRST source to
 // carry it wins (later sources contribute only what is not already present). This
-// is the visor-side analogue of the cloud fleet dedup — a DOKS node whose droplet
+// is the compute-side analogue of the cloud fleet dedup — a DOKS node whose droplet
 // is also in the droplet list appears once (deduped by droplet id). Ordered
 // sources let the caller pick the winner.
 func unionMachines(sources ...[]*service.Machine) []*service.Machine {

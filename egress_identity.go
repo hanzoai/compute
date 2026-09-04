@@ -24,9 +24,9 @@ import (
 	"time"
 )
 
-// identity mints the access token visor presents to egress.
+// identity mints the access token compute presents to egress.
 //
-// It is visor's OWN IAM identity — the clientId and clientSecret this process
+// It is compute's OWN IAM identity — the clientId and clientSecret this process
 // already signs in with — exchanged for an access token, not a second
 // credential minted for this purpose. Egress verifies it the way every other
 // service verifies a caller: `iss` against the issuer, `aud` against the

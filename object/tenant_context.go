@@ -23,9 +23,9 @@
 // Org and project OVERLAP zip.CallerOf, deliberately and not by accident: zip
 // reads the same X-Org-Id / X-Project-Id off the same request, so a typed op can
 // have the caller's org without any of this. What zip does NOT carry is the rest
-// of visor's hierarchy — app, tenant, actor, env — nor the two rules underneath
+// of compute's hierarchy — app, tenant, actor, env — nor the two rules underneath
 // it: org falls back to the whitelabel hostname's filter, and tenant defaults to
-// org. Those are visor's, so this stays until an op needs only org, and then it
+// org. Those are compute's, so this stays until an op needs only org, and then it
 // should ask zip rather than grow a second accessor here.
 package object
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package conf is visor's ONE configuration reader. It replaces Beego's global
+// Package conf is compute's ONE configuration reader. It replaces Beego's global
 // AppConfig with a small, dependency-light loader: conf/app.conf is parsed once
 // (ini format), each value's ${VAR||default} form is expanded against the
 // environment exactly as Beego did, and lookups fall through env → file →
@@ -93,7 +93,7 @@ func GetConfigString(key string) string {
 		if key == "staticBaseUrl" {
 			res = "https://cdn.hanzo.ai"
 		} else if key == "logConfig" {
-			res = "{\"filename\": \"logs/visor.log\", \"maxdays\":99999, \"perm\":\"0770\"}"
+			res = "{\"filename\": \"logs/compute.log\", \"maxdays\":99999, \"perm\":\"0770\"}"
 		}
 	}
 

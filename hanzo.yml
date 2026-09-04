@@ -1,4 +1,4 @@
-# Hanzo Visor — the one file that says how this repo builds, gates and ships.
+# Hanzo Compute — the one file that says how this repo builds, gates and ships.
 #
 # It replaces a caller of hanzoai/.github's docker-build.yml, which built and
 # pushed to ghcr and stopped there. hanzoai/ci's build.yml does the same push and
@@ -7,12 +7,16 @@
 # arrangement source already has, where the forge is canonical and GitHub mirrors
 # it. What changed is that ours gets a copy at all.
 #
-# The version is DERIVED, never typed. This repo carries no package.json,
-# Cargo.toml, VERSION or pyproject.toml, so imgver reads the registry floor —
-# the highest semver already published for this image — and publishes the next
-# patch. ghcr.io/hanzoai/visor is at 1.108.30, so the next build is 1.108.31 and
-# the series this repo has been on since 1.108.x continues unbroken. Adding a
-# VERSION file later would take precedence; there is no reason to.
+# The version is normally DERIVED: imgver reads the registry floor — the highest
+# semver already published for this image — and publishes the next patch. That
+# floor is per image NAME, and this image was renamed. ghcr.io/hanzoai/visor is
+# at 1.108.30; ghcr.io/hanzoai/compute is a package that does not exist yet, so
+# imgver reads no floor and, having nothing to derive from, fails the build.
+#
+# The VERSION file next to this one carries the series across the rename: 1.108.31
+# is the number the old name was owed, imgver publishes it exactly once, and from
+# the build after that the compute package is its own floor again and the file
+# stops mattering. Do not bump it by hand — the registry took the series back.
 
 test:
   - name: build-and-vet
@@ -22,10 +26,10 @@ test:
       go vet ./...
 
 images:
-  - name: visor
+  - name: compute
     context: .
     dockerfile: Dockerfile
-    repo: ghcr.io/hanzoai/visor
+    repo: ghcr.io/hanzoai/compute
     # amd64-only, carried over from the previous caller and still true: DOKS has
     # no arm64 droplets, so there is no arm64 deploy target, and a queued arm64
     # job would block the manifest step behind a runner that never claims it.

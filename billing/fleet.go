@@ -23,7 +23,7 @@
 //
 // The tier is a property of the compute source (a Provider vs a FleetWorker.Kind),
 // resolved here; there is one debit path, three rates. Money safety: every unit is
-// claimed cluster-wide via object BillingLease before it is billed, because visor
+// claimed cluster-wide via object BillingLease before it is billed, because compute
 // runs replicas: 2 with no leader election and commerce does not dedup on requestId.
 // Honesty: no spend or exemption is ever fabricated — an unreadable cost is skipped
 // (no fee) and an unverified validator is billed (flagged), never the reverse.
@@ -39,11 +39,11 @@ import (
 	"time"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/visor/chain"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/chain"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // Fleet-billing tiers (the metering line's Status + telemetry tier).

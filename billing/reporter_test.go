@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 // TestMain gives this package a REAL per-org store. The property that matters
@@ -37,7 +37,7 @@ import (
 // DATA_ROOT is set before anything reads conf, so ${DATA_ROOT||/data} expands to
 // a temp dir and the Base backend opens its per-org SQLite there.
 func TestMain(m *testing.M) {
-	root, err := os.MkdirTemp("", "visor-billing-store-")
+	root, err := os.MkdirTemp("", "compute-billing-store-")
 	if err != nil {
 		panic(err)
 	}
@@ -490,7 +490,7 @@ func TestADroppedRowDoesNotStopBillingALiveCluster(t *testing.T) {
 
 // RED-7. A pool that autoscaled from one node to sixteen. Nothing wrote the new
 // count down: the upstream grows the pool on its own and no request reaches
-// visor, so the row still says one. Billing the row bills one-sixteenth of what
+// compute, so the row still says one. Billing the row bills one-sixteenth of what
 // is running.
 func TestAnAutoscaledPoolBillsTheNodesItGrewTo(t *testing.T) {
 	f := commerceOf(t)

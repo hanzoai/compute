@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/digitalocean/godo"
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // orgTagKey/orgTag namespace droplets by the Hanzo org that owns them. Per-org
@@ -39,6 +39,18 @@ import (
 const orgTagKey = "hanzo-org"
 
 func orgTag(org string) string { return orgTagKey + ":" + org }
+
+// managedBy is the value stamped on every machine, volume and cluster this
+// service creates, and the value it filters on to find them again. It reads
+// "hanzo-visor" because it is written into DigitalOcean, Hetzner and AWS — not
+// into this repo — and the resources carrying it are running now. The repo was
+// renamed to compute; this string was not, because changing it would make every
+// live resource invisible to the service that owns it. Retiring it is a
+// migration (retag, then flip), never a rename.
+const managedBy = "hanzo-visor"
+
+// managedByTag is managedBy in the "key:value" tag shape DigitalOcean uses.
+func managedByTag() string { return "managed-by:" + managedBy }
 
 // projectTag namespaces a droplet by the project (WITHIN its org) that owns it,
 // using the same "key:value" tag shape as orgTag. projectTagKey ("hanzo-project")
@@ -642,7 +654,7 @@ func createClusterMetered(ctx context.Context, client clusterCreator, record rec
 	// A cluster's seed pool does not autoscale — CreateClusterSpec carries no
 	// bounds — so the ceiling and the charge are the same count.
 	err = Provision(ctx, org, project, hourly*int64(count), hourly*int64(count), spec.NodePool.Size, func() (string, error) {
-		c, err := client.CreateCluster(ctx, spec, []string{"managed-by:hanzo-visor", orgTag(org)})
+		c, err := client.CreateCluster(ctx, spec, []string{managedByTag(), orgTag(org)})
 		if err != nil {
 			return "", err
 		}
@@ -790,7 +802,7 @@ func dropletHasAnyOrgTag(d godo.Droplet) bool {
 //     for a cluster's nodes — it is the one that knows the pool, its size and its
 //     live count — so a Kubernetes worker is not a machine here.
 //
-//     Skipping it is now a property of VISOR, not of how DigitalOcean happens to
+//     Skipping it is now a property of COMPUTE, not of how DigitalOcean happens to
 //     tag things: the guard holds whether or not the cluster tag propagates. It
 //     used to rest on the unverified belief that worker droplets carry no
 //     hanzo-org tag, which is a claim about somebody else's product.

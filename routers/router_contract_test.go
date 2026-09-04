@@ -27,7 +27,7 @@ import (
 // and the ApiController method that serves it.
 type route struct{ method, path, handler string }
 
-// apiContract is visor's /v1 surface, written out by hand: every verb, path and
+// apiContract is compute's /v1 surface, written out by hand: every verb, path and
 // handler this service serves.
 //
 // It began as the migration's acceptance criterion — transcribed from the
@@ -38,15 +38,15 @@ type route struct{ method, path, handler string }
 //
 // It is NOT retired now that the migration is over, and it is not a record of
 // what some previous framework happened to do. It is the declared contract, and
-// the property it pins is the one that outlives any framework: what visor SERVES
-// equals what visor SAYS it serves. A route added without a line here fails, and
+// the property it pins is the one that outlives any framework: what compute SERVES
+// equals what compute SAYS it serves. A route added without a line here fails, and
 // so does a line here without a route.
 //
 // Deliberately hand-written rather than derived from registerAPI: a table
 // generated from the code under test agrees with that code by construction and
 // proves nothing.
 //
-// Changing a line here changes visor's public API. That is the point.
+// Changing a line here changes compute's public API. That is the point.
 var apiContract = []route{
 	// The TYPED ops, whose handlers are package functions rather than
 	// ApiController methods: health and the k8s worker nodes here, a machine's
@@ -136,7 +136,7 @@ var apiContract = []route{
 // key renders a route as "METHOD path" for set comparison.
 func (r route) key() string { return r.method + " " + r.path }
 
-// registeredRoutes returns the verb+path set visor actually installs on a fresh
+// registeredRoutes returns the verb+path set compute actually installs on a fresh
 // app, read back off the live fiber router (not re-parsed from source), so the
 // assertion covers what the server will really serve.
 //
@@ -163,7 +163,7 @@ func registeredRoutes(t *testing.T) map[string]bool {
 	return got
 }
 
-// TestAPIContractPreserved is the standing check: the routes visor registers are
+// TestAPIContractPreserved is the standing check: the routes compute registers are
 // exactly the routes it declares — none dropped, none invented. It caught the
 // framework swap that motivated it, and it now catches the ordinary case: a
 // route that ships without a contract line, or a contract line with no route.

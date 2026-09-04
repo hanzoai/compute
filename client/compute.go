@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package client — canonical client interface for Hanzo Visor.
+// Package client — canonical client interface for Hanzo Compute.
 //
-//	import visor "github.com/hanzoai/visor/client"
-//	var v visor.VM = visor.NewClient(cfg)
+//	import compute "github.com/hanzoai/compute/client"
+//	var v compute.VM = compute.NewClient(cfg)
 
 package client
 

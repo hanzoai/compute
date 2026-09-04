@@ -28,14 +28,14 @@ import (
 // depend on one — the dependency is unpatchable by construction, whatever the
 // code inside says. It is the Casdoor lineage's old home; its ROOT package was
 // a second copy of the Casdoor Go SDK, 67 of 73 files byte-identical to
-// github.com/hanzoai/iamsdk/v2/iamsdk, which is live and tagged. visor required
+// github.com/hanzoai/iamsdk/v2/iamsdk, which is live and tagged. compute required
 // it DIRECTLY while also linking the v2 lineage through cloud — one binary, both
 // implementations. The SDK is the one that stays.
 //
-// SECOND WEB FRAMEWORK. visor serves on zip and only zip. Beego is named here
-// because visor WAS a Beego service and the rip is the reason this list grew:
+// SECOND WEB FRAMEWORK. compute serves on zip and only zip. Beego is named here
+// because compute WAS a Beego service and the rip is the reason this list grew:
 // the import is gone, and this is what keeps it gone. The rest never shipped in
-// visor and are listed so they cannot arrive — a framework does not have to be
+// compute and are listed so they cannot arrive — a framework does not have to be
 // used to be linked, and a second router reachable from the binary is a second
 // place a route can exist. One framework is not a preference about style; it is
 // what makes the served route table knowable from one file.
@@ -43,24 +43,24 @@ import (
 // zip's OWN engine (github.com/zap-proto/fiber, github.com/valyala/fasthttp) is
 // deliberately absent: zip requires it, so banning it here would ban zip. That
 // engine is not a second framework — it is the one framework's underside — and
-// whether visor reaches past zip to touch it is a question about visor's source,
+// whether compute reaches past zip to touch it is a question about compute's source,
 // which this file cannot see and does not pretend to.
 var banned = map[string]string{
 	"github.com/hanzoai/iam-v1": "archived Casdoor fork — use github.com/hanzoai/iamsdk/v2/iamsdk",
 
-	"github.com/beego/beego":              "visor's old framework — it serves on github.com/zap-proto/zip",
+	"github.com/beego/beego":              "compute's old framework — it serves on github.com/zap-proto/zip",
 	"github.com/astaxie/beego":            "Beego's pre-rename import path — same framework, older address",
-	"github.com/gin-gonic/gin":            "second web framework — visor serves on github.com/zap-proto/zip",
-	"github.com/labstack/echo":            "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/gin-gonic/gin":            "second web framework — compute serves on github.com/zap-proto/zip",
+	"github.com/labstack/echo":            "second web framework — compute serves on github.com/zap-proto/zip",
 	"github.com/gofiber/fiber":            "second web framework — zip's engine is github.com/zap-proto/fiber, reached through zip",
-	"github.com/gorilla/mux":              "second router — visor serves on github.com/zap-proto/zip",
-	"github.com/go-chi/chi":               "second router — visor serves on github.com/zap-proto/zip",
-	"github.com/julienschmidt/httprouter": "second router — visor serves on github.com/zap-proto/zip",
-	"github.com/kataras/iris":             "second web framework — visor serves on github.com/zap-proto/zip",
-	"github.com/gobuffalo/buffalo":        "second web framework — visor serves on github.com/zap-proto/zip",
-	"github.com/revel/revel":              "second web framework — visor serves on github.com/zap-proto/zip",
-	"github.com/go-martini/martini":       "second web framework — visor serves on github.com/zap-proto/zip",
-	"github.com/urfave/negroni":           "second middleware stack — visor's chain is zip's",
+	"github.com/gorilla/mux":              "second router — compute serves on github.com/zap-proto/zip",
+	"github.com/go-chi/chi":               "second router — compute serves on github.com/zap-proto/zip",
+	"github.com/julienschmidt/httprouter": "second router — compute serves on github.com/zap-proto/zip",
+	"github.com/kataras/iris":             "second web framework — compute serves on github.com/zap-proto/zip",
+	"github.com/gobuffalo/buffalo":        "second web framework — compute serves on github.com/zap-proto/zip",
+	"github.com/revel/revel":              "second web framework — compute serves on github.com/zap-proto/zip",
+	"github.com/go-martini/martini":       "second web framework — compute serves on github.com/zap-proto/zip",
+	"github.com/urfave/negroni":           "second middleware stack — compute's chain is zip's",
 }
 
 // covers reports whether module path f is banned path p, or a package/major
@@ -138,7 +138,7 @@ func TestBannedInCatchesFrameworks(t *testing.T) {
 }
 
 // TestBannedInSpares proves the prefix match does not overreach. Every line here
-// is how visor actually serves, and each is one boundary slip away from a banned
+// is how compute actually serves, and each is one boundary slip away from a banned
 // path: zip's engine is a fiber, and the websocket packages sit next to a router
 // that is banned by the same first two path elements.
 func TestBannedInSpares(t *testing.T) {
@@ -152,7 +152,7 @@ func TestBannedInSpares(t *testing.T) {
 		"\tgithub.com/gofiber/utils/v2 v2.0.4\n",
 	} {
 		if got := bannedIn(req); len(got) != 0 {
-			t.Errorf("bannedIn(%q) = %v, want none — that is how visor serves", strings.TrimSpace(req), got)
+			t.Errorf("bannedIn(%q) = %v, want none — that is how compute serves", strings.TrimSpace(req), got)
 		}
 	}
 }

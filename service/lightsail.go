@@ -209,7 +209,7 @@ func (client MachineLightsailClient) CreateMachine(spec *CreateMachineSpec) (*Ma
 	}
 	tags = append(tags, lsTypes.Tag{
 		Key:   aws.String("ManagedBy"),
-		Value: aws.String("hanzo-visor"),
+		Value: aws.String(managedBy),
 	})
 	for k, v := range spec.Tags {
 		tags = append(tags, lsTypes.Tag{

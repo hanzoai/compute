@@ -23,10 +23,10 @@ import (
 	"github.com/zap-proto/zip"
 )
 
-// declared is one op as visor DECLARES it, read off a fresh app's registry.
+// declared is one op as compute DECLARES it, read off a fresh app's registry.
 //
 // It is a different question from registeredRoutes (router_contract_test.go):
-// that one asks what visor SERVES, this asks what it DECLARES, and the gap
+// that one asks what compute SERVES, this asks what it DECLARES, and the gap
 // between the two sets is exactly the surface no projection can see.
 type declared struct {
 	key     string
@@ -60,7 +60,7 @@ func registry(t *testing.T) []declared {
 // property is being in the REGISTRY, because that single entry is what the
 // OpenAPI document, the MCP tool list, the CLI and every generated SDK are
 // derived from. A route absent from it is on the wire and nowhere else, which is
-// how cloud came to hand-write a client for a shape visor never published.
+// how cloud came to hand-write a client for a shape compute never published.
 func TestNodesIsDeclared(t *testing.T) {
 	const want = "GET /v1/k8s/nodes"
 

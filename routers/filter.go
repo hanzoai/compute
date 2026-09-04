@@ -32,15 +32,15 @@ var (
 	swaggerFS = os.DirFS("swagger")
 )
 
-// MCPPath is where visor serves MCP. Stated here, in the package that owns
+// MCPPath is where compute serves MCP. Stated here, in the package that owns
 // the HTTP surface, and handed to zip.Config — so the path the static filter
 // lets through and the path zip mounts are the same string and cannot drift
 // into an endpoint that exists and cannot be reached.
 const MCPPath = "/mcp"
 
-// control are the paths zip serves on visor's behalf: the OpenAPI document, the
+// control are the paths zip serves on compute's behalf: the OpenAPI document, the
 // page over it, and the MCP endpoint. They are PROJECTIONS of the typed ops
-// rather than routes visor wrote, which is exactly why static swallowed them —
+// rather than routes compute wrote, which is exactly why static swallowed them —
 // the rule below is "anything that is not /v1/ is a file", and these are neither.
 //
 // The failure was quiet, which is the reason for naming them explicitly. With no

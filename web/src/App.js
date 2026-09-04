@@ -411,7 +411,7 @@ class App extends Component {
             textAlign: "center",
           }
         }>
-          Powered by <a target="_blank" href={this.state.whitelabel?.docsUrl || "https://hanzo.ai"} rel="noreferrer">{this.state.whitelabel?.appName || "Hanzo Visor"}</a>
+          Powered by <a target="_blank" href={this.state.whitelabel?.docsUrl || "https://hanzo.ai"} rel="noreferrer">{this.state.whitelabel?.appName || "Hanzo Compute"}</a>
         </Footer>
       </React.Fragment>
     );

@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/hanzoai/orm/relational/schemas"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/util"
 )
 
 type NodePool struct {
@@ -515,7 +515,7 @@ func poolNodes(spec *service.CreateNodePoolSpec) int {
 //
 // The ceiling matters because nothing gates that growth. MinNodes/MaxNodes/
 // AutoScale are forwarded to the upstream, which then adds nodes whenever the
-// scheduler asks — no request reaches visor, so the money gate never runs. An org
+// scheduler asks — no request reaches compute, so the money gate never runs. An org
 // authorized for one node could have a pool that walks to its ceiling of sixteen
 // on a balance that never covered them. Authorizing the ceiling up front is what
 // makes "authorized" mean "can afford what this pool is allowed to become".
@@ -707,7 +707,7 @@ func poolCloudClient(stored *NodePool) (cloudNodePoolDeleter, error) {
 //
 // It used to gate the whole upstream round-trip on the BODY's PoolID and Provider
 // being non-empty. Omit either — send `{"name":"gpu"}` and nothing else — and
-// visor skipped the provider entirely and deleted the row: the cluster kept
+// compute skipped the provider entirely and deleted the row: the cluster kept
 // running on the configured cloud account and the row that billed it was gone. The body
 // is the customer's, so opting out of the upstream check was one absent JSON field
 // away. It also resolved the Provider from the body, and treated a Provider it

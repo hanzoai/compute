@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-// providerTimeout bounds every call visor makes to a cloud. An HTTP client with
+// providerTimeout bounds every call compute makes to a cloud. An HTTP client with
 // no timeout waits as long as the socket stays open, and a provision waits under
 // the org's provisioning hold.
 const providerTimeout = 30 * time.Second
@@ -29,7 +29,7 @@ const providerTimeout = 30 * time.Second
 //
 // This is the ONE place a cloud credential turns into an outbound request, which
 // is what makes it the one place the credential can stop being here. Registered
-// with a carrier that reaches hanzoai/egress, visor sends the request and egress
+// with a carrier that reaches hanzoai/egress, compute sends the request and egress
 // attaches the key: the token is never in this process, never in its environment
 // and never in its config, so reading a pod here yields nothing to spend.
 //
@@ -43,7 +43,7 @@ var (
 )
 
 // RegisterCarrier installs the carrier every provider client is built with.
-// Unregistered, visor holds the token itself and calls the cloud directly —
+// Unregistered, compute holds the token itself and calls the cloud directly —
 // which is what it did before egress existed and what a single-binary or local
 // run still wants.
 func RegisterCarrier(c Carrier) {
@@ -61,7 +61,7 @@ func carrierRegistered() bool {
 }
 
 // httpFor returns the client for one account. It is the only caller of the
-// registered carrier, so "how does visor reach a cloud" has one answer.
+// registered carrier, so "how does compute reach a cloud" has one answer.
 func httpFor(p Credential) (*http.Client, error) {
 	carrierMu.RLock()
 	c := carrier
@@ -72,7 +72,7 @@ func httpFor(p Credential) (*http.Client, error) {
 	return directHTTP(), nil
 }
 
-// directHTTP is the carrier-less client: visor's own transport, bounded, with no
+// directHTTP is the carrier-less client: compute's own transport, bounded, with no
 // credential attached — the SDK adds that from the token it was handed.
 func directHTTP() *http.Client {
 	return &http.Client{Timeout: providerTimeout}

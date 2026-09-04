@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package telemetry is visor's OpenTelemetry seam: ONE place that wires OTel
+// Package telemetry is compute's OpenTelemetry seam: ONE place that wires OTel
 // traces + metrics to the o11y collector over ZAP (the same OTEL_EXPORTER_OTLP_*
 // contract zen-gateway uses to emit GenAI telemetry), and ONE small API the rest
-// of visor calls to attribute spans/metrics per org+project.
+// of compute calls to attribute spans/metrics per org+project.
 //
-// It is a leaf package — it imports only the OpenTelemetry SDK and visor's own
+// It is a leaf package — it imports only the OpenTelemetry SDK and compute's own
 // logs (which is log/slog), so service/ and controllers/ can instrument the
 // provision/list/delete/meter paths without an import cycle. When O11Y_ENDPOINT is unset the
 // pipeline is a no-op (disabled): the global no-op providers back every span and
 // counter, so instrumentation stays branch-free and a local/dev run never spams a
 // nonexistent collector. Setup is best-effort — a failure logs and disables
-// telemetry, never breaks visor.
+// telemetry, never breaks compute.
 package telemetry
 
 import (
@@ -33,7 +33,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 	luxtrace "github.com/luxfi/trace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -44,14 +44,14 @@ import (
 
 // defaultServiceName is the OTel service.name for this process unless overridden
 // by O11Y_SERVICE_NAME (the standard OTel env knob).
-const defaultServiceName = "visor"
+const defaultServiceName = "compute"
 
 // enabled reports whether the real OTLP pipeline was installed. It gates only
 // logging/reporting; the instrumentation helpers work regardless (no-op providers
 // when disabled), so no caller branches on it.
 var enabled bool
 
-// Enabled reports whether visor is exporting real OTel data to an OTLP collector.
+// Enabled reports whether compute is exporting real OTel data to an OTLP collector.
 func Enabled() bool { return enabled }
 
 // ContextFromRequest extracts any inbound W3C trace context from the request
@@ -62,7 +62,7 @@ func ContextFromRequest(r *http.Request) context.Context {
 	return otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 }
 
-// serviceName resolves the OTel service.name (O11Y_SERVICE_NAME or "visor").
+// serviceName resolves the OTel service.name (O11Y_SERVICE_NAME or "compute").
 func serviceName() string {
 	if n := strings.TrimSpace(os.Getenv("O11Y_SERVICE_NAME")); n != "" {
 		return n
@@ -97,7 +97,7 @@ func Init(ctx context.Context) func(context.Context) error {
 		return noop
 	}
 
-	// Propagate W3C trace context (+ baggage) so a span visor starts links to the
+	// Propagate W3C trace context (+ baggage) so a span compute starts links to the
 	// gateway's incoming trace, giving one end-to-end trace across the edge.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},

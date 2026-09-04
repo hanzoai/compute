@@ -85,7 +85,7 @@ func TestGatedRouteStillGated(t *testing.T) {
 // TestHealthIsDeclared proves health is a TYPED op and not merely a route. The
 // registry is what every projection reads — the OpenAPI document, the MCP tool
 // list, the CLI, the by-name call plane — so an op absent from it is served over
-// HTTP and invisible everywhere else. That was visor's whole state before this:
+// HTTP and invisible everywhere else. That was compute's whole state before this:
 // an app with no typed op projects nothing.
 func TestHealthIsDeclared(t *testing.T) {
 	app := zip.New(zip.Config{})
@@ -106,7 +106,7 @@ func TestHealthIsDeclared(t *testing.T) {
 }
 
 // TestControlPlaneNotShadowed proves static yields to the surfaces zip serves on
-// visor's behalf. These are where a typed op becomes an OpenAPI document and an
+// compute's behalf. These are where a typed op becomes an OpenAPI document and an
 // MCP tool, so a static filter that answers them first does not merely hide a
 // page — it makes the whole projection unreachable while the op looks fine.
 //

@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: visor-config
+  name: compute-config
   namespace: hanzo
 type: Opaque
 stringData:
   app.conf: |
-    appname = hanzo-visor
+    appname = hanzo-compute
     httpport = 19000
     runmode = prod
     SessionOn = true
@@ -30,7 +30,7 @@ stringData:
     enableExtraPages = false
     defaultLanguage = "en"
     staticBaseUrl = "https://cdn.hanzo.ai"
-    htmlTitle = "Hanzo Visor"
+    htmlTitle = "Hanzo Compute"
     faviconUrl = "https://cdn.hanzo.ai/static/favicon.png"
     logoUrl = "https://cdn.hanzo.ai/img/hanzo-visor-logo.png"
     showGithubCorner = false
@@ -45,7 +45,7 @@ stringData:
 # apiVersion: external-secrets.io/v1beta1
 # kind: ExternalSecret
 # metadata:
-#   name: visor-credentials
+#   name: compute-credentials
 #   namespace: hanzo
 # spec:
 #   refreshInterval: 1h
@@ -53,20 +53,20 @@ stringData:
 #     name: hanzo-kms
 #     kind: ClusterSecretStore
 #   target:
-#     name: visor-env
+#     name: compute-env
 #   data:
 #     - secretKey: DB_DSN
 #       remoteRef:
-#         key: visor/db-dsn
+#         key: compute/db-dsn
 #     - secretKey: IAM_CLIENT_ID
 #       remoteRef:
-#         key: visor/iam-client-id
+#         key: compute/iam-client-id
 #     - secretKey: IAM_CLIENT_SECRET
 #       remoteRef:
-#         key: visor/iam-client-secret
+#         key: compute/iam-client-secret
 #     - secretKey: COMMERCE_URL
 #       remoteRef:
-#         key: visor/commerce-url
+#         key: compute/commerce-url
 #     - secretKey: COMMERCE_TOKEN
 #       remoteRef:
-#         key: visor/commerce-token
+#         key: compute/commerce-token

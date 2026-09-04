@@ -33,7 +33,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // providerAWS is AWS's name as NewMachineClient spells it.
@@ -42,8 +42,8 @@ const providerAWS = "AWS"
 // The two IAM roles every EKS cluster needs, ensured once per account: the one
 // the control plane assumes and the one its worker instances run as.
 const (
-	eksClusterRole = "hanzo-visor-eks-cluster"
-	eksNodeRole    = "hanzo-visor-eks-node"
+	eksClusterRole = managedBy + "-eks-cluster"
+	eksNodeRole    = managedBy + "-eks-node"
 
 	// eksClusterHeader names the cluster inside the presigned STS request, which
 	// is how the cluster's authenticator ties the token to itself.

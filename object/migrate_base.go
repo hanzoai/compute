@@ -29,7 +29,7 @@ type MigrationReport struct {
 	Orgs        int // distinct owner DBs the rows fanned into
 }
 
-// MigratePostgresToBase copies the per-tenant visor tables from the shared
+// MigratePostgresToBase copies the per-tenant compute tables from the shared
 // Postgres engine into per-org Base SQLite files, routing each row to
 // DBPath(owner). It iterates perOrgModels() -- the SAME registry the Base schema
 // sync uses -- so it can never drift from what an org DB actually holds. The
@@ -38,17 +38,17 @@ type MigrationReport struct {
 // LLM.md, Base backend: shared vs per-org).
 //
 // It NEVER runs at boot: an operator invokes it explicitly during the cutover
-// window (e.g. a `visor migrate` subcommand). Rows are grouped by their Owner
+// window (e.g. a `compute migrate` subcommand). Rows are grouped by their Owner
 // field; the rare row with an empty Owner (e.g. a Record whose Organization was
 // unset) routes to the _global sentinel DB. This mirrors hanzo/cloud's
-// introspective migration/pg_to_sqlite.go, but is schema-aware because visor
+// introspective migration/pg_to_sqlite.go, but is schema-aware because compute
 // owns its models rather than a drifted upstream schema.
 func MigratePostgresToBase(src *relational.Engine, dst *baseStore) ([]MigrationReport, error) {
 	if src == nil {
-		return nil, fmt.Errorf("visor: migrate: nil source engine")
+		return nil, fmt.Errorf("compute: migrate: nil source engine")
 	}
 	if dst == nil {
-		return nil, fmt.Errorf("visor: migrate: nil base store")
+		return nil, fmt.Errorf("compute: migrate: nil base store")
 	}
 
 	reports := make([]MigrationReport, 0, len(perOrgModels()))
@@ -69,7 +69,7 @@ func migrateModel(src *relational.Engine, dst *baseStore, model interface{}) (Mi
 	// A []*Model slice to receive every source row.
 	rowsPtr := reflect.New(reflect.SliceOf(reflect.PtrTo(elemType)))
 	if err := src.Find(rowsPtr.Interface()); err != nil {
-		return rep, fmt.Errorf("visor: migrate: read %s: %w", rep.Table, err)
+		return rep, fmt.Errorf("compute: migrate: read %s: %w", rep.Table, err)
 	}
 	rows := rowsPtr.Elem()
 	rep.SourceRows = rows.Len()
@@ -82,7 +82,7 @@ func migrateModel(src *relational.Engine, dst *baseStore, model interface{}) (Mi
 			return rep, err
 		}
 		if _, err := engine.Insert(rows.Index(i).Interface()); err != nil {
-			return rep, fmt.Errorf("visor: migrate: write %s owner=%q: %w", rep.Table, owner, err)
+			return rep, fmt.Errorf("compute: migrate: write %s owner=%q: %w", rep.Table, owner, err)
 		}
 		rep.WrittenRows++
 		if owner == "" {

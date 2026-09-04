@@ -15,13 +15,13 @@
 package controllers
 
 import (
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/util"
 	"strings"
 
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // ApiController is the ZAP-native controller base. It carries the request

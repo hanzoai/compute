@@ -188,7 +188,7 @@ func TestOrgIsolationPredicate(t *testing.T) {
 //
 // The node-pool sweep is the meter of record for a cluster's nodes, so the
 // machine meter must not admit a Kubernetes worker — whether or not DigitalOcean
-// propagates the tag. That is what makes this a property of visor.
+// propagates the tag. That is what makes this a property of compute.
 func TestBillableDroplet_KubernetesWorkersAreNotOnTheMachineMeter(t *testing.T) {
 	for name, tc := range map[string]struct {
 		droplet godo.Droplet

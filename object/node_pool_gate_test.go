@@ -24,12 +24,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 // An autoscaling pool grows without asking. MinNodes/MaxNodes/AutoScale are
 // forwarded to the upstream, which adds nodes whenever the scheduler wants them
-// — no request reaches visor, so the money gate never runs on the growth. An org
+// — no request reaches compute, so the money gate never runs on the growth. An org
 // authorized for one node could therefore end up running sixteen.
 //
 // The gate authorizes what the pool is ALLOWED to become, not what it starts as.

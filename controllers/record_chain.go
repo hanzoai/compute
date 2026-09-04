@@ -17,7 +17,7 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // CommitRecord

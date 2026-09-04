@@ -26,7 +26,7 @@ type WhitelabelConfig struct {
 }
 
 var defaultWhitelabelConfig = WhitelabelConfig{
-	AppName:      "Hanzo Visor",
+	AppName:      "Hanzo Compute",
 	LogoUrl:      "https://cdn.hanzo.ai/img/hanzo-logo.svg",
 	FaviconUrl:   "https://cdn.hanzo.ai/static/favicon.png",
 	PrimaryColor: "#ffffff",
@@ -36,8 +36,8 @@ var defaultWhitelabelConfig = WhitelabelConfig{
 }
 
 var whitelabelConfigs = map[string]WhitelabelConfig{
-	"visor.hanzo.ai": {
-		AppName:      "Hanzo Visor",
+	"compute.hanzo.ai": {
+		AppName:      "Hanzo Compute",
 		LogoUrl:      "https://cdn.hanzo.ai/img/hanzo-logo.svg",
 		FaviconUrl:   "https://cdn.hanzo.ai/static/favicon.png",
 		PrimaryColor: "#ffffff",
@@ -45,8 +45,8 @@ var whitelabelConfigs = map[string]WhitelabelConfig{
 		DocsUrl:      "https://docs.hanzo.ai",
 		OrgFilter:    "",
 	},
-	"visor.lux.network": {
-		AppName:      "Lux Visor",
+	"compute.lux.network": {
+		AppName:      "Lux Compute",
 		LogoUrl:      "https://lux.network/logo.svg",
 		FaviconUrl:   "https://lux.network/favicon.ico",
 		PrimaryColor: "#0066ff",
@@ -54,8 +54,8 @@ var whitelabelConfigs = map[string]WhitelabelConfig{
 		DocsUrl:      "https://docs.lux.network",
 		OrgFilter:    "lux",
 	},
-	"visor.zoo.ngo": {
-		AppName:      "Zoo Visor",
+	"compute.zoo.ngo": {
+		AppName:      "Zoo Compute",
 		LogoUrl:      "https://zoo.ngo/logo.svg",
 		FaviconUrl:   "https://zoo.ngo/favicon.ico",
 		PrimaryColor: "#00cc66",
@@ -63,8 +63,8 @@ var whitelabelConfigs = map[string]WhitelabelConfig{
 		DocsUrl:      "https://docs.zoo.ngo",
 		OrgFilter:    "zoo",
 	},
-	"visor.pars.network": {
-		AppName:      "Pars Visor",
+	"compute.pars.network": {
+		AppName:      "Pars Compute",
 		LogoUrl:      "https://pars.network/logo.svg",
 		FaviconUrl:   "https://pars.network/favicon.ico",
 		PrimaryColor: "#ff6600",
@@ -77,7 +77,7 @@ var whitelabelConfigs = map[string]WhitelabelConfig{
 // GetWhitelabelConfig returns the branding config for a given hostname.
 // Falls back to the default (Hanzo) config if no match is found.
 func GetWhitelabelConfig(host string) *WhitelabelConfig {
-	// Strip port if present (e.g. "visor.hanzo.ai:443" -> "visor.hanzo.ai")
+	// Strip port if present (e.g. "compute.hanzo.ai:443" -> "compute.hanzo.ai")
 	for i := 0; i < len(host); i++ {
 		if host[i] == ':' {
 			host = host[:i]

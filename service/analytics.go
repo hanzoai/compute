@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// analytics.go is the ONE path by which visor rolls compute fleet/spend events
+// analytics.go is the ONE path by which compute rolls compute fleet/spend events
 // into hanzoai/datastore (hanzo.compute_usage, ClickHouse) — the ANALYTICAL plane
 // that mirrors, but is orthogonal to, the OPERATIONAL commerce ledger
 // (tenant-data-hierarchy HIP). Commerce metering DEBITS an org's balance; this
 // only RECORDS a fleet event for unified, cross-tenant rollups that
-// admin.hanzo.ai reads by org / app / project — and by kind across visor's
+// admin.hanzo.ai reads by org / app / project — and by kind across compute's
 // compute spectrum (machine, bot, cluster, nodepool, container, function).
 //
 // Every emit is best-effort and fire-and-forget: the write runs in its own
@@ -38,7 +38,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // Compute event kinds — the values of the `event` column. A launched row is
@@ -51,7 +51,7 @@ const (
 )
 
 // Compute kinds — the values of the `kind` LowCardinality(String) lens in
-// hanzo.compute_usage, spanning visor's compute spectrum:
+// hanzo.compute_usage, spanning compute's compute spectrum:
 //
 //	machine   — a raw droplet/VM (no agent)
 //	bot       — a machine running the @hanzo/bot agent (gw.hanzo.bot)

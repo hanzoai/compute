@@ -19,7 +19,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // newFilterCtx builds a ZAP request context the way the router hands one to the

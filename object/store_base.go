@@ -23,7 +23,7 @@ import (
 	// hanzoai/sqlite registers the CGO-free "sqlite" database/sql driver; the
 	// relational engine maps the "sqlite" driver name onto its sqlite3 dialect
 	// (see github.com/hanzoai/xorm/dialects/dialect.go). This is the same driver
-	// hanzoai/base uses, so visor and base share one SQLite engine under
+	// hanzoai/base uses, so compute and base share one SQLite engine under
 	// CGO_ENABLED=0.
 	"github.com/hanzoai/orm/relational"
 	"github.com/hanzoai/sqlite"
@@ -66,13 +66,13 @@ type baseStore struct {
 // newBaseStore opens the per-org SQLite substrate. The cross-pod shared tables
 // (Plan catalog + MeterLease lease) live in the ONE `_global` SQLite DB — no
 // Postgres anywhere (platform rule: SQLite/Base for everything). This is a valid
-// single coordination store because visor runs replicas=1: one pod == one writer,
-// so the MeterLease insert-once lease cannot double-fire. Scaling visor out later
+// single coordination store because compute runs replicas=1: one pod == one writer,
+// so the MeterLease insert-once lease cannot double-fire. Scaling compute out later
 // needs a real cluster coordinator (WAL→object-storage single-writer election,
 // the staged replication note above) — until then Base mode is single-replica.
 func newBaseStore(root string) (*baseStore, error) {
 	if root == "" {
-		return nil, fmt.Errorf("visor: base store data root is empty")
+		return nil, fmt.Errorf("compute: base store data root is empty")
 	}
 	// HA object-store binding (opt-in via REPLICA_STORE; nil = local-only). Never
 	// fatal — a bad/unreachable store degrades to local-only inside newReplicator.
@@ -80,20 +80,20 @@ func newBaseStore(root string) (*baseStore, error) {
 
 	coordPath := DBPath(root, "_global")
 	if err := os.MkdirAll(filepath.Dir(coordPath), 0o700); err != nil {
-		return nil, fmt.Errorf("visor: base store coord dir %s: %w", filepath.Dir(coordPath), err)
+		return nil, fmt.Errorf("compute: base store coord dir %s: %w", filepath.Dir(coordPath), err)
 	}
 	// Hydrate the shared (_global) DB from the object store BEFORE opening it.
 	if err := repl.hydrate("_global", coordPath); err != nil {
-		return nil, fmt.Errorf("visor: base store hydrate coord: %w", err)
+		return nil, fmt.Errorf("compute: base store hydrate coord: %w", err)
 	}
 	coord, err := relational.NewEngine("sqlite", dsn(coordPath))
 	if err != nil {
-		return nil, fmt.Errorf("visor: base store open coord %s: %w", coordPath, err)
+		return nil, fmt.Errorf("compute: base store open coord %s: %w", coordPath, err)
 	}
 	// The shared tables live only here (never synced into a per-org DB).
 	if err := coord.Sync2(sharedModels()...); err != nil {
 		_ = coord.Close()
-		return nil, fmt.Errorf("visor: base store sync coord: %w", err)
+		return nil, fmt.Errorf("compute: base store sync coord: %w", err)
 	}
 	bs := &baseStore{root: root, coord: coord, repl: repl, engines: map[string]*relational.Engine{}}
 	repl.ship("_global", coordPath) // back up the shared DB on an interval
@@ -116,23 +116,23 @@ func (s *baseStore) EngineFor(owner string) (*relational.Engine, error) {
 
 	path := DBPath(s.root, owner)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("visor: base store mkdir %s: %w", filepath.Dir(path), err)
+		return nil, fmt.Errorf("compute: base store mkdir %s: %w", filepath.Dir(path), err)
 	}
 	// Hydrate this org's DB from the object store BEFORE opening it (HA: a fresh
 	// pod pulls the org's last committed state; a brand-new org starts empty).
 	if err := s.repl.hydrate(owner, path); err != nil {
-		return nil, fmt.Errorf("visor: base store hydrate %s: %w", owner, err)
+		return nil, fmt.Errorf("compute: base store hydrate %s: %w", owner, err)
 	}
 
 	engine, err := relational.NewEngine("sqlite", dsn(path))
 	if err != nil {
-		return nil, fmt.Errorf("visor: base store open %s: %w", path, err)
+		return nil, fmt.Errorf("compute: base store open %s: %w", path, err)
 	}
 	// Only the per-tenant tables live in an org DB; the shared tables (Plan,
 	// MeterLease) stay on coord (Postgres) and are never synced here.
 	if err := engine.Sync2(perOrgModels()...); err != nil {
 		_ = engine.Close()
-		return nil, fmt.Errorf("visor: base store sync %s: %w", path, err)
+		return nil, fmt.Errorf("compute: base store sync %s: %w", path, err)
 	}
 
 	s.engines[owner] = engine
@@ -188,7 +188,7 @@ func (s *baseStore) AllEngines() ([]*relational.Engine, error) {
 		if os.IsNotExist(err) {
 			return nil, nil // no org has been written yet
 		}
-		return nil, fmt.Errorf("visor: base store list orgs %s: %w", orgsDir, err)
+		return nil, fmt.Errorf("compute: base store list orgs %s: %w", orgsDir, err)
 	}
 
 	engines := make([]*relational.Engine, 0, len(entries))
@@ -219,7 +219,7 @@ func (s *baseStore) Close() error {
 	var firstErr error
 	for owner, e := range s.engines {
 		if err := e.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("visor: base store close %s: %w", owner, err)
+			firstErr = fmt.Errorf("compute: base store close %s: %w", owner, err)
 		}
 		delete(s.engines, owner)
 	}

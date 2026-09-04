@@ -1,12 +1,12 @@
 version: '3.1'
 services:
-  visor:
+  compute:
     restart: always
     build:
       context: ./
       dockerfile: Dockerfile
       target: STANDARD
-    entrypoint: /bin/sh -c './visor --createDatabase=true'
+    entrypoint: /bin/sh -c './compute --createDatabase=true'
     ports:
       - "19000:19000"
     depends_on:
@@ -36,7 +36,7 @@ services:
     environment:
       GUACD_LOG_LEVEL: debug
     volumes:
-      - ./data/guacd:/usr/local/visor/data
+      - ./data/guacd:/usr/local/compute/data
     ports:
       - "4822:4822"
     restart:

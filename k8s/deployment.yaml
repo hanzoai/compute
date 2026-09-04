@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: visor
+  name: compute
   namespace: hanzo
   labels:
-    app: visor
+    app: compute
 spec:
   replicas: 2
   strategy:
@@ -14,18 +14,18 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: visor
+      app: compute
   template:
     metadata:
       labels:
-        app: visor
+        app: compute
     spec:
-      serviceAccountName: visor
+      serviceAccountName: compute
       imagePullSecrets:
         - name: ghcr-secret
       containers:
-        - name: visor
-          image: ghcr.io/hanzoai/visor:latest
+        - name: compute
+          image: ghcr.io/hanzoai/compute:latest
           ports:
             - containerPort: 19000
               protocol: TCP
@@ -34,7 +34,7 @@ spec:
               value: "true"
           envFrom:
             - secretRef:
-                name: visor-env
+                name: compute-env
                 optional: true
           volumeMounts:
             - name: config
@@ -64,4 +64,4 @@ spec:
       volumes:
         - name: config
           secret:
-            secretName: visor-config
+            secretName: compute-config

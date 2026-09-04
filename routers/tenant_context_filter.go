@@ -19,7 +19,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 func normalizeTenantHeader(value string) string {

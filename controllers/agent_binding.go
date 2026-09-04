@@ -22,8 +22,8 @@ import (
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 // A machine's AGENT: the record that it runs the @hanzo/bot runtime for one
@@ -32,7 +32,7 @@ import (
 // code states. They are the only typed ops on this surface; the rest of the
 // controller package still answers in casibase's {status,msg,data} envelope,
 // which is why cloud's client reads these four one way and everything else the
-// other (cloud/apps/visor/client.go).
+// other (cloud/apps/compute/client.go).
 //
 // ONE noun, ONE address, and the METHOD carries the verb:
 //

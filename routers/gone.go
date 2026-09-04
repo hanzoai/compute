@@ -25,7 +25,7 @@ import (
 	"github.com/zap-proto/zip"
 )
 
-// Addresses visor used to serve, and the resource that replaced each.
+// Addresses compute used to serve, and the resource that replaced each.
 //
 // This is the ONE table. A retirement recorded in two places is two lists to
 // keep in agreement, and the one that drifts is the one nobody reads.

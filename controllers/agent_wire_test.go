@@ -25,12 +25,12 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // These tests pin the WIRE of the agent ops, which is the half of this change
 // that no compiler checks and that a caller in another repo depends on byte for
-// byte. hanzoai/cloud's apps/visor/client.go reads these four answers; every
+// byte. hanzoai/cloud's apps/compute/client.go reads these four answers; every
 // assertion below is a line in that client, and the fake vm in its
 // bots_http_test.go is written to match exactly what is asserted here.
 //
@@ -56,7 +56,7 @@ import (
 // DigitalOcean, so it has no honest answer without a provider and is not faked
 // into one.
 func TestMain(m *testing.M) {
-	root, err := os.MkdirTemp("", "visor-agent-wire")
+	root, err := os.MkdirTemp("", "compute-agent-wire")
 	if err != nil {
 		panic(err)
 	}

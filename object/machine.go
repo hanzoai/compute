@@ -18,7 +18,7 @@ import (
 	"fmt"
 
 	"github.com/hanzoai/orm/relational/schemas"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/util"
 )
 
 type Machine struct {

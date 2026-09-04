@@ -14,7 +14,7 @@
 
 package object
 
-import "github.com/hanzoai/visor/util"
+import "github.com/hanzoai/compute/util"
 
 // DefaultPlans returns the Hanzo Cloud plan catalog.
 // Provider mapping is internal — customers never see backend provider names.

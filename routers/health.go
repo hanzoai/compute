@@ -20,7 +20,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // Ping is what a probe sends: nothing. A health check asks one question and
@@ -28,7 +28,7 @@ import (
 // op be declared like every other — one shape, no special case.
 type Ping struct{}
 
-// Health is visor's answer to a probe.
+// Health is compute's answer to a probe.
 //
 // Status is "ok" or the response is not a 200 at all, so a reader never has to
 // parse the body to learn the verdict — which matters because the reader is
@@ -40,17 +40,17 @@ type Health struct {
 	Backend string `json:"backend"`
 }
 
-// health answers whether visor can do its job, which reduces to whether it can
+// health answers whether compute can do its job, which reduces to whether it can
 // reach its store: every route on this service reads or writes one.
 //
 // The failure is a 503 and not a 200-with-a-sad-field. A readiness probe that
 // always answers 200 cannot take a broken pod out of the Service, and that is
-// precisely the bug this op was written to end — visor's probes used to request
+// precisely the bug this op was written to end — compute's probes used to request
 // /api/health, which is not a route, so TransparentStatic served the SPA's
 // index.html and every probe passed with the database face down.
 func health(_ context.Context, _ *Ping) (*Health, error) {
 	if err := object.Ready(); err != nil {
-		return nil, zip.Errorf(http.StatusServiceUnavailable, "visor: store unreachable: %v", err)
+		return nil, zip.Errorf(http.StatusServiceUnavailable, "compute: store unreachable: %v", err)
 	}
 	return &Health{Status: "ok", Backend: string(object.ConfiguredBackend())}, nil
 }

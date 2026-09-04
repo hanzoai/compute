@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// instrument.go is the small, typed instrumentation API the rest of visor calls.
+// instrument.go is the small, typed instrumentation API the rest of compute calls.
 // Every span and metric is attributed per org+project through ONE attribute
 // builder (orgProjectAttrs), so the whole fleet — provision, list, delete, meter,
 // and all three fleet-billing tiers — reports on the same two dimensions the
@@ -25,7 +25,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -34,7 +34,7 @@ import (
 
 // scope is the instrumentation scope name (the OTel "library" that emits the
 // telemetry) shared by the tracer and meter.
-const scope = "github.com/hanzoai/visor"
+const scope = "github.com/hanzoai/compute"
 
 var (
 	instrumentsOnce sync.Once
@@ -55,24 +55,24 @@ func ensureInstruments() {
 		tracer = otel.Tracer(scope)
 		m := otel.Meter(scope)
 		var err error
-		if launchCounter, err = m.Int64Counter("visor.compute.launches",
+		if launchCounter, err = m.Int64Counter("compute.compute.launches",
 			metric.WithDescription("compute machines launched, by org/project")); err != nil {
 			logs.Warning("telemetry: launch counter: %v", err)
 		}
-		if deleteCounter, err = m.Int64Counter("visor.compute.deletes",
+		if deleteCounter, err = m.Int64Counter("compute.compute.deletes",
 			metric.WithDescription("compute machines deleted, by org/project")); err != nil {
 			logs.Warning("telemetry: delete counter: %v", err)
 		}
-		if listCounter, err = m.Int64Counter("visor.compute.machines_listed",
+		if listCounter, err = m.Int64Counter("compute.compute.machines_listed",
 			metric.WithDescription("compute machines returned by list, by org/project")); err != nil {
 			logs.Warning("telemetry: list counter: %v", err)
 		}
-		if meteredCounter, err = m.Int64Counter("visor.billing.metered_cents",
+		if meteredCounter, err = m.Int64Counter("compute.billing.metered_cents",
 			metric.WithDescription("cents metered to commerce, by org/project/tier"),
 			metric.WithUnit("{cent}")); err != nil {
 			logs.Warning("telemetry: metered counter: %v", err)
 		}
-		if skipCounter, err = m.Int64Counter("visor.billing.sweeps_skipped",
+		if skipCounter, err = m.Int64Counter("compute.billing.sweeps_skipped",
 			metric.WithDescription("billing sweeps that could not debit (metering unconfigured), by sweep")); err != nil {
 			logs.Warning("telemetry: skip counter: %v", err)
 		}

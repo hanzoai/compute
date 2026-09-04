@@ -180,7 +180,7 @@ func (client MachineAwsClient) CreateMachine(spec *CreateMachineSpec) (*Machine,
 	}
 	tags = append(tags, ec2Types.Tag{
 		Key:   aws.String("ManagedBy"),
-		Value: aws.String("hanzo-visor"),
+		Value: aws.String(managedBy),
 	})
 	for k, v := range spec.Tags {
 		tags = append(tags, ec2Types.Tag{

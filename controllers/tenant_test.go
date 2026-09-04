@@ -22,7 +22,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // The node pools were fixed and the same split-brain was left standing on the

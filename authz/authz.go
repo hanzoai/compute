@@ -21,7 +21,7 @@ import (
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/compute/conf"
 )
 
 var Enforcer *authz.Enforcer

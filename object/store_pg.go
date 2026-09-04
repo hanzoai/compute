@@ -16,7 +16,7 @@ package object
 
 import "github.com/hanzoai/orm/relational"
 
-// pgStore serves every owner from one shared engine -- the historical visor
+// pgStore serves every owner from one shared engine -- the historical compute
 // backend. owner is ignored: tenant isolation is a WHERE owner=? clause, not a
 // separate database. This is the default provider and keeps the live path
 // byte-identical to before the Base seam existed.

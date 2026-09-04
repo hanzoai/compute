@@ -260,7 +260,7 @@ func TestGKECredentials(t *testing.T) {
 
 // ---- the registry ----
 
-const fakeServiceAccount = `{"type":"service_account","project_id":"p-1","client_email":"visor@p-1.iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n","token_uri":"https://oauth2.googleapis.com/token"}`
+const fakeServiceAccount = `{"type":"service_account","project_id":"p-1","client_email":"compute@p-1.iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n","token_uri":"https://oauth2.googleapis.com/token"}`
 
 func TestGCPSpeaksKubernetesAndIsCarried(t *testing.T) {
 	RegisterCarrier(nil)

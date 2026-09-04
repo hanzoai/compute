@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hanzoai/visor/object/kms"
+	"github.com/hanzoai/compute/object/kms"
 )
 
 // A save of a masked read must keep the rotation keys' secrets — the corruption

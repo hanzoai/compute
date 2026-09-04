@@ -23,11 +23,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/visor/util/guacamole"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
+	"github.com/hanzoai/compute/util/guacamole"
 )
 
 const (

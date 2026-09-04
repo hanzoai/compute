@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package visor
+package compute
 
 import (
 	"context"
@@ -22,10 +22,10 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/routers"
+	"github.com/hanzoai/compute/routers"
 )
 
-// bind serves a routed visor on its canonical socket inside a runtime dir owned
+// bind serves a routed compute on its canonical socket inside a runtime dir owned
 // by the test, and returns the app. Not Bootstrap: that opens the store and
 // starts tickers, and none of that is what these tests are about.
 func bind(t *testing.T) *zip.App {
@@ -63,7 +63,7 @@ func bind(t *testing.T) *zip.App {
 // it — so reading zip.Serving straight after Serve is a race, and one that
 // passes on an idle machine and fails on a loaded one.
 //
-// It is worth knowing outside a test too: a caller that dials visor in the
+// It is worth knowing outside a test too: a caller that dials compute in the
 // instant after it starts can legitimately get ErrNoPeer, so "no peer" means
 // "not yet or not here", never "not deployed".
 func bound(name string, within time.Duration) *zip.App {
@@ -79,13 +79,13 @@ func bound(name string, within time.Duration) *zip.App {
 	}
 }
 
-// TestPlaneResolvesByName is the fact that makes visor reachable to the rest of
+// TestPlaneResolvesByName is the fact that makes compute reachable to the rest of
 // the fleet: bound to its canonical socket, it answers to its NAME.
 //
-// This is what visor did not do before. A sibling service reaches a peer through
+// This is what compute did not do before. A sibling service reaches a peer through
 // zip.SocketPath(name), so a process that binds no socket is not merely slow to
 // reach — it does not exist, and the caller gets ErrNoPeer. That is why cloud
-// still spoke plain HTTP to visor.hanzo.svc:19000 while every other hop had
+// still spoke plain HTTP to compute.hanzo.svc:19000 while every other hop had
 // converted: there was nothing on the plane to convert TO.
 func TestPlaneResolvesByName(t *testing.T) {
 	app := bind(t)
@@ -105,7 +105,7 @@ func TestPlaneResolvesByName(t *testing.T) {
 func TestPlaneRejectsAnotherName(t *testing.T) {
 	bind(t)
 
-	if got := bound("visor-not-this-one", 50*time.Millisecond); got != nil {
+	if got := bound("compute-not-this-one", 50*time.Millisecond); got != nil {
 		t.Fatal("zip.Serving resolved a name nothing bound")
 	}
 }

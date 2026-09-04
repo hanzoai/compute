@@ -15,13 +15,13 @@
 package object
 
 import (
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 	"time"
 )
 
 // claimLease is the ONE exactly-once primitive behind every billing idempotency lease.
 // It composes the TWO guarantees that make hourly metering exactly-once under the
-// multi-replica visor Deployment, so there is exactly one such mechanism cluster-wide:
+// multi-replica compute Deployment, so there is exactly one such mechanism cluster-wide:
 //
 //	(1) single-writer gate  — only the HRW-elected owner of the `_global` coord DB may
 //	    claim; every other replica returns false and skips (billingOwner, coordinator.go).
@@ -68,7 +68,7 @@ func claimLease(row interface{}) bool {
 // BillingLease is the generic single-flight lease for a billable UNIT — a
 // daily BYOC-cost line ("byoc:<owner>:<provider>:<YYYYMMDD>") or a monthly
 // per-device line ("device:<owner>:<worker>:<YYYYMM>"). It is the money-safety
-// twin of MeterLease: visor runs replicas: 2 with no leader election and commerce
+// twin of MeterLease: compute runs replicas: 2 with no leader election and commerce
 // does NOT dedup the withdraw on requestId, so without a cluster-wide claim BOTH
 // replicas would meter the same unit and double-bill it.
 //

@@ -196,7 +196,7 @@ func (client MachineHetznerClient) CreateMachine(spec *CreateMachineSpec) (*Mach
 	}
 
 	labels := map[string]string{
-		"managed-by": "hanzo-visor",
+		"managed-by": managedBy,
 	}
 	if spec.OS != "" {
 		labels["os"] = spec.OS

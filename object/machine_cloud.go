@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 // GetKubernetesNodesCloud returns DOKS worker nodes — as service.Machines — for
@@ -28,7 +28,7 @@ import (
 // both, so a cluster discovered by either path surfaces its nodes (deduped by
 // droplet id) exactly once. The DO provider selection mirrors SyncNodePoolsCloud
 // (Type=="DigitalOcean" && ClusterID!=""), so nodes come from the same clusters
-// visor already reconciles pools for.
+// compute already reconciles pools for.
 func GetKubernetesNodesCloud(owner string) ([]*service.Machine, error) {
 	providers, err := getActiveCloudProviders(owner)
 	if err != nil {

@@ -22,8 +22,8 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/authz"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/authz"
+	"github.com/hanzoai/compute/util"
 )
 
 type Object struct {

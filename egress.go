@@ -22,19 +22,19 @@ import (
 
 	"github.com/hanzoai/egress/spend"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/service"
 )
 
 // carry sends every cloud call through hanzoai/egress, so this process stops
 // holding cloud credentials.
 //
-// Unconfigured it does nothing and visor calls clouds directly with the tokens
+// Unconfigured it does nothing and compute calls clouds directly with the tokens
 // on its Provider rows, which is what it has always done and what a local or
 // single-binary run wants. Configured, the tokens are egress's: reading this
 // pod's environment, config or memory yields nothing that spends.
 //
-// What visor still holds is its OWN token, and that is the trade rather than an
+// What compute still holds is its OWN token, and that is the trade rather than an
 // oversight. A stolen caller token buys metered calls through our meter — rate
 // limited, attributed, audited, revocable in one place — instead of a vendor
 // key that spends without limit, off our network, and takes a rotation across
@@ -44,7 +44,7 @@ func carry() error {
 	if address == "" {
 		return nil
 	}
-	// WHO IS CALLING IS ASKED OF IAM, not of a config value. visor already signs
+	// WHO IS CALLING IS ASKED OF IAM, not of a config value. compute already signs
 	// in with a clientId and clientSecret; egress verifies what those buy the
 	// same way every service verifies a caller — issuer, audience, JWKS. So
 	// there is no second credential to mint, paste or rotate, and the token
@@ -58,7 +58,7 @@ func carry() error {
 	secret := strings.TrimSpace(conf.GetConfigString("clientSecret"))
 	iam := strings.TrimSpace(conf.GetConfigString("iamEndpoint"))
 	if id == "" || secret == "" || iam == "" {
-		return fmt.Errorf("egressAddress is set but visor has no IAM identity "+
+		return fmt.Errorf("egressAddress is set but compute has no IAM identity "+
 			"(clientId=%q iamEndpoint=%q): it cannot say who it is to egress", id, iam)
 	}
 	who := &identity{

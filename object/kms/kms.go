@@ -15,8 +15,8 @@
 // Package kms seals provider secrets in Hanzo KMS and resolves them back.
 //
 // The model is a server-side org CEK: the vault is unlocked once at launch with
-// a service secret read from the environment, and from then on visor seals and
-// unseals unattended — no per-member key wrapping, because visor must resolve a
+// a service secret read from the environment, and from then on compute seals and
+// unseals unattended — no per-member key wrapping, because compute must resolve a
 // launch credential with no human present. Encryption and decryption happen
 // client-side (github.com/hanzoai/kms/sdk/go), so the MPC nodes hold only
 // ciphertext.
@@ -42,7 +42,7 @@ import (
 // so secrets stay in the plaintext column exactly as before KMS.
 var ErrNotConfigured = errors.New("kms: not configured")
 
-// Vault is the sealing surface visor depends on. It mirrors what the Hanzo KMS
+// Vault is the sealing surface compute depends on. It mirrors what the Hanzo KMS
 // SDK exposes over a client-side org CEK (Set/Get on a flat key), so the real
 // *sdk.Client satisfies it directly and a test substitutes a fake.
 type Vault interface {
@@ -124,28 +124,28 @@ func Configured() bool {
 	return vault != nil
 }
 
-// Configure wires the process vault from the environment when VISOR_KMS_NODES
-// and VISOR_KMS_TOKEN are present. The client derives an org CEK client-side
-// from VISOR_KMS_TOKEN (the service secret) and VISOR_KMS_ORG and unlocks once,
-// so visor seals and unseals unattended. Absent config leaves the vault nil and
+// Configure wires the process vault from the environment when COMPUTE_KMS_NODES
+// and COMPUTE_KMS_TOKEN are present. The client derives an org CEK client-side
+// from COMPUTE_KMS_TOKEN (the service secret) and COMPUTE_KMS_ORG and unlocks once,
+// so compute seals and unseals unattended. Absent config leaves the vault nil and
 // returns nil — the plaintext path stays in force. A present-but-malformed
 // config, or an unlock failure, returns an error so a half-provisioned
 // deployment fails loudly rather than silently storing plaintext.
 func Configure() error {
-	nodes := splitCSV(os.Getenv("VISOR_KMS_NODES"))
-	token := strings.TrimSpace(os.Getenv("VISOR_KMS_TOKEN"))
+	nodes := splitCSV(os.Getenv("COMPUTE_KMS_NODES"))
+	token := strings.TrimSpace(os.Getenv("COMPUTE_KMS_TOKEN"))
 	if len(nodes) == 0 || token == "" {
 		return nil
 	}
-	org := strings.TrimSpace(os.Getenv("VISOR_KMS_ORG"))
+	org := strings.TrimSpace(os.Getenv("COMPUTE_KMS_ORG"))
 	if org == "" {
 		org = "hanzo"
 	}
 	threshold := len(nodes)
-	if t := strings.TrimSpace(os.Getenv("VISOR_KMS_THRESHOLD")); t != "" {
+	if t := strings.TrimSpace(os.Getenv("COMPUTE_KMS_THRESHOLD")); t != "" {
 		n, err := strconv.Atoi(t)
 		if err != nil || n < 1 {
-			return fmt.Errorf("kms: VISOR_KMS_THRESHOLD %q is not a positive integer", t)
+			return fmt.Errorf("kms: COMPUTE_KMS_THRESHOLD %q is not a positive integer", t)
 		}
 		threshold = n
 	}

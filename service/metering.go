@@ -29,8 +29,8 @@ import (
 	"time"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // meteringProvider labels resell-compute usage in the commerce ledger so spend
@@ -56,7 +56,7 @@ func PriceToCents(price float64) int64 {
 // operator wires the token from KMS as COMMERCE_SERVICE_TOKEN). When the token is
 // absent the client fails closed on Authorize, so real launches are denied while
 // quotes still work, and the recurring meter is a no-op (Record short-circuits on
-// !Enabled()). This is the SAME client construction every visor debit uses, so
+// !Enabled()). This is the SAME client construction every compute debit uses, so
 // they all key the same per-org ledger.
 //
 // TierAware is OFF: the compute gate reads the org's PREPAID balance, not the

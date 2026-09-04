@@ -13,7 +13,7 @@ FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/golang:1.26-alpine AS BACK
 ENV GOTOOLCHAIN=auto
 # build.sh is #!/bin/bash and fetches private modules over git (GOPRIVATE direct)
 RUN apk add --no-cache bash git
-WORKDIR /go/src/hanzo-visor
+WORKDIR /go/src/hanzo-compute
 COPY . .
 
 # Per SCALE_STANDARD.md §2 — every Go production Dockerfile that
@@ -34,7 +34,7 @@ RUN --mount=type=secret,id=gh_token ./build.sh
 
 FROM ghcr.io/hanzoai/alpine:3.22 AS STANDARD
 LABEL MAINTAINER="https://hanzo.ai/"
-ARG USER=hanzo-visor
+ARG USER=hanzo-compute
 
 RUN sed -i 's/https/http/' /etc/apk/repositories
 RUN apk add --update sudo
@@ -49,9 +49,9 @@ RUN adduser -D $USER -u 1000 \
 
 USER 1000
 WORKDIR /
-COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/visor ./visor
-COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/data ./data
-COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-visor/conf/app.conf ./conf/app.conf
+COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-compute/compute ./compute
+COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-compute/data ./data
+COPY --from=BACK --chown=$USER:$USER /go/src/hanzo-compute/conf/app.conf ./conf/app.conf
 COPY --from=FRONT --chown=$USER:$USER /web/build ./web/build
 
-ENTRYPOINT ["/visor"]
+ENTRYPOINT ["/compute"]

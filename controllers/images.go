@@ -17,7 +17,7 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 // images.go — the /v1/images surface: browse selectable images and upload your

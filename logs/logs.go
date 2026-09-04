@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package logs writes visor's leveled log lines.
+// Package logs writes compute's leveled log lines.
 //
 // It is log/slog underneath, and the whole package is the signature: a format
 // string and its arguments, always in that order.

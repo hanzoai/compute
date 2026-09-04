@@ -18,10 +18,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/hanzoai/visor/billing"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/billing"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 type Ticker struct{}
@@ -57,7 +57,7 @@ func (t *Ticker) SetupTicker() {
 	// unconfigured), so this is wired unconditionally — no second config gate to
 	// drift.
 	//
-	// SINGLE-FLIGHT ACROSS REPLICAS (money safety): visor runs replicas: 2+ with no
+	// SINGLE-FLIGHT ACROSS REPLICAS (money safety): compute runs replicas: 2+ with no
 	// external coordinator, and commerce does NOT dedup the withdraw on requestId, so an
 	// unguarded sweep would double-debit every machine every hour. Exactly-once is TWO
 	// composed guarantees, both inside object:

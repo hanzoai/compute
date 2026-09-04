@@ -97,12 +97,12 @@ func activate(t *testing.T, bs *baseStore) {
 func TestNonOwnerDoesNotClaim(t *testing.T) {
 	installBaseStore(t)
 
-	set := []ha.Member{{ID: "visor-a"}, {ID: "visor-b"}}
+	set := []ha.Member{{ID: "compute-a"}, {ID: "compute-b"}}
 	owner := electedOwner(set)
 	// Pick self as the NON-owner of the pair.
-	self := "visor-a"
+	self := "compute-a"
 	if self == owner {
-		self = "visor-b"
+		self = "compute-b"
 	}
 	withMembership(t, stubMembership{id: self, set: set})
 
@@ -126,7 +126,7 @@ func TestNonOwnerDoesNotClaim(t *testing.T) {
 // peer set does NOT claim — a paid product never bills under uncertainty.
 func TestUnknownMembershipFailsClosed(t *testing.T) {
 	installBaseStore(t)
-	withMembership(t, stubMembership{id: "visor-a", fail: true})
+	withMembership(t, stubMembership{id: "compute-a", fail: true})
 
 	now := time.Date(2026, 7, 5, 11, 0, 0, 0, time.UTC)
 	if ClaimMeterHour(now) {
@@ -143,8 +143,8 @@ func TestUnknownMembershipFailsClosed(t *testing.T) {
 // always elects itself owner with NO external coordinator, so it bills normally.
 func TestSingleReplicaAlwaysOwner(t *testing.T) {
 	installBaseStore(t)
-	solo := []ha.Member{{ID: "visor-only"}}
-	withMembership(t, stubMembership{id: "visor-only", set: solo})
+	solo := []ha.Member{{ID: "compute-only"}}
+	withMembership(t, stubMembership{id: "compute-only", set: solo})
 
 	if !billingOwner() {
 		t.Fatal("a single replica must always be its own billing owner")
@@ -161,7 +161,7 @@ func TestExactlyOneOwnerAcrossReplicas(t *testing.T) {
 	for _, n := range []int{1, 2, 3, 5} {
 		set := make([]ha.Member, n)
 		for i := 0; i < n; i++ {
-			set[i] = ha.Member{ID: "visor-" + string(rune('a'+i))}
+			set[i] = ha.Member{ID: "compute-" + string(rune('a'+i))}
 		}
 		owners := 0
 		for _, m := range set {
@@ -192,8 +192,8 @@ func TestNoMembershipSourceFailsClosed(t *testing.T) {
 // the coord engine. This is the direct money-safety proof for the hourly sweep.
 func TestConcurrentClaimMeterHourExactlyOnce(t *testing.T) {
 	installBaseStore(t)
-	solo := []ha.Member{{ID: "visor-only"}}
-	withMembership(t, stubMembership{id: "visor-only", set: solo})
+	solo := []ha.Member{{ID: "compute-only"}}
+	withMembership(t, stubMembership{id: "compute-only", set: solo})
 
 	now := time.Date(2026, 7, 5, 13, 0, 0, 0, time.UTC)
 	const racers = 16
@@ -222,8 +222,8 @@ func TestConcurrentClaimMeterHourExactlyOnce(t *testing.T) {
 // unit (daily BYOC / monthly device): concurrent claims of one unit → exactly one wins.
 func TestConcurrentClaimBillingUnitExactlyOnce(t *testing.T) {
 	installBaseStore(t)
-	solo := []ha.Member{{ID: "visor-only"}}
-	withMembership(t, stubMembership{id: "visor-only", set: solo})
+	solo := []ha.Member{{ID: "compute-only"}}
+	withMembership(t, stubMembership{id: "compute-only", set: solo})
 
 	now := time.Date(2026, 7, 5, 14, 0, 0, 0, time.UTC)
 	unit := "device:org-a:box-1:202607"
@@ -265,7 +265,7 @@ func TestLeadershipHandoffNoReclaim(t *testing.T) {
 
 	hourH := time.Date(2026, 7, 5, 15, 0, 0, 0, time.UTC)
 	hourKey := hourH.UTC().Format("2006010215")
-	set := []ha.Member{{ID: "visor-old"}, {ID: "visor-new"}}
+	set := []ha.Member{{ID: "compute-old"}, {ID: "compute-new"}}
 
 	// Two LIVE replicas, each its own local root, SHARING one object store. We model
 	// "which pod is executing" by pointing the process store/adapter at that pod's engine
@@ -277,7 +277,7 @@ func TestLeadershipHandoffNoReclaim(t *testing.T) {
 
 	// --- Replica O becomes owner and claims + ships hour H. ---
 	activate(t, bsO)
-	withMembership(t, stubMembership{id: "visor-old", set: []ha.Member{{ID: "visor-old"}}})
+	withMembership(t, stubMembership{id: "compute-old", set: []ha.Member{{ID: "compute-old"}}})
 	if !ClaimMeterHour(hourH) {
 		t.Fatal("replica O (owner) must claim hour H")
 	}
@@ -293,7 +293,7 @@ func TestLeadershipHandoffNoReclaim(t *testing.T) {
 	if staleEmpty {
 		t.Fatal("precondition failed: N's coord already has H before claim-time hydrate")
 	}
-	withMembership(t, stubMembership{id: "visor-new", set: set})
+	withMembership(t, stubMembership{id: "compute-new", set: set})
 
 	// N attempts to claim the SAME hour H. claimLease hydrates O's shipped lease rows
 	// FIRST, so the insert-once PK now sees H taken → N LOSES (no re-bill across failover).
@@ -314,19 +314,19 @@ func TestHandoffBillingUnitNoReclaim(t *testing.T) {
 
 	now := time.Date(2026, 7, 5, 16, 0, 0, 0, time.UTC)
 	unit := "byoc:org-x:aws-1:20260705"
-	set := []ha.Member{{ID: "visor-old"}, {ID: "visor-new"}}
+	set := []ha.Member{{ID: "compute-old"}, {ID: "compute-new"}}
 
 	bsO := newReplicaStore(t, t.TempDir())
 	bsN := newReplicaStore(t, t.TempDir()) // boots empty (stale for anything O bills later).
 
 	activate(t, bsO)
-	withMembership(t, stubMembership{id: "visor-old", set: []ha.Member{{ID: "visor-old"}}})
+	withMembership(t, stubMembership{id: "compute-old", set: []ha.Member{{ID: "compute-old"}}})
 	if !ClaimBillingUnit(unit, now) {
 		t.Fatal("replica O (owner) must claim the billing unit")
 	}
 
 	activate(t, bsN)
-	withMembership(t, stubMembership{id: "visor-new", set: set})
+	withMembership(t, stubMembership{id: "compute-new", set: set})
 	if ClaimBillingUnit(unit, now) {
 		t.Fatal("leadership handoff: new owner RE-BILLED the unit — double-bill across failover")
 	}

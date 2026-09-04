@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/hanzoai/ha"
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // TestMain gives this package a real store rooted in a temp dir, so ClaimMeterHour
@@ -41,7 +41,7 @@ import (
 // cached on first read, so setting it late sends the whole suite to the machine's
 // real /data.
 func TestMain(m *testing.M) {
-	root, err := os.MkdirTemp("", "visor-ticker-")
+	root, err := os.MkdirTemp("", "compute-ticker-")
 	if err != nil {
 		panic(err)
 	}
@@ -64,7 +64,7 @@ func TestMain(m *testing.M) {
 // existing election, reused; the fix introduces no second mechanism.
 func soleWriter(t *testing.T) {
 	t.Helper()
-	object.RegisterMembership(ha.Static("visor-ticker-test"))
+	object.RegisterMembership(ha.Static("compute-ticker-test"))
 	t.Cleanup(func() { object.RegisterMembership(nil) })
 }
 

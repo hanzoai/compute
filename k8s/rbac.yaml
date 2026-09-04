@@ -1,8 +1,8 @@
-# Visor holds NO Kubernetes API permissions. It manages VMs across clouds and never
+# Compute holds NO Kubernetes API permissions. It manages VMs across clouds and never
 # reads or writes cluster objects — cluster access lives in the cluster controllers.
 # The ServiceAccount exists only to give the pod a non-default identity.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: visor
+  name: compute
   namespace: hanzo

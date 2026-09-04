@@ -1,20 +1,20 @@
-<p align="center"><img src=".github/hero.svg" alt="visor" width="880"></p>
+<p align="center"><img src=".github/hero.svg" alt="compute" width="880"></p>
 
-<h1 align="center" style="border-bottom: none;">Hanzo Visor</h1>
+<h1 align="center" style="border-bottom: none;">Hanzo Compute</h1>
 <h3 align="center">Cloud operating-system management platform (Go + React).</h3>
 
 ## Architecture
 
-Hanzo Visor has two parts:
+Hanzo Compute has two parts:
 
 | Name     | Description                          | Language               | Source code                                |
 |----------|--------------------------------------|------------------------|--------------------------------------------|
-| Frontend | Web UI                               | JavaScript + React     | https://github.com/hanzoai/visor/tree/main/web |
-| Backend  | RESTful API + Beego                  | Go + Beego + Postgres  | https://github.com/hanzoai/visor           |
+| Frontend | Web UI                               | JavaScript + React     | https://github.com/hanzoai/compute/tree/main/web |
+| Backend  | RESTful API + Beego                  | Go + Beego + Postgres  | https://github.com/hanzoai/compute           |
 
 ## Installation
 
-Hanzo Visor uses Hanzo IAM as the authentication system. Create an organization and an application for Visor in your IAM instance, then wire it via `app.conf`.
+Hanzo Compute uses Hanzo IAM as the authentication system. Create an organization and an application for Compute in your IAM instance, then wire it via `app.conf`.
 
 ### Necessary configuration
 
@@ -22,15 +22,15 @@ Hanzo Visor uses Hanzo IAM as the authentication system. Create an organization 
 
 ```shell
 git clone https://github.com/hanzoai/iam
-git clone https://github.com/hanzoai/visor
+git clone https://github.com/hanzoai/compute
 ```
 
 #### Setup database
 
-Visor stores users, nodes, and resource information in a Postgres database named `visor` (auto-created). The DB connection string is configured in `conf/app.conf`:
+Compute stores users, nodes, and resource information in a Postgres database named `hanzo_visor` (auto-created). The database keeps that name across the repo rename — renaming it is a migration, not a rename. The connection string is configured in `conf/app.conf`:
 
 ```ini
-dataSourceName = postgres://user:pass@localhost:5432/visor
+dataSourceName = postgres://user:pass@localhost:5432/hanzo_visor
 ```
 
 #### Configure IAM

@@ -22,9 +22,9 @@ import (
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 type Response struct {

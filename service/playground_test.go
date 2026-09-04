@@ -40,7 +40,7 @@ func TestBuildBotUserDataInjectsOrg(t *testing.T) {
 		t.Fatalf("cloud-init must inject HANZO_ORG=maxpower, got:\n%s", ud)
 	}
 	// The node id the runtime reports must match the machine name so it upserts
-	// the same registry node visor registered server-side.
+	// the same registry node compute registered server-side.
 	if !strings.Contains(ud, "AGENT_NODE_ID=dave-000\n") {
 		t.Fatalf("cloud-init must inject AGENT_NODE_ID=dave-000, got:\n%s", ud)
 	}

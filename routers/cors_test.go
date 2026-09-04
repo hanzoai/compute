@@ -25,7 +25,7 @@ import (
 )
 
 // TestPreflightAllowsBearerToken drives the exact request a browser sends before
-// it will call visor with a token, and asserts the answer permits it.
+// it will call compute with a token, and asserts the answer permits it.
 //
 // This is a real preflight rather than an assertion over corsPolicy's fields,
 // because the field being set is not the fact that matters — what matters is

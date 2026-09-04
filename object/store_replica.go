@@ -16,8 +16,8 @@ package object
 // gap: the durable copy lives in the object store, so a lost pod (or a pod with no
 // persistent volume) loses no committed data — it Pulls its orgs back on boot.
 //
-// Single-writer: visor runs replicas=1, so self is the sole owner of every org and
-// the PushLoop is the whole story. When visor scales out, swap the members source for
+// Single-writer: compute runs replicas=1, so self is the sole owner of every org and
+// the PushLoop is the whole story. When compute scales out, swap the members source for
 // the live pod set and gate writes with ha.IsOwner (github.com/hanzoai/ha) — the
 // election primitive already does the HRW election; no code here changes.
 
@@ -58,7 +58,7 @@ func newReplicator(root string) *replicator {
 	}
 	be, err := backend.Open(context.Background(), url)
 	if err != nil {
-		log.Printf("visor: REPLICA_STORE set but object store unavailable (%v); running local-only (no HA durability)", err)
+		log.Printf("compute: REPLICA_STORE set but object store unavailable (%v); running local-only (no HA durability)", err)
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,7 +78,7 @@ func (r *replicator) hydrate(owner, path string) error {
 	if r == nil {
 		return nil
 	}
-	data, _, err := r.store.Get(r.ctx, replica.DBPath(owner, "", "visor"))
+	data, _, err := r.store.Get(r.ctx, replica.DBPath(owner, "", "compute"))
 	if err != nil || len(data) == 0 {
 		return nil // no remote yet — start fresh
 	}
@@ -96,7 +96,7 @@ func (r *replicator) pushNow(owner, path string) error {
 	if err != nil {
 		return err
 	}
-	return r.store.Put(r.ctx, replica.DBPath(owner, "", "visor"), data)
+	return r.store.Put(r.ctx, replica.DBPath(owner, "", "compute"), data)
 }
 
 // mergeSharedLeases pulls the object store's committed billing-lease rows for owner
@@ -117,13 +117,13 @@ func (r *replicator) mergeSharedLeases(owner string, coord *relational.Engine) e
 	if r == nil {
 		return nil
 	}
-	data, _, err := r.store.Get(r.ctx, replica.DBPath(owner, "", "visor"))
+	data, _, err := r.store.Get(r.ctx, replica.DBPath(owner, "", "compute"))
 	if err != nil || len(data) == 0 {
 		return nil // no remote yet — nothing to merge.
 	}
 	// Materialize the remote snapshot in a throwaway temp dir and open a transient read
 	// engine on it. Dir + engine are removed before we return; nothing persists.
-	dir, err := os.MkdirTemp("", "visor-lease-merge")
+	dir, err := os.MkdirTemp("", "compute-lease-merge")
 	if err != nil {
 		return err
 	}
@@ -222,13 +222,13 @@ func (r *replicator) ship(owner, path string) {
 				err := r.pushNow(owner, path)
 				switch {
 				case err != nil && !failing:
-					log.Printf("visor HA: org %q push FAILED (durability at risk): %v", owner, err)
+					log.Printf("compute HA: org %q push FAILED (durability at risk): %v", owner, err)
 					failing = true
 				case err == nil && failing:
-					log.Printf("visor HA: org %q push recovered", owner)
+					log.Printf("compute HA: org %q push recovered", owner)
 					failing = false
 				case err == nil && first:
-					log.Printf("visor HA: org %q shipping to object store (durable)", owner)
+					log.Printf("compute HA: org %q shipping to object store (durable)", owner)
 				}
 				if err == nil {
 					first = false

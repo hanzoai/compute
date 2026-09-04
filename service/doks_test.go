@@ -79,8 +79,8 @@ func TestNodePoolMachines(t *testing.T) {
 	}
 }
 
-// An autoscaling pool grows and shrinks without a request reaching visor, so
-// nothing writes the new number down anywhere visor controls. The nodes the
+// An autoscaling pool grows and shrinks without a request reaching compute, so
+// nothing writes the new number down anywhere compute controls. The nodes the
 // provider reports are the only ground truth, and every one of them is a droplet
 // Hanzo is paying for — so the count that bills is the count that exists.
 //

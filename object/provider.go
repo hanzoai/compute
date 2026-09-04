@@ -19,8 +19,8 @@ import (
 	"sync"
 
 	"github.com/hanzoai/orm/relational/schemas"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/util"
 )
 
 type Provider struct {
@@ -231,7 +231,7 @@ func AddProvider(provider *Provider) (bool, error) {
 
 	if affected != 0 && provider.isManagedCluster() {
 		// A DOKS provider carrying a cluster UUID = a managed K8s cluster entering
-		// visor's fleet. Roll a launched event (best-effort) — kind=cluster.
+		// compute's fleet. Roll a launched event (best-effort) — kind=cluster.
 		service.EmitComputeEvent(provider.clusterEvent(service.ComputeLaunched))
 	}
 
@@ -258,7 +258,7 @@ func DeleteProvider(provider *Provider) (bool, error) {
 			p = provider
 		}
 		if p.isManagedCluster() {
-			// The managed cluster is leaving visor's fleet. Roll a destroyed
+			// The managed cluster is leaving compute's fleet. Roll a destroyed
 			// event (best-effort) — kind=cluster.
 			service.EmitComputeEvent(p.clusterEvent(service.ComputeDestroyed))
 		}
@@ -426,7 +426,7 @@ func (p *Provider) launchCredentialNamed(account string) (LaunchCredential, bool
 // distinct label or a carried launch resolves them all to one KMS key and the
 // cycling has no effect. The row's own account keeps the provider's own label
 // (unchanged from the single-account past); an additional key uses its own name.
-// KeyID/Secret are consulted only on the carrier-less path, where visor holds
+// KeyID/Secret are consulted only on the carrier-less path, where compute holds
 // the token itself; under the carrier they are empty and egress attaches the key.
 func (p *Provider) credential(c LaunchCredential) service.Credential {
 	label := c.KeyName

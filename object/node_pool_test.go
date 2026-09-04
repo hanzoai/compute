@@ -25,7 +25,7 @@ import (
 
 	"github.com/digitalocean/godo"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 type fakeNodePoolDeleter struct {
@@ -262,7 +262,7 @@ func TestRecordSeedPoolStillRetriesTheSameCluster(t *testing.T) {
 // ---- a running pool's row is not dropped on the customer's say-so ----
 
 // The delete used to gate the whole upstream round-trip on the BODY carrying a
-// PoolID and a Provider. Send `{"name":"gpu"}` and nothing else and visor never
+// PoolID and a Provider. Send `{"name":"gpu"}` and nothing else and compute never
 // asked DigitalOcean anything: it deleted the row and returned success, while the
 // pool kept running on the configured cloud account with nothing left to bill it.
 //

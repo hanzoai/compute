@@ -17,9 +17,9 @@ package controllers
 import (
 	"fmt"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 func addRecord(c *ApiController, userName string, requestUri string) {

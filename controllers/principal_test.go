@@ -28,7 +28,7 @@ import (
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 )
 
-// principal is the ONE org resolution both visor surfaces run — the controller methods
+// principal is the ONE org resolution both compute surfaces run — the controller methods
 // through resolveComputeOrg, the typed ops through their decoded input — so these
 // cases pin the rule once for both.
 //
@@ -76,7 +76,7 @@ func signer(t *testing.T, issuer string) func(owner string) string {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "visor-test"},
+		Subject:      pkix.Name{CommonName: "compute-test"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 	}
@@ -112,7 +112,7 @@ func signer(t *testing.T, issuer string) func(owner string) string {
 // A real user's org comes from a SIGNED claim; ?owner is a string the caller
 // typed. If the query could win, any customer holding any valid token could read
 // any other tenant's fleet by appending ?owner=<them> — so the precedence is not
-// a preference, it is the isolation. Both visor surfaces resolve through this one
+// a preference, it is the isolation. Both compute surfaces resolve through this one
 // function, so this pins it for the typed op and the controller methods at once.
 func TestPrincipalBearerBeatsOwner(t *testing.T) {
 	mint := signer(t, "https://test.id")

@@ -41,10 +41,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // MeterRunningNodePools debits every running node pool one hour of its resale
@@ -179,7 +179,7 @@ func meterPools(ctx context.Context, live []service.LivePool, rows []*object.Nod
 //     while the cluster kept running. Now dropping the row changes nothing: the
 //     pool is still on the provider, so it still bills.
 //   - an autoscaled pool grew from one node to sixteen and kept billing one,
-//     because nothing writes the new count anywhere visor controls. Now the count
+//     because nothing writes the new count anywhere compute controls. Now the count
 //     comes from the provider, so it bills sixteen from the next hour.
 //
 // A row whose cluster the configured cloud account does NOT have is billed FROM THE ROW.

@@ -18,14 +18,14 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hanzoai/visor/authz"
+	"github.com/hanzoai/compute/authz"
 )
 
 // TestMain builds the authorizer the way the server does, because without it
 // these tests were not measuring authorization at all.
 //
 // authz.Enforcer is a package variable and InitAuthz is called from exactly one
-// place — pkg/visor/embed.go, the real bootstrap. A test that routes a request
+// place — pkg/compute/embed.go, the real bootstrap. A test that routes a request
 // through ApiFilter without it reaches Enforcer.Enforce on a NIL enforcer, which
 // panics, which Recover turns into a 500. A "this route is gated" assertion
 // written as "not 200" then passes on the strength of a nil dereference, and

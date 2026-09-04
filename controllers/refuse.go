@@ -17,7 +17,7 @@
 
 package controllers
 
-// What visor says when it will not answer.
+// What compute says when it will not answer.
 //
 // Each of these was written out at several call sites, so each was several
 // slightly different sentences for one fact. They are values now, said the same
