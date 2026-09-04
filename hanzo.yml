@@ -31,3 +31,4 @@ images:
     # job would block the manifest step behind a runner that never claims it.
     platforms:
       - linux/amd64
+      - linux/arm64
