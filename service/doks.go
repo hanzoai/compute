@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/digitalocean/godo"
 	"golang.org/x/oauth2"
@@ -212,4 +213,207 @@ func IsNotFound(err error) bool {
 		return doErr.Response.StatusCode == http.StatusNotFound
 	}
 	return false
+}
+
+// ---- DOKS clusters + worker nodes ----
+//
+// The node-pool CRUD above manages a cluster's pools; the surface below reads the
+// cluster inventory itself and, crucially, expands each pool's per-node droplet
+// list into machine-shaped records so the fleet can show individual DOKS worker
+// NODES (not just standalone droplets). Every field is a REAL DigitalOcean value —
+// a node with no address on the pool object honestly carries empty IPs; nothing is
+// fabricated.
+
+// ClusterInfo is a DOKS cluster's identity, placement and health — no secrets. It
+// is the value the /v1/kubernetes-clusters surface returns and the enumeration the
+// house node path filters by org tag.
+type ClusterInfo struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Region    string   `json:"region"`
+	Version   string   `json:"version"`
+	Status    string   `json:"status"`
+	NodePools int      `json:"nodePools"`
+	NodeCount int      `json:"nodeCount"`
+	Tags      []string `json:"tags"`
+	CreatedAt string   `json:"createdAt"`
+}
+
+func clusterInfoFromGodo(c *godo.KubernetesCluster) *ClusterInfo {
+	ci := &ClusterInfo{
+		ID:        c.ID,
+		Name:      c.Name,
+		Region:    c.RegionSlug,
+		Version:   c.VersionSlug,
+		Tags:      c.Tags,
+		NodePools: len(c.NodePools),
+	}
+	if c.Status != nil {
+		ci.Status = string(c.Status.State)
+	}
+	if !c.CreatedAt.IsZero() {
+		ci.CreatedAt = c.CreatedAt.Format(time.RFC3339)
+	}
+	for _, p := range c.NodePools {
+		ci.NodeCount += p.Count
+	}
+	return ci
+}
+
+// ListClusters returns every DOKS cluster visible to this client's token.
+func (c *DOKSClient) ListClusters() ([]*ClusterInfo, error) {
+	opt := &godo.ListOptions{Page: 1, PerPage: 200}
+	var out []*ClusterInfo
+	for {
+		clusters, resp, err := c.Client.Kubernetes.List(context.TODO(), opt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list DOKS clusters: %w", err)
+		}
+		for _, cl := range clusters {
+			out = append(out, clusterInfoFromGodo(cl))
+		}
+		if resp.Links == nil || resp.Links.IsLastPage() {
+			break
+		}
+		opt.Page++
+	}
+	return out, nil
+}
+
+// GetCluster returns this client's cluster identity/placement/health.
+func (c *DOKSClient) GetCluster() (*ClusterInfo, error) {
+	cluster, _, err := c.Client.Kubernetes.Get(context.TODO(), c.ClusterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get DOKS cluster %s: %w", c.ClusterID, err)
+	}
+	return clusterInfoFromGodo(cluster), nil
+}
+
+// nodeMachinesFromCluster expands a cluster's node pools into machine-shaped worker
+// records — one Machine per node. Id is the underlying DROPLET id (so a node dedupes
+// against the plain droplet list by id), Name is the k8s node name, Provider is
+// DigitalOcean, Size is the pool slug, Region is the cluster region, State is the
+// node's own state and Tag marks its cluster (doks-cluster:<name>). IPs are left
+// empty: a DOKS worker's addresses are not carried on the node-pool object, and an
+// honest blank is correct — never a fabricated address.
+func nodeMachinesFromCluster(cluster *godo.KubernetesCluster) []*Machine {
+	if cluster == nil {
+		return nil
+	}
+	var out []*Machine
+	for _, pool := range cluster.NodePools {
+		for _, node := range pool.Nodes {
+			m := &Machine{
+				Id:          node.DropletID,
+				Name:        node.Name,
+				DisplayName: node.Name,
+				Provider:    "DigitalOcean",
+				Category:    "Kubernetes",
+				Size:        pool.Size,
+				Region:      cluster.RegionSlug,
+				Tag:         "doks-cluster:" + cluster.Name,
+			}
+			if node.Status != nil {
+				m.State = node.Status.State
+			}
+			if !node.CreatedAt.IsZero() {
+				m.CreatedTime = node.CreatedAt.Format(time.RFC3339)
+			}
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// clusterNodesByID fetches a cluster and expands its worker nodes. Kubernetes.Get
+// carries the node pools WITH their per-node droplet ids + state and the cluster
+// region/name — everything a node record needs in one call.
+func (c *DOKSClient) clusterNodesByID(clusterID string) ([]*Machine, error) {
+	cluster, _, err := c.Client.Kubernetes.Get(context.TODO(), clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get DOKS cluster %s: %w", clusterID, err)
+	}
+	return nodeMachinesFromCluster(cluster), nil
+}
+
+// ClusterNodes returns this client's cluster's worker nodes as machine records.
+func (c *DOKSClient) ClusterNodes() ([]*Machine, error) {
+	return c.clusterNodesByID(c.ClusterID)
+}
+
+// newHouseDOKSClient builds a DOKS client on Hanzo's house DO token with no fixed
+// cluster — used to enumerate/expand every house cluster tagged to an org.
+func newHouseDOKSClient() (*DOKSClient, error) {
+	hc, err := newHouseDOClient()
+	if err != nil {
+		return nil, err
+	}
+	return &DOKSClient{Client: hc.Client}, nil
+}
+
+// listOrgKubernetesNodes enumerates every cluster visible to client, keeps those
+// tagged hanzo-org:<org> (the SAME tenancy tag ListOrgMachines scopes droplets by)
+// and expands each into worker-node machine records.
+func listOrgKubernetesNodes(client *DOKSClient, org string) ([]*Machine, error) {
+	clusters, err := client.ListClusters()
+	if err != nil {
+		return nil, err
+	}
+	want := orgTag(org)
+	var out []*Machine
+	for _, ci := range clusters {
+		if !hasTag(ci.Tags, want) {
+			continue
+		}
+		nodes, err := client.clusterNodesByID(ci.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, nodes...)
+	}
+	return out, nil
+}
+
+// listOrgKubernetesClusters is the cluster analogue of listOrgKubernetesNodes: the
+// house-account clusters tagged to org.
+func listOrgKubernetesClusters(client *DOKSClient, org string) ([]*ClusterInfo, error) {
+	clusters, err := client.ListClusters()
+	if err != nil {
+		return nil, err
+	}
+	want := orgTag(org)
+	out := make([]*ClusterInfo, 0, len(clusters))
+	for _, ci := range clusters {
+		if hasTag(ci.Tags, want) {
+			out = append(out, ci)
+		}
+	}
+	return out, nil
+}
+
+// ListOrgKubernetesNodesHouse returns the worker nodes of every house-account DOKS
+// cluster tagged hanzo-org:<org>. Empty (nil, nil) when compute is not configured —
+// the BYOC provider path still contributes on its own.
+func ListOrgKubernetesNodesHouse(org string) ([]*Machine, error) {
+	if !ComputeConfigured() {
+		return nil, nil
+	}
+	client, err := newHouseDOKSClient()
+	if err != nil {
+		return nil, err
+	}
+	return listOrgKubernetesNodes(client, org)
+}
+
+// ListOrgKubernetesClustersHouse returns the house-account DOKS clusters tagged
+// hanzo-org:<org>. Empty (nil, nil) when compute is not configured.
+func ListOrgKubernetesClustersHouse(org string) ([]*ClusterInfo, error) {
+	if !ComputeConfigured() {
+		return nil, nil
+	}
+	client, err := newHouseDOKSClient()
+	if err != nil {
+		return nil, err
+	}
+	return listOrgKubernetesClusters(client, org)
 }
