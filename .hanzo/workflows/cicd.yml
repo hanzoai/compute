@@ -2,7 +2,7 @@
 #
 # `.hanzo/workflows`, not `.github/workflows`: git.hanzo.ai reads the FIRST of
 # those directories present in the commit, and the git-runner pool that
-# advertises `hanzo-build-linux-amd64` registers against git.hanzo.ai only.
+# advertises `linux-amd64` registers against git.hanzo.ai only.
 name: CI/CD
 on:
   push:
