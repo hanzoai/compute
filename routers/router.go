@@ -18,7 +18,7 @@ import (
 	"github.com/zap-proto/zip"
 	"github.com/zap-proto/zip/middleware"
 
-	"github.com/hanzoai/visor/controllers"
+	"github.com/hanzoai/compute/controllers"
 )
 
 // h adapts a controller method to a zip.Handler: it binds a fresh controller to
@@ -67,6 +67,7 @@ func Route(app *zip.App) {
 	// path outside /v1/ falls to the SPA fallback and comes back 200, so the
 	// probe measured the file server rather than the service.
 	registerHealth(app)
+	registerGone(app)
 
 	app.Use(zip.H(TransparentStatic))
 	app.Use(zip.H(TenantContextFilter))
@@ -101,7 +102,7 @@ func registerHealth(app *zip.App) {
 // It is called next to the other /v1/machines routes because that is where the
 // noun lives, and NOT because the position decides anything: fiber prefers a
 // static segment over a `:param` at the same position however the two were
-// registered, so /v1/machines/agents beats /v1/machines/:id on specificity.
+// registered, so /v1/machines/agents beats /v1/machines/:owner/:name on specificity.
 // Measured, not assumed — moving this call below the :id routes leaves the
 // literal still winning. What is worth pinning is the OUTCOME rather than an
 // ordering rule that turns out not to be one, so TestAgentsIsNotAMachineId
@@ -112,17 +113,17 @@ func registerAgent(app *zip.App) {
 		zip.WithOperationID("listAgents"),
 		zip.WithTags("AgentBinding"),
 	)
-	zip.Put(app, "/v1/machines/:id/agent", controllers.BindAgent,
+	zip.Put(app, "/v1/machines/:owner/:name/agent", controllers.BindAgent,
 		zip.WithSummary("Bind a cloud Agent to a machine"),
 		zip.WithOperationID("bindAgent"),
 		zip.WithTags("AgentBinding"),
 	)
-	zip.Get(app, "/v1/machines/:id/agent", controllers.GetAgent,
+	zip.Get(app, "/v1/machines/:owner/:name/agent", controllers.GetAgent,
 		zip.WithSummary("Read a machine's agent binding"),
 		zip.WithOperationID("getAgent"),
 		zip.WithTags("AgentBinding"),
 	)
-	zip.Delete(app, "/v1/machines/:id/agent", controllers.UnbindAgent,
+	zip.Delete(app, "/v1/machines/:owner/:name/agent", controllers.UnbindAgent,
 		zip.WithSummary("Unbind a machine's agent"),
 		zip.WithOperationID("unbindAgent"),
 		zip.WithTags("AgentBinding"),
@@ -135,46 +136,50 @@ func registerAgent(app *zip.App) {
 func registerAPI(app *zip.App) {
 	app.Post("/v1/signin", h((*controllers.ApiController).Signin))
 	app.Post("/v1/signout", h((*controllers.ApiController).Signout))
-	app.Get("/v1/get-account", h((*controllers.ApiController).GetAccount))
+	app.Get("/v1/account", h((*controllers.ApiController).GetAccount))
 
-	app.Get("/v1/get-records", h((*controllers.ApiController).GetRecords))
-	app.Get("/v1/get-record", h((*controllers.ApiController).GetRecord))
-	app.Post("/v1/update-record", h((*controllers.ApiController).UpdateRecord))
-	app.Post("/v1/add-record", h((*controllers.ApiController).AddRecord))
-	app.Post("/v1/delete-record", h((*controllers.ApiController).DeleteRecord))
+	app.Get("/v1/records", h((*controllers.ApiController).GetRecords))
+	app.Get("/v1/records/:owner/:name", h((*controllers.ApiController).GetRecord))
+	app.Put("/v1/records/:owner/:name", h((*controllers.ApiController).UpdateRecord))
+	app.Post("/v1/records", h((*controllers.ApiController).AddRecord))
+	app.Delete("/v1/records/:owner/:name", h((*controllers.ApiController).DeleteRecord))
 
-	app.Post("/v1/commit-record", h((*controllers.ApiController).CommitRecord))
-	app.Get("/v1/query-record", h((*controllers.ApiController).QueryRecord))
+	// Committing a record writes its BLOCK on the chain (object.Record.Block);
+	// querying reads it back. One noun, written and read.
+	app.Put("/v1/records/:owner/:name/block", h((*controllers.ApiController).CommitRecord))
+	app.Get("/v1/records/:owner/:name/block", h((*controllers.ApiController).QueryRecord))
 
-	app.Get("/v1/get-assets", h((*controllers.ApiController).GetAssets))
-	app.Get("/v1/get-asset", h((*controllers.ApiController).GetAsset))
-	app.Post("/v1/update-asset", h((*controllers.ApiController).UpdateAsset))
-	app.Post("/v1/add-asset", h((*controllers.ApiController).AddAsset))
-	app.Post("/v1/delete-asset", h((*controllers.ApiController).DeleteAsset))
+	// An asset is a resource. The collection lists and creates; the item, named
+	// by its (owner, name) key, is read, replaced and removed.
+	app.Get("/v1/assets", h((*controllers.ApiController).GetAssets))
+	app.Post("/v1/assets", h((*controllers.ApiController).AddAsset))
+	app.Get("/v1/assets/:owner/:name", h((*controllers.ApiController).GetAsset))
+	app.Put("/v1/assets/:owner/:name", h((*controllers.ApiController).UpdateAsset))
+	app.Delete("/v1/assets/:owner/:name", h((*controllers.ApiController).DeleteAsset))
 
-	app.Get("/v1/get-providers", h((*controllers.ApiController).GetProviders))
-	app.Get("/v1/get-provider", h((*controllers.ApiController).GetProvider))
-	app.Post("/v1/update-provider", h((*controllers.ApiController).UpdateProvider))
-	app.Post("/v1/add-provider", h((*controllers.ApiController).AddProvider))
-	app.Post("/v1/delete-provider", h((*controllers.ApiController).DeleteProvider))
-
-	app.Get("/v1/get-machines", h((*controllers.ApiController).GetMachines))
-	app.Get("/v1/get-machine", h((*controllers.ApiController).GetMachine))
-	app.Post("/v1/update-machine", h((*controllers.ApiController).UpdateMachine))
-	app.Post("/v1/add-machine", h((*controllers.ApiController).AddMachine))
-	app.Post("/v1/delete-machine", h((*controllers.ApiController).DeleteMachine))
-	app.Post("/v1/launch-machine", h((*controllers.ApiController).LaunchMachine))
+	// A provider holds a cloud credential, so the authorization on each address
+	// is the one the verb spelling had: the seam reads the (owner, name) out of
+	// the path (see pathTarget) and compares it to the subject exactly as before.
+	app.Get("/v1/providers", h((*controllers.ApiController).GetProviders))
+	app.Post("/v1/providers", h((*controllers.ApiController).AddProvider))
+	app.Get("/v1/providers/:owner/:name", h((*controllers.ApiController).GetProvider))
+	app.Put("/v1/providers/:owner/:name", h((*controllers.ApiController).UpdateProvider))
+	app.Delete("/v1/providers/:owner/:name", h((*controllers.ApiController).DeleteProvider))
 
 	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
 	// per-org machines over the configured cloud account (controllers/compute.go).
 	app.Get("/v1/regions", h((*controllers.ApiController).GetComputeRegions))
 	app.Get("/v1/sizes", h((*controllers.ApiController).GetComputeSizes))
 	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
-	app.Get("/v1/machines", h((*controllers.ApiController).ListComputeMachines))
-	app.Post("/v1/machines/launch", h((*controllers.ApiController).LaunchComputeMachine))
+	// ONE machines collection. It answers from the organization's own providers
+	// and from the house account, keyed the one way (owner, name), with Source
+	// saying which. There is no second address to join against.
+	app.Get("/v1/machines", h((*controllers.ApiController).ListMachines))
+	app.Post("/v1/machines", h((*controllers.ApiController).LaunchComputeMachine))
 	registerAgent(app)
-	app.Get("/v1/machines/:id", h((*controllers.ApiController).GetComputeMachine))
-	app.Delete("/v1/machines/:id", h((*controllers.ApiController).DeleteComputeMachine))
+	app.Get("/v1/machines/:owner/:name", h((*controllers.ApiController).GetMachine))
+	app.Put("/v1/machines/:owner/:name", h((*controllers.ApiController).UpdateMachine))
+	app.Delete("/v1/machines/:owner/:name", h((*controllers.ApiController).DeleteMachine))
 	// Unified /v1/k8s noun — the ONE Kubernetes surface: DOKS cluster lifecycle
 	// (list / detail+nodes / create / delete) plus the worker NODES on the fleet.
 	app.Get("/v1/k8s/providers", h((*controllers.ApiController).ListComputeKubernetesProviders))
@@ -196,37 +201,54 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
 	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
 
-	app.Get("/v1/get-sessions", h((*controllers.ApiController).GetSessions))
-	app.Get("/v1/get-session", h((*controllers.ApiController).GetConnSession))
-	app.Post("/v1/update-session", h((*controllers.ApiController).UpdateSession))
-	app.Post("/v1/add-session", h((*controllers.ApiController).AddSession))
-	app.Post("/v1/delete-session", h((*controllers.ApiController).DeleteSession))
-	app.Post("/v1/start-session", h((*controllers.ApiController).StartSession))
-	app.Post("/v1/stop-session", h((*controllers.ApiController).StopSession))
+	app.Get("/v1/sessions", h((*controllers.ApiController).GetSessions))
+	app.Get("/v1/sessions/:owner/:name", h((*controllers.ApiController).GetConnSession))
+	app.Put("/v1/sessions/:owner/:name", h((*controllers.ApiController).UpdateSession))
+	app.Post("/v1/sessions", h((*controllers.ApiController).AddSession))
+	app.Delete("/v1/sessions/:owner/:name", h((*controllers.ApiController).DeleteSession))
+	// Starting and stopping both write the session's STATUS — connected, or
+	// disconnected. One address, because it is one property.
+	app.Put("/v1/sessions/:owner/:name/status", h((*controllers.ApiController).StartSession))
+	app.Delete("/v1/sessions/:owner/:name/status", h((*controllers.ApiController).StopSession))
 
-	app.Post("/v1/add-asset-tunnel", h((*controllers.ApiController).AddAssetTunnel))
-	app.Get("/v1/get-asset-tunnel", h((*controllers.ApiController).GetAssetTunnel))
+	// Neither of these is a tunnel on an asset, which is what they were called.
+	//
+	// The first CREATES A SESSION for an asset and returns it, so it is a POST to
+	// the asset's sessions. The second opens the live connection to a SESSION —
+	// it reads ?sessionId= and upgrades to a WebSocket — so it belongs to the
+	// session, not to the asset it happens to reach.
+	//
+	// Separating them puts each with the thing it is about: creating belongs to
+	// the collection that holds the created, and the connection belongs to the
+	// session it connects to.
+	app.Post("/v1/assets/:owner/:name/sessions", h((*controllers.ApiController).AddAssetTunnel))
+	app.Get("/v1/sessions/:owner/:name/connection", h((*controllers.ApiController).GetAssetTunnel))
 
-	app.Get("/v1/get-node-pools", h((*controllers.ApiController).GetNodePools))
-	app.Get("/v1/get-node-pool", h((*controllers.ApiController).GetNodePool))
-	app.Post("/v1/create-node-pool", h((*controllers.ApiController).CreateNodePool))
-	app.Post("/v1/update-node-pool", h((*controllers.ApiController).UpdateNodePool))
-	app.Post("/v1/delete-node-pool", h((*controllers.ApiController).DeleteNodePool))
-	app.Post("/v1/scale-node-pool", h((*controllers.ApiController).ScaleNodePool))
+	app.Get("/v1/pools", h((*controllers.ApiController).GetNodePools))
+	app.Post("/v1/pools", h((*controllers.ApiController).CreateNodePool))
+	app.Get("/v1/pools/:owner/:name", h((*controllers.ApiController).GetNodePool))
+	app.Put("/v1/pools/:owner/:name", h((*controllers.ApiController).UpdateNodePool))
+	app.Delete("/v1/pools/:owner/:name", h((*controllers.ApiController).DeleteNodePool))
+	// How many nodes the pool runs is a property of the pool, so scaling is
+	// writing that property — not a verb of its own.
+	app.Put("/v1/pools/:owner/:name/size", h((*controllers.ApiController).ScaleNodePool))
 
-	app.Get("/v1/get-plans", h((*controllers.ApiController).GetPlans))
-	app.Get("/v1/get-plan", h((*controllers.ApiController).GetPlan))
-	app.Post("/v1/add-plan", h((*controllers.ApiController).AddPlan))
-	app.Post("/v1/update-plan", h((*controllers.ApiController).UpdatePlan))
-	app.Post("/v1/delete-plan", h((*controllers.ApiController).DeletePlan))
+	app.Get("/v1/plans", h((*controllers.ApiController).GetPlans))
+	app.Get("/v1/plans/:owner/:name", h((*controllers.ApiController).GetPlan))
+	app.Post("/v1/plans", h((*controllers.ApiController).AddPlan))
+	app.Put("/v1/plans/:owner/:name", h((*controllers.ApiController).UpdatePlan))
+	app.Delete("/v1/plans/:owner/:name", h((*controllers.ApiController).DeletePlan))
 
-	app.Get("/v1/get-whitelabel", h((*controllers.ApiController).GetWhitelabel))
+	app.Get("/v1/whitelabel", h((*controllers.ApiController).GetWhitelabel))
 
-	app.Get("/v1/get-volumes", h((*controllers.ApiController).GetVolumes))
-	app.Get("/v1/get-volume", h((*controllers.ApiController).GetVolume))
-	app.Post("/v1/create-volume", h((*controllers.ApiController).CreateVolume))
-	app.Post("/v1/delete-volume", h((*controllers.ApiController).DeleteVolume))
-	app.Post("/v1/attach-volume", h((*controllers.ApiController).AttachVolume))
-	app.Post("/v1/detach-volume", h((*controllers.ApiController).DetachVolume))
-	app.Post("/v1/resize-volume", h((*controllers.ApiController).ResizeVolume))
+	app.Get("/v1/volumes", h((*controllers.ApiController).GetVolumes))
+	app.Post("/v1/volumes", h((*controllers.ApiController).CreateVolume))
+	app.Get("/v1/volumes/:owner/:name", h((*controllers.ApiController).GetVolume))
+	app.Delete("/v1/volumes/:owner/:name", h((*controllers.ApiController).DeleteVolume))
+	// Which machine a volume is attached to is a RELATION, and a relation the
+	// volume has one of: writing it attaches, removing it detaches.
+	app.Put("/v1/volumes/:owner/:name/attachment", h((*controllers.ApiController).AttachVolume))
+	app.Delete("/v1/volumes/:owner/:name/attachment", h((*controllers.ApiController).DetachVolume))
+	// How large the volume is, written.
+	app.Put("/v1/volumes/:owner/:name/size", h((*controllers.ApiController).ResizeVolume))
 }

@@ -25,8 +25,8 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 // A batch launched with count=N is just N machines named "<name>-000",
@@ -126,7 +126,7 @@ func TestFilterMachinesByProject(t *testing.T) {
 // newLaunchCtx builds a ZAP request context the way the router hands one to a
 // handler, so resolveComputeApp/Project can read the threaded tenant scope.
 func newLaunchCtx() *zip.Ctx {
-	return zip.New(zip.Config{}).TestCtx("POST", "/v1/machines/launch")
+	return zip.New(zip.Config{}).TestCtx("POST", "/v1/machines")
 }
 
 // resolveComputeApp/Project resolve the OPTIONAL scope exactly one way: the
@@ -265,7 +265,6 @@ func launchCommerceOf(t *testing.T, availableCents int64) *launchCommerce {
 	// No provider token: LaunchOrgMachine cannot reach DigitalOcean, so if the
 	// launch ever gets that far it fails for a DIFFERENT reason — which is
 	// exactly what the read count is here to detect.
-	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 	return c
 }
 

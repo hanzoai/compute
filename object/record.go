@@ -22,8 +22,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/util"
 )
 
 var logPostOnly bool

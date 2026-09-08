@@ -17,8 +17,8 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 // GetAssets
@@ -73,7 +73,7 @@ func (c *ApiController) GetAssets() {
 // @Success 200 {object} object.Asset The Response object
 // @router /get-asset [get]
 func (c *ApiController) GetAsset() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	asset, err := object.GetMaskedAsset(object.GetAsset(id))
 	if err != nil {
@@ -93,7 +93,7 @@ func (c *ApiController) GetAsset() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-asset [post]
 func (c *ApiController) UpdateAsset() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	var asset object.Asset
 	err := json.Unmarshal(c.Ctx.Body(), &asset)

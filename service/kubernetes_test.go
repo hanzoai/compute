@@ -295,18 +295,26 @@ func TestOnlyOneFileMatchesProviderNames(t *testing.T) {
 	}
 }
 
-// An empty registration falls back to the single configured token, so a
-// deployment that has not been told where its accounts live keeps working.
-func TestNoRegistrationFallsBackToTheSingleToken(t *testing.T) {
-	t.Cleanup(func() { RegisterCredentials(nil) })
+// An empty registration falls back to the platform account, which exists only
+// where a carrier can reach it. There is no token to fall back to any more, so
+// the two answers are "the platform account" and "nothing", and which one is
+// correct is decided by the carrier alone.
+func TestNoRegistrationFallsBackToThePlatformAccount(t *testing.T) {
+	t.Cleanup(func() { RegisterCredentials(nil); RegisterCarrier(nil) })
 	RegisterCredentials(func() []Credential { return nil })
-	// With no DO token configured either, there is simply nothing — which is a
-	// different answer from "one account", and both are correct answers.
+
+	RegisterCarrier(nil)
+	if got := cloudProviders(); len(got) != 0 {
+		t.Errorf("no carrier and no registration should yield no accounts, got %d", len(got))
+	}
+
+	RegisterCarrier(func(Credential) (*http.Client, error) { return &http.Client{}, nil })
 	got := cloudProviders()
-	if tok := digitalOceanToken(); tok == "" && len(got) != 0 {
-		t.Errorf("no token and no registration should yield no accounts, got %d", len(got))
-	} else if tok != "" && len(got) != 1 {
-		t.Errorf("a configured token should yield exactly one account, got %d", len(got))
+	if len(got) != 1 || got[0].provider != providerDigitalOcean {
+		t.Fatalf("a carrier should yield exactly the platform account, got %+v", got)
+	}
+	if got[0].secret != "" {
+		t.Error("the platform account must carry no secret: egress attaches it")
 	}
 }
 

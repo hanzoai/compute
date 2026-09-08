@@ -19,8 +19,8 @@ import (
 	"runtime"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/util"
 	_ "github.com/lib/pq"
 
 	"github.com/hanzoai/orm/relational"

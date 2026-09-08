@@ -24,7 +24,7 @@ import (
 
 	"github.com/digitalocean/godo"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 type fakeNodePoolDeleter struct {

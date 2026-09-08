@@ -33,9 +33,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/pkg/visor"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/pkg/visor"
 )
 
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".

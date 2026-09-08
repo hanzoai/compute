@@ -19,13 +19,13 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // newFilterCtx builds a ZAP request context the way the router hands one to the
 // filter chain, with the gateway-injected tenant headers set.
 func newFilterCtx(app *zip.App, headers map[string]string) *zip.Ctx {
-	c := app.TestCtx("POST", "/v1/machines/launch")
+	c := app.TestCtx("POST", "/v1/machines")
 	for k, v := range headers {
 		c.Fiber().Request().Header.Set(k, v)
 	}

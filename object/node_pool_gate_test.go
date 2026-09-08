@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 // An autoscaling pool grows without asking. MinNodes/MaxNodes/AutoScale are
@@ -127,7 +127,6 @@ func commerceOf(t *testing.T, availableCents int64) *commerce {
 	t.Cleanup(srv.Close)
 	t.Setenv("COMMERCE_URL", srv.URL)
 	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
-	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 	return c
 }
 

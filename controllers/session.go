@@ -17,8 +17,8 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 // GetSessions
@@ -75,7 +75,7 @@ func (c *ApiController) GetSessions() {
 // @Success 200 {object} object.Session
 // @router /get-session [get]
 func (c *ApiController) GetConnSession() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	session, err := object.GetConnSession(id)
 	if err != nil {
@@ -120,7 +120,7 @@ func (c *ApiController) DeleteSession() {
 // @Success 200 {object} Response
 // @router /update-session [post]
 func (c *ApiController) UpdateSession() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	var session object.Session
 	err := json.Unmarshal(c.Ctx.Body(), &session)
@@ -153,7 +153,7 @@ func (c *ApiController) AddSession() {
 }
 
 func (c *ApiController) StartSession() {
-	sessionId := c.Ctx.Query("id")
+	sessionId := c.Id()
 
 	s := &object.Session{
 		Status:    object.Connected,
@@ -170,7 +170,7 @@ func (c *ApiController) StartSession() {
 }
 
 func (c *ApiController) StopSession() {
-	sessionId := c.Ctx.Query("id")
+	sessionId := c.Id()
 
 	err := object.CloseSession(sessionId, ForcedDisconnect, "The administrator forcibly closes the session")
 	if err != nil {

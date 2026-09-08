@@ -20,7 +20,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // Ping is what a probe sends: nothing. A health check asks one question and

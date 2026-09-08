@@ -15,8 +15,8 @@
 package object
 
 import (
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/service"
 )
 
 // RegisterCloudCredentials teaches service which cloud accounts this deployment

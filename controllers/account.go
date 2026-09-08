@@ -20,7 +20,7 @@ import (
 
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/compute/conf"
 )
 
 //go:embed token_jwt_key.pem

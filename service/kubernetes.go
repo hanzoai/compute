@@ -144,8 +144,10 @@ func cloudProviders() []cloudProvider {
 			return out
 		}
 	}
-	if t := digitalOceanToken(); t != "" {
-		return []cloudProvider{{provider: providerDigitalOcean, secret: t}}
+	// The platform account carries no secret: egress attaches it. Without a
+	// carrier there is no way to reach it, so there is nothing to name.
+	if carrierRegistered() {
+		return []cloudProvider{{provider: providerDigitalOcean}}
 	}
 	return nil
 }

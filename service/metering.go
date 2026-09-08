@@ -29,8 +29,8 @@ import (
 	"time"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // meteringProvider labels resell-compute usage in the commerce ledger so spend

@@ -18,7 +18,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hanzoai/visor/authz"
+	"github.com/hanzoai/compute/authz"
 )
 
 // TestMain builds the authorizer the way the server does, because without it

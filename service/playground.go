@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/compute/conf"
 )
 
 // playground.go — a launched bot IS a playground node. registerPlaygroundNode

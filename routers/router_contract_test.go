@@ -17,6 +17,7 @@ package routers
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/zap-proto/zip"
@@ -56,45 +57,40 @@ var apiContract = []route{
 
 	{"POST", "/v1/signin", "Signin"},
 	{"POST", "/v1/signout", "Signout"},
-	{"GET", "/v1/get-account", "GetAccount"},
-	{"GET", "/v1/get-records", "GetRecords"},
-	{"GET", "/v1/get-record", "GetRecord"},
-	{"POST", "/v1/update-record", "UpdateRecord"},
-	{"POST", "/v1/add-record", "AddRecord"},
-	{"POST", "/v1/delete-record", "DeleteRecord"},
-	{"POST", "/v1/commit-record", "CommitRecord"},
-	{"GET", "/v1/query-record", "QueryRecord"},
-	{"GET", "/v1/get-assets", "GetAssets"},
-	{"GET", "/v1/get-asset", "GetAsset"},
-	{"POST", "/v1/update-asset", "UpdateAsset"},
-	{"POST", "/v1/add-asset", "AddAsset"},
-	{"POST", "/v1/delete-asset", "DeleteAsset"},
-	{"GET", "/v1/get-providers", "GetProviders"},
-	{"GET", "/v1/get-provider", "GetProvider"},
-	{"POST", "/v1/update-provider", "UpdateProvider"},
-	{"POST", "/v1/add-provider", "AddProvider"},
-	{"POST", "/v1/delete-provider", "DeleteProvider"},
-	{"GET", "/v1/get-machines", "GetMachines"},
-	{"GET", "/v1/get-machine", "GetMachine"},
-	{"POST", "/v1/update-machine", "UpdateMachine"},
-	{"POST", "/v1/add-machine", "AddMachine"},
-	{"POST", "/v1/delete-machine", "DeleteMachine"},
-	{"POST", "/v1/launch-machine", "LaunchMachine"},
+	{"GET", "/v1/account", "GetAccount"},
+	{"GET", "/v1/records", "GetRecords"},
+	{"GET", "/v1/records/:owner/:name", "GetRecord"},
+	{"PUT", "/v1/records/:owner/:name", "UpdateRecord"},
+	{"POST", "/v1/records", "AddRecord"},
+	{"DELETE", "/v1/records/:owner/:name", "DeleteRecord"},
+	{"PUT", "/v1/records/:owner/:name/block", "CommitRecord"},
+	{"GET", "/v1/records/:owner/:name/block", "QueryRecord"},
+	{"GET", "/v1/assets", "GetAssets"},
+	{"GET", "/v1/assets/:owner/:name", "GetAsset"},
+	{"PUT", "/v1/assets/:owner/:name", "UpdateAsset"},
+	{"POST", "/v1/assets", "AddAsset"},
+	{"DELETE", "/v1/assets/:owner/:name", "DeleteAsset"},
+	{"GET", "/v1/providers", "GetProviders"},
+	{"GET", "/v1/providers/:owner/:name", "GetProvider"},
+	{"PUT", "/v1/providers/:owner/:name", "UpdateProvider"},
+	{"POST", "/v1/providers", "AddProvider"},
+	{"DELETE", "/v1/providers/:owner/:name", "DeleteProvider"},
+	{"GET", "/v1/machines", "ListMachines"},
+	{"GET", "/v1/machines/:owner/:name", "GetMachine"},
+	{"PUT", "/v1/machines/:owner/:name", "UpdateMachine"},
+	{"POST", "/v1/machines", "LaunchComputeMachine"},
+	{"DELETE", "/v1/machines/:owner/:name", "DeleteMachine"},
 	{"GET", "/v1/regions", "GetComputeRegions"},
 	{"GET", "/v1/sizes", "GetComputeSizes"},
 	{"GET", "/v1/gpus", "GetComputeGPUs"},
-	{"GET", "/v1/machines", "ListComputeMachines"},
-	{"POST", "/v1/machines/launch", "LaunchComputeMachine"},
 	// A machine's AGENT — four TYPED ops (see registerAgent), so like health
 	// these rows name package functions rather than ApiController methods. The
-	// literal /v1/machines/agents is declared here, ahead of /v1/machines/:id,
+	// literal /v1/machines/agents is declared here, ahead of /v1/machines/:owner/:name,
 	// in the order registerAPI installs them.
 	{"GET", "/v1/machines/agents", "ListAgents"},
-	{"PUT", "/v1/machines/:id/agent", "BindAgent"},
-	{"GET", "/v1/machines/:id/agent", "GetAgent"},
-	{"DELETE", "/v1/machines/:id/agent", "UnbindAgent"},
-	{"GET", "/v1/machines/:id", "GetComputeMachine"},
-	{"DELETE", "/v1/machines/:id", "DeleteComputeMachine"},
+	{"PUT", "/v1/machines/:owner/:name/agent", "BindAgent"},
+	{"GET", "/v1/machines/:owner/:name/agent", "GetAgent"},
+	{"DELETE", "/v1/machines/:owner/:name/agent", "UnbindAgent"},
 	{"GET", "/v1/k8s/providers", "ListComputeKubernetesProviders"},
 	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
@@ -102,34 +98,34 @@ var apiContract = []route{
 	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
 	{"GET", "/v1/images", "ListImages"},
 	{"POST", "/v1/images", "CreateImage"},
-	{"GET", "/v1/get-sessions", "GetSessions"},
-	{"GET", "/v1/get-session", "GetConnSession"},
-	{"POST", "/v1/update-session", "UpdateSession"},
-	{"POST", "/v1/add-session", "AddSession"},
-	{"POST", "/v1/delete-session", "DeleteSession"},
-	{"POST", "/v1/start-session", "StartSession"},
-	{"POST", "/v1/stop-session", "StopSession"},
-	{"POST", "/v1/add-asset-tunnel", "AddAssetTunnel"},
-	{"GET", "/v1/get-asset-tunnel", "GetAssetTunnel"},
-	{"GET", "/v1/get-node-pools", "GetNodePools"},
-	{"GET", "/v1/get-node-pool", "GetNodePool"},
-	{"POST", "/v1/create-node-pool", "CreateNodePool"},
-	{"POST", "/v1/update-node-pool", "UpdateNodePool"},
-	{"POST", "/v1/delete-node-pool", "DeleteNodePool"},
-	{"POST", "/v1/scale-node-pool", "ScaleNodePool"},
-	{"GET", "/v1/get-plans", "GetPlans"},
-	{"GET", "/v1/get-plan", "GetPlan"},
-	{"POST", "/v1/add-plan", "AddPlan"},
-	{"POST", "/v1/update-plan", "UpdatePlan"},
-	{"POST", "/v1/delete-plan", "DeletePlan"},
-	{"GET", "/v1/get-whitelabel", "GetWhitelabel"},
-	{"GET", "/v1/get-volumes", "GetVolumes"},
-	{"GET", "/v1/get-volume", "GetVolume"},
-	{"POST", "/v1/create-volume", "CreateVolume"},
-	{"POST", "/v1/delete-volume", "DeleteVolume"},
-	{"POST", "/v1/attach-volume", "AttachVolume"},
-	{"POST", "/v1/detach-volume", "DetachVolume"},
-	{"POST", "/v1/resize-volume", "ResizeVolume"},
+	{"GET", "/v1/sessions", "GetSessions"},
+	{"GET", "/v1/sessions/:owner/:name", "GetConnSession"},
+	{"PUT", "/v1/sessions/:owner/:name", "UpdateSession"},
+	{"POST", "/v1/sessions", "AddSession"},
+	{"DELETE", "/v1/sessions/:owner/:name", "DeleteSession"},
+	{"PUT", "/v1/sessions/:owner/:name/status", "StartSession"},
+	{"DELETE", "/v1/sessions/:owner/:name/status", "StopSession"},
+	{"POST", "/v1/assets/:owner/:name/sessions", "AddAssetTunnel"},
+	{"GET", "/v1/sessions/:owner/:name/connection", "GetAssetTunnel"},
+	{"GET", "/v1/pools", "GetNodePools"},
+	{"GET", "/v1/pools/:owner/:name", "GetNodePool"},
+	{"POST", "/v1/pools", "CreateNodePool"},
+	{"PUT", "/v1/pools/:owner/:name", "UpdateNodePool"},
+	{"DELETE", "/v1/pools/:owner/:name", "DeleteNodePool"},
+	{"PUT", "/v1/pools/:owner/:name/size", "ScaleNodePool"},
+	{"GET", "/v1/plans", "GetPlans"},
+	{"GET", "/v1/plans/:owner/:name", "GetPlan"},
+	{"POST", "/v1/plans", "AddPlan"},
+	{"PUT", "/v1/plans/:owner/:name", "UpdatePlan"},
+	{"DELETE", "/v1/plans/:owner/:name", "DeletePlan"},
+	{"GET", "/v1/whitelabel", "GetWhitelabel"},
+	{"GET", "/v1/volumes", "GetVolumes"},
+	{"GET", "/v1/volumes/:owner/:name", "GetVolume"},
+	{"POST", "/v1/volumes", "CreateVolume"},
+	{"DELETE", "/v1/volumes/:owner/:name", "DeleteVolume"},
+	{"PUT", "/v1/volumes/:owner/:name/attachment", "AttachVolume"},
+	{"DELETE", "/v1/volumes/:owner/:name/attachment", "DetachVolume"},
+	{"PUT", "/v1/volumes/:owner/:name/size", "ResizeVolume"},
 }
 
 // key renders a route as "METHOD path" for set comparison.
@@ -188,8 +184,17 @@ func TestAPIContractPreserved(t *testing.T) {
 	sort.Strings(missing)
 	sort.Strings(extra)
 
+	// A route may LEAVE this table only by being retired. Retirement is not a
+	// drop: the address still answers, with 410 and the resource that replaced
+	// it, so a caller is told where to go rather than meeting a 404. Anything
+	// that leaves without a successor is the silent break this test exists for.
 	for _, k := range missing {
-		t.Errorf("route dropped by the migration: %s", k)
+		path := k[strings.Index(k, " ")+1:]
+		if Retired(path) {
+			continue
+		}
+		t.Errorf("route dropped by the migration: %s — retire it with Retire(%q, <successor>) "+
+			"so callers are told where it went, or put it back", k, path)
 	}
 	for _, k := range extra {
 		t.Errorf("route served but not declared: %s", k)
@@ -202,7 +207,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 74
+	const wantRoutes = 69
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -214,7 +219,34 @@ func TestAPIContractCount(t *testing.T) {
 // TestAPIContractVerbMix pins the per-verb split — a GET silently re-registered
 // as POST keeps the total at 72 while breaking every caller.
 func TestAPIContractVerbMix(t *testing.T) {
-	want := map[string]int{"GET": 33, "POST": 37, "DELETE": 3, "PUT": 1}
+	// assets and providers moved to resource addresses, and the shape moved with
+	// them: replacing an item is PUT and removing one is DELETE, where the verb
+	// surface said POST to both. Four POSTs became two PUTs and two DELETEs —
+	// update-asset, delete-asset, update-provider, delete-provider.
+	//
+	//	POST 37 -> 33    PUT 1 -> 3    DELETE 3 -> 5    GET 33 unchanged
+	//
+	// GET does not move: reading a collection and reading an item were both GET
+	// before and are both GET now. A number here that changes WITHOUT a family
+	// moving is the thing this test is for.
+	// Volumes, node pools and the four state changes moved, and the shape moved
+	// with them. Ten POSTs became PUTs or DELETEs — because writing a property
+	// (a pool's size, a volume's attachment, a session's status, a record's
+	// block) is PUT, and removing one is DELETE.
+	//
+	//	POST 27 -> 17    PUT 6 -> 12    DELETE 8 -> 12    GET 33 unchanged
+	//
+	// GET stays put across every family: reading a collection and reading an item
+	// were both GET before and are both GET now. A number that moves WITHOUT a
+	// family moving is what this test is for.
+	// The two machine collections became one, so the counts fall as well as move:
+	// four POSTs and two GETs went away entirely rather than changing method.
+	//
+	//	GET 33 -> 31    POST 17 -> 13    PUT 12 -> 13    DELETE 12 unchanged
+	//
+	// GET falls for the first time in this migration, and only here — two
+	// addresses answered the same question and one of them is gone.
+	want := map[string]int{"GET": 31, "POST": 13, "DELETE": 12, "PUT": 13}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

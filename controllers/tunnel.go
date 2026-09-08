@@ -23,11 +23,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
-	"github.com/hanzoai/visor/util/guacamole"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
+	"github.com/hanzoai/compute/util/guacamole"
 )
 
 const (
@@ -54,17 +54,20 @@ var UpGrader = websocket.FastHTTPUpgrader{
 // AddAssetTunnel
 // @Title AddAssetTunnel
 // @Tag Session API
-// @Description add session
-// @Param   assetId    query   string  true        "The id of asset"
+// @Description Open a session on this asset. The asset is the address; mode
+// @Description chooses the protocol to reach it with.
+// @Param   owner   path   string  true   "The organization the asset belongs to"
+// @Param   name    path   string  true   "The asset's name"
+// @Param   mode    query  string  false  "The access mode to open the session in"
 // @Success 200 {object} Response
-// @router /add-asset-tunnel [get]
+// @router /assets/{owner}/{name}/sessions [post]
 func (c *ApiController) AddAssetTunnel() {
 	assetId := c.Ctx.Query("assetId")
 	mode := c.Ctx.Query("mode")
 
 	user := c.GetSessionUser()
 	if user == nil {
-		c.ResponseError("please sign in first")
+		c.ResponseError(refuseNotSignedIn)
 		return
 	}
 

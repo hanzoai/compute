@@ -324,7 +324,7 @@ Provider path in `machine_cloud.go`). Endpoints (envelope `{status,msg,data}`):
 | GET | `/v1/sizes` | Cached sizes, Hanzo resale price only |
 | GET | `/v1/gpus` | GPU sizes (H100/H200/MI300X/L40S/…), resale-priced |
 | GET | `/v1/machines` | Caller org's machines (DO tag `hanzo-org:<org>`) |
-| POST | `/v1/machines/launch` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
+| POST | `/v1/machines` | `dryRun` → price quote (no spend); real → commerce-gated + provision + first-hour debit |
 | GET/DELETE | `/v1/machines/:id` | Get/delete, verified to belong to the org |
 
 A machine's AGENT hangs off the same noun and is the exception to the envelope
@@ -358,9 +358,9 @@ row above — those four are TYPED ops with no envelope at all (see "Typed ops")
   ×1.25 over DO list). Wholesale + provider never surfaced (brand policy).
 - **Metering:** canonical `github.com/hanzoai/commerce/metering` (Authorize
   gate + Record debit, per-org, real launches only).
-- **Secrets (KMS-only):** `houseDOToken()` reads env `DIGITALOCEAN_ACCESS_TOKEN`
-  or the KMS-synced `digitalOceanToken` conf key; commerce token from
-  `COMMERCE_SERVICE_TOKEN`. Never hardcoded; absent ⇒ fail closed.
+- **Secrets:** visor holds NO provider credential. A cloud key is spent through
+  hanzoai/egress, which holds it off-cluster; commerce token from
+  `COMMERCE_SERVICE_TOKEN`. Never hardcoded; no carrier ⇒ fail closed.
 
 ### How visor reaches a cloud — one seam, `service/transport.go`
 Every provider client is built over an `*http.Client` from `httpFor`, and that
@@ -371,15 +371,20 @@ swap and not an SDK rewrite.
 - **Unregistered** (`RegisterCarrier` never called): `directHTTP()` — visor's own
   bounded client, and the SDK attaches the token it was handed. What a local or
   single-binary run wants, and what visor always did.
-- **Registered** (`egressAddress` + `egressToken` in conf, wired by `carry()` in
-  `egress.go`): the request is described to **hanzoai/egress**, which holds the
-  key and attaches it. Reading this pod's env, config or memory yields nothing
-  that spends. Visor still holds its OWN token — that is the trade, not an
-  oversight: a stolen caller token buys metered calls through our meter rather
-  than a vendor key that spends without limit, off our network.
-  - `egressAddress` without `egressToken` **refuses to start**. Booting anyway
+- **Registered** (`egressAddress` in conf, wired by `carry()` in `egress.go`):
+  the request is described to **hanzoai/egress**, which holds the key and
+  attaches it. Reading this pod's env, config or memory yields nothing that
+  spends. Visor identifies itself with its OWN IAM identity — the `clientId` /
+  `clientSecret` it already signs in with, exchanged for an access token at
+  `iamEndpoint` (`egress_identity.go`) and scoped to egress by RFC 8707
+  `resource`. There is no second credential to paste or rotate, and it expires
+  on its own; egress verifies it against the issuer, audience and JWKS the way
+  every service verifies a caller.
+  - `egressAddress` without an IAM identity **refuses to start**. Booting anyway
     would 401 every cloud call, and the obvious repair for that is to unset the
     address and put the keys back.
+  - `egressAudience` names the `aud` egress requires. It is a name, not a
+    secret.
   - The address is one value: `host:port`, `tcp://host:port`, or
     `unix:///path.sock`.
   - Nothing else to configure: egress knows where each cloud it can pay for
@@ -478,13 +483,13 @@ A build never deploys itself: it publishes an image, and `crs/visor.yaml` in
 `hanzoai/universe` names which tag is live.
 
 ### Build pipeline
-`.hanzo/workflows/build.yml` calls the shared `hanzoai/.github` docker-build
-workflow. Native per-arch build (no QEMU): amd64 on the `hanzo-build-linux-amd64`
-runner, arm64 on spark's arcd (`self-hosted,linux,arm64`); a multi-arch manifest
-is composed from the per-arch tags. `build.sh` cross-compiles via
-`GOOS=linux GOARCH=${TARGETARCH}` (CGO_ENABLED=0), so each arch builds natively.
-Requires `id-token: write` (cosign/SBOM), else the reusable workflow fails at
-startup.
+`.hanzo/workflows/cicd.yml` calls `hanzoai/ci/.hanzo/workflows/build.yml@v1`;
+every knob lives in `/hanzo.yml`. amd64-only on the `hanzo-build-linux-amd64`
+pool — DOKS has no arm64 droplets, so there is no arm64 deploy target and a
+queued arm64 job would block the manifest step behind a runner that never claims
+it. `build.sh` cross-compiles via `GOOS=linux GOARCH=${TARGETARCH}`
+(CGO_ENABLED=0). The build pushes to `ghcr.io/hanzoai/visor` and copies the same
+tag set to `oci.hanzo.ai` server-side, no rebuild.
 
 ### Base images — ghcr.io/hanzoai/* (NOT Docker Hub / ECR)
 The Dockerfile pulls golang/node/alpine/guacd from `ghcr.io/hanzoai/*` (mirrored

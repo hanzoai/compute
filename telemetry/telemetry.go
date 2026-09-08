@@ -33,7 +33,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 	luxtrace "github.com/luxfi/trace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

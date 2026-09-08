@@ -34,8 +34,8 @@ import (
 	"sync"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // ErrPriceUnavailable reports that a size's price could not be RESOLVED. It is
@@ -46,7 +46,7 @@ import (
 var ErrPriceUnavailable = errors.New("price unavailable")
 
 // HourlyCents resolves a size slug to Hanzo's resale price in cents per hour,
-// from the SAME catalog the /v1/machines/launch quote and debit read
+// from the SAME catalog the POST /v1/machines quote and debit read
 // (SizeBySlug → PriceToCents). There is no second price table.
 //
 // Both a slug absent from the catalog AND a slug whose resolved price is <= 0

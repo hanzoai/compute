@@ -17,8 +17,8 @@ package controllers
 import (
 	"strings"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 type Response struct {
@@ -71,7 +71,7 @@ func (c *ApiController) ResponseError(error string, data ...interface{}) {
 
 func (c *ApiController) RequireSignedIn() bool {
 	if c.GetSessionUser() == nil {
-		c.ResponseError("please sign in first")
+		c.ResponseError(refuseNotSignedIn)
 		return true
 	}
 

@@ -17,7 +17,7 @@ package controllers
 import (
 	"encoding/json"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // CommitRecord
@@ -47,7 +47,7 @@ func (c *ApiController) CommitRecord() {
 // @Success 200 {object} object.Record The Response object
 // @router /query-record [get]
 func (c *ApiController) QueryRecord() {
-	id := c.Ctx.Query("id")
+	id := c.Id()
 
 	res, err := object.QueryRecord(id)
 	if err != nil {

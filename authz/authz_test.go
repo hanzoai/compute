@@ -29,14 +29,14 @@ func TestIsResellComputePath(t *testing.T) {
 		{"GET", "/v1/sizes"},
 		{"GET", "/v1/gpus"},
 		{"GET", "/v1/machines"},
-		{"POST", "/v1/machines/launch"},
-		{"GET", "/v1/machines/abc-123"},
-		{"DELETE", "/v1/machines/abc-123"},
+		{"POST", "/v1/machines"},
+		{"GET", "/v1/machines/acme/abc-123"},
+		{"DELETE", "/v1/machines/acme/abc-123"},
 		// A machine's agent — one address, the method carrying the verb.
 		{"GET", "/v1/machines/agents"},
-		{"GET", "/v1/machines/abc-123/agent"},
-		{"DELETE", "/v1/machines/abc-123/agent"},
-		{"PUT", "/v1/machines/abc-123/agent"},
+		{"GET", "/v1/machines/acme/abc-123/agent"},
+		{"DELETE", "/v1/machines/acme/abc-123/agent"},
+		{"PUT", "/v1/machines/acme/abc-123/agent"},
 	}
 	for _, c := range allow {
 		if !isResellComputePath(c.method, c.path) {
@@ -45,20 +45,19 @@ func TestIsResellComputePath(t *testing.T) {
 	}
 
 	deny := []struct{ method, path string }{
-		{"POST", "/v1/regions"},           // catalog is read-only
-		{"POST", "/v1/machines"},          // no bulk create on the collection
-		{"DELETE", "/v1/machines/launch"}, // launch is POST-only
-		{"GET", "/v1/plans"},              // not a resell-compute route
-		{"POST", "/v1/start-session"},     // legacy surface, gated separately
+		{"POST", "/v1/regions"},       // catalog is read-only
+		{"DELETE", "/v1/machines"},    // the collection takes GET and POST, nothing else
+		{"GET", "/v1/plans"},          // not a resell-compute route
+		{"POST", "/v1/start-session"}, // legacy surface, gated separately
 		{"GET", "/v1/get-account"},
-		{"PUT", "/v1/machines/abc-123"},             // only GET/DELETE by id
-		{"POST", "/v1/machines/abc-123"},            // no blanket POST by id
-		{"POST", "/v1/machines/abc-123/agent"},      // the bind is PUT, and only PUT
-		{"PUT", "/v1/machines/abc-123/tag"},         // PUT is admitted for /agent alone
-		{"POST", "/v1/machines/agents"},             // the binding list is read-only
-		{"PUT", "/v1/machines/agents"},              // …and is not a bind target
-		{"GET", "/v1/agent-bindings"},               // the old list address is gone
-		{"POST", "/v1/machines/abc-123/bind-agent"}, // the old bind address is gone
+		{"PUT", "/v1/machines/acme/abc-123"},             // only GET/DELETE on an item
+		{"POST", "/v1/machines/acme/abc-123"},            // no blanket POST on an item
+		{"POST", "/v1/machines/acme/abc-123/agent"},      // the bind is PUT, and only PUT
+		{"PUT", "/v1/machines/acme/abc-123/tag"},         // PUT is admitted for /agent alone
+		{"POST", "/v1/machines/agents"},                  // the binding list is read-only
+		{"PUT", "/v1/machines/agents"},                   // …and is not a bind target
+		{"GET", "/v1/agent-bindings"},                    // the old list address is gone
+		{"POST", "/v1/machines/acme/abc-123/bind-agent"}, // the old bind address is gone
 	}
 	for _, c := range deny {
 		if isResellComputePath(c.method, c.path) {
@@ -82,7 +81,7 @@ func TestAdminOwnedObjectIsNotEveryonesObject(t *testing.T) {
 
 	// A route the static policy does not cover, so the decision is the subject
 	// rule alone.
-	const method, path = "POST", "/v1/create-node-pool"
+	const method, path = "POST", "/v1/pools"
 
 	if IsAllowed(customer, "acme", "alice", method, path, "admin", "thing") {
 		t.Fatal("a customer must not reach a SuperAdmin-owned object")

@@ -26,19 +26,19 @@ import (
 	"github.com/hanzoai/egress/spend"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
-// door is a stand-in for egress on the ZAP address visor dials. It records what
+// stub is a stand-in for egress on the ZAP address visor dials. It records what
 // it was asked for and answers with what a cloud would have said.
-type door struct {
+type stub struct {
 	asked  atomic.Value // spend.Fetch
 	bearer atomic.Value // string
 	answer json.RawMessage
 	status int
 }
 
-func (d *door) listen(t *testing.T) string {
+func (d *stub) listen(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -71,7 +71,7 @@ func (d *door) listen(t *testing.T) string {
 	return ""
 }
 
-func (d *door) fetch(t *testing.T) spend.Fetch {
+func (d *stub) fetch(t *testing.T) spend.Fetch {
 	t.Helper()
 	in, ok := d.asked.Load().(spend.Fetch)
 	if !ok {
@@ -85,7 +85,7 @@ func (d *door) fetch(t *testing.T) spend.Fetch {
 // credential — the Credential here carries no secret at all — and the call still
 // reaches the cloud, because the key is attached at egress.
 func TestTheSDKCallsThroughEgress(t *testing.T) {
-	d := &door{status: 200, answer: json.RawMessage(`{"droplets":[{"id":7,"name":"web-1","vcpus":2,"memory":4096,"status":"active","region":{"slug":"nyc3"},"size":{"slug":"s-2vcpu-4gb"},"image":{"slug":"ubuntu-24-04","distribution":"Ubuntu","name":"24.04"}}]}`)}
+	d := &stub{status: 200, answer: json.RawMessage(`{"droplets":[{"id":7,"name":"web-1","vcpus":2,"memory":4096,"status":"active","region":{"slug":"nyc3"},"size":{"slug":"s-2vcpu-4gb"},"image":{"slug":"ubuntu-24-04","distribution":"Ubuntu","name":"24.04"}}]}`)}
 	addr := d.listen(t)
 
 	t.Cleanup(func() { service.RegisterCarrier(nil) })
@@ -153,7 +153,6 @@ func TestDial(t *testing.T) {
 func TestCarry(t *testing.T) {
 	t.Run("unset, visor calls clouds itself", func(t *testing.T) {
 		t.Setenv("egressAddress", "")
-		t.Setenv("egressToken", "")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 		service.RegisterCarrier(nil)
 
@@ -169,23 +168,27 @@ func TestCarry(t *testing.T) {
 		}
 	})
 
-	t.Run("an address with no token refuses to start", func(t *testing.T) {
+	t.Run("an address with no IAM identity refuses to start", func(t *testing.T) {
 		t.Setenv("egressAddress", "egress.hanzo.ai:9653")
-		t.Setenv("egressToken", "")
+		t.Setenv("clientId", "")
+		t.Setenv("clientSecret", "")
+		t.Setenv("iamEndpoint", "")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 
 		err := carry()
 		if err == nil {
-			t.Fatal("visor started with an address and no token — every cloud call would be a 401")
+			t.Fatal("visor started with an address and no identity — every cloud call would be a 401")
 		}
-		if !strings.Contains(err.Error(), "egressToken") {
+		if !strings.Contains(err.Error(), "IAM identity") {
 			t.Errorf("the refusal does not name what is missing: %v", err)
 		}
 	})
 
 	t.Run("both, and the cloud keys are egress's", func(t *testing.T) {
 		t.Setenv("egressAddress", "tcp://egress.hanzo.ai:9653")
-		t.Setenv("egressToken", "visor-own-token")
+		t.Setenv("clientId", "visor")
+		t.Setenv("clientSecret", "shh")
+		t.Setenv("iamEndpoint", "https://hanzo.id")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 		service.RegisterCarrier(nil)
 

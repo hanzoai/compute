@@ -14,7 +14,7 @@
 
 // Package client — canonical client interface for Hanzo Visor.
 //
-//	import visor "github.com/hanzoai/visor/client"
+//	import visor "github.com/hanzoai/compute/client"
 //	var v visor.VM = visor.NewClient(cfg)
 
 package client
