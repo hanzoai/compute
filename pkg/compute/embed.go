@@ -20,7 +20,7 @@
 // There is ONE boot path. Both cmd main() and the embedded cloud mount call
 // Bootstrap; the only difference is who owns the listener (main.go calls
 // app.Listen; the cloud mount serves Handler() behind its own listener).
-package visor
+package compute
 
 import (
 	"fmt"
@@ -40,7 +40,7 @@ import (
 // serves under AND the name its canonical socket is derived from
 // (zip.SocketPath(Name)), because those are the same fact: a caller reaches a
 // peer BY NAME, so a second spelling of the name is a peer that cannot be found.
-const Name = "visor"
+const Name = "compute"
 
 // initState runs visor's stateful process initialization — DB adapter, authz,
 // IP/UA parsers and background tickers — the half of boot that is independent of
@@ -80,12 +80,12 @@ func Bootstrap() *zip.App {
 func Handler() (h http.Handler, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			h, err = nil, fmt.Errorf("visor.Handler: bootstrap panicked: %v", r)
+			h, err = nil, fmt.Errorf("compute.Handler: bootstrap panicked: %v", r)
 		}
 	}()
 	app := Bootstrap()
 	if err := app.Build(); err != nil {
-		return nil, fmt.Errorf("visor.Handler: %w", err)
+		return nil, fmt.Errorf("compute.Handler: %w", err)
 	}
 	return adaptor.FiberApp(app.Fiber()), nil
 }

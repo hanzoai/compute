@@ -35,7 +35,7 @@ import (
 
 	"github.com/hanzoai/compute/conf"
 	"github.com/hanzoai/compute/object"
-	"github.com/hanzoai/compute/pkg/visor"
+	"github.com/hanzoai/compute/pkg/compute"
 )
 
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
@@ -62,7 +62,7 @@ func main() {
 		},
 	}
 	f := root.Flags()
-	f.StringVar(&zapAddr, "zap", zip.SocketPath(visor.Name), "ZAP listen address (empty = HTTP edge only)")
+	f.StringVar(&zapAddr, "zap", zip.SocketPath(compute.Name), "ZAP listen address (empty = HTTP edge only)")
 	f.StringVar(&httpAddr, "http", defaultHTTPAddr(), "HTTP edge listen address")
 	// Accepted for container-command compatibility; the store creates its schema
 	// on open (object.InitAdapter) regardless, so this is informational.
@@ -82,7 +82,7 @@ func main() {
 	}
 }
 
-// serve boots visor and binds the listener(s). visor.Bootstrap is the single
+// serve boots visor and binds the listener(s). compute.Bootstrap is the single
 // in-process boot path — DB, authz, parsers, filters, routes and background
 // tickers — shared verbatim with the embedded cloud mount, so standalone and
 // fused never drift. Here main() owns the listener.
@@ -97,7 +97,7 @@ func main() {
 func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	// The standalone Deployment runs replicas: 1 (universe
 	// charts/app/values/hanzo/visor.yaml), so this process is the only writer and
-	// correctly elects itself. Declared HERE and not in visor.Bootstrap on
+	// correctly elects itself. Declared HERE and not in compute.Bootstrap on
 	// purpose: Bootstrap is shared verbatim with the embedded cloud mount, whose
 	// replica count is cloud's, not ours. Registering it there would hand a
 	// multi-replica cloud the claim "I am alone" and double-debit every hour.
@@ -119,7 +119,7 @@ func serve(ctx context.Context, zapAddr, httpAddr string) error {
 		return fmt.Errorf("serve: %w", err)
 	}
 
-	app := visor.Bootstrap()
+	app := compute.Bootstrap()
 
 	// Translate ctx cancellation (SIGINT/SIGTERM) into a graceful shutdown.
 	go func() {

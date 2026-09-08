@@ -1,4 +1,4 @@
-# Hanzo Visor
+# Hanzo Compute
 
 **The multi-cloud compute plane for Hanzo Cloud — machines, GPUs, and clusters across AWS, GCP, Azure, DigitalOcean, and bare metal.**
 
