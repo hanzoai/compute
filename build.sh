@@ -18,4 +18,4 @@ export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 # which is where every other Hanzo Go builder sets it. Outside a container Go
 # already defaults to auto, so this script needs no export of its own.
 
-CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-w -s" -o visor .
+CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-w -s" -o compute .

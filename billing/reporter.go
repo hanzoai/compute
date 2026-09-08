@@ -41,10 +41,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // MeterRunningNodePools debits every running node pool one hour of its resale

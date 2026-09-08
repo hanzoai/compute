@@ -34,8 +34,8 @@ import (
 	"sync"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // ErrPriceUnavailable reports that a size's price could not be RESOLVED. It is

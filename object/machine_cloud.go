@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 // GetKubernetesNodesCloud returns DOKS worker nodes — as service.Machines — for

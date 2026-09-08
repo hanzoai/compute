@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/compute/conf"
 
 	"github.com/hanzoai/orm/relational"
 )

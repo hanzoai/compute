@@ -18,7 +18,7 @@ import (
 	"github.com/zap-proto/zip"
 	"github.com/zap-proto/zip/middleware"
 
-	"github.com/hanzoai/visor/controllers"
+	"github.com/hanzoai/compute/controllers"
 )
 
 // h adapts a controller method to a zip.Handler: it binds a fresh controller to

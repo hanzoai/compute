@@ -19,8 +19,8 @@ import (
 	"sync"
 
 	"github.com/hanzoai/orm/relational/schemas"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/util"
 )
 
 type Provider struct {

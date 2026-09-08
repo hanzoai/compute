@@ -25,7 +25,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // machineWire stands the machine collection up exactly as routers.Route does.

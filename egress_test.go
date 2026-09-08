@@ -26,7 +26,7 @@ import (
 	"github.com/hanzoai/egress/spend"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 // stub is a stand-in for egress on the ZAP address visor dials. It records what

@@ -25,7 +25,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // These tests pin the WIRE of the agent ops, which is the half of this change

@@ -1,4 +1,4 @@
-module github.com/hanzoai/visor
+module github.com/hanzoai/compute
 
 go 1.26.5
 

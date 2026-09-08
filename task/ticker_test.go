@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/hanzoai/ha"
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // TestMain gives this package a real store rooted in a temp dir, so ClaimMeterHour

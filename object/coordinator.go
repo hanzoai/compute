@@ -56,7 +56,7 @@ import (
 	"time"
 
 	"github.com/hanzoai/ha"
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // coordKey is the single coordination resource every replica elects an owner for:

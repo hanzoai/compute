@@ -38,7 +38,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // Compute event kinds — the values of the `event` column. A launched row is

@@ -25,7 +25,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -34,7 +34,7 @@ import (
 
 // scope is the instrumentation scope name (the OTel "library" that emits the
 // telemetry) shared by the tracer and meter.
-const scope = "github.com/hanzoai/visor"
+const scope = "github.com/hanzoai/compute"
 
 var (
 	instrumentsOnce sync.Once

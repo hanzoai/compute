@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
-	"github.com/hanzoai/visor/conf"
+	"github.com/hanzoai/compute/conf"
 )
 
 // GetBearerUser validates an "Authorization: Bearer <IAM JWT>" header and

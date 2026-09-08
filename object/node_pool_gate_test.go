@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/service"
 )
 
 // An autoscaling pool grows without asking. MinNodes/MaxNodes/AutoScale are

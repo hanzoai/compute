@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 // TestMain gives this package a REAL per-org store. The property that matters

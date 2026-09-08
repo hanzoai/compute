@@ -22,10 +22,10 @@ test:
       go vet ./...
 
 images:
-  - name: visor
+  - name: compute
     context: .
     dockerfile: Dockerfile
-    repo: ghcr.io/hanzoai/visor
+    repo: ghcr.io/hanzoai/compute
     # amd64-only, carried over from the previous caller and still true: DOKS has
     # no arm64 droplets, so there is no arm64 deploy target, and a queued arm64
     # job would block the manifest step behind a runner that never claims it.

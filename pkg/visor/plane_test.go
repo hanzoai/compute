@@ -22,7 +22,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/routers"
+	"github.com/hanzoai/compute/routers"
 )
 
 // bind serves a routed visor on its canonical socket inside a runtime dir owned

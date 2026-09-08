@@ -29,9 +29,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/util"
 )
 
 // poolId resolves a request into the fully-qualified `owner/name` node-pool id it

@@ -22,8 +22,8 @@ import (
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 // A machine's AGENT: the record that it runs the @hanzo/bot runtime for one

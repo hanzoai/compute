@@ -15,7 +15,7 @@
 package object
 
 import (
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 	"time"
 )
 

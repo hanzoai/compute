@@ -29,11 +29,11 @@ import (
 	"github.com/zap-proto/fiber/v3/middleware/adaptor"
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/authz"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/routers"
-	"github.com/hanzoai/visor/task"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/authz"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/routers"
+	"github.com/hanzoai/compute/task"
+	"github.com/hanzoai/compute/util"
 )
 
 // Name is what visor is called on the fleet, stated once. It is the app name zip

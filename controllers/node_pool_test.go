@@ -22,7 +22,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
-	"github.com/hanzoai/visor/object"
+	"github.com/hanzoai/compute/object"
 )
 
 // The tenant a node-pool handler acts on is the caller's own, and the id is

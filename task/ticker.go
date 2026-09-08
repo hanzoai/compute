@@ -18,10 +18,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/hanzoai/visor/billing"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/billing"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 type Ticker struct{}

@@ -9,8 +9,9 @@ RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
 FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/golang:1.26-alpine AS back
 ENV GOTOOLCHAIN=auto
+# build.sh is #!/bin/bash and fetches private modules over git (GOPRIVATE direct)
 RUN apk add --no-cache bash git ca-certificates tzdata
-WORKDIR /go/src/hanzo-visor
+WORKDIR /go/src/hanzo-compute
 COPY . .
 ARG GO_EXPERIMENT=jsonv2
 ENV GOEXPERIMENT=${GO_EXPERIMENT}
@@ -20,7 +21,7 @@ RUN --mount=type=secret,id=gh_token ./build.sh
 # The runtime directories, owned by the runtime user, made here because an
 # empty image has no mkdir and no chown.
 RUN mkdir -p /out/logs /out/conf /out/web \
-    && cp visor /out/visor \
+    && cp compute /out/compute \
     && cp -r data /out/data \
     && cp conf/app.conf /out/conf/app.conf \
     && chown -R 1000:1000 /out
@@ -32,4 +33,4 @@ COPY --from=back /out/ /
 COPY --from=front --chown=1000:1000 /web/build /web/build
 USER 1000:1000
 WORKDIR /
-ENTRYPOINT ["/visor"]
+ENTRYPOINT ["/compute"]

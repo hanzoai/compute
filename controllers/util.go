@@ -17,8 +17,8 @@ package controllers
 import (
 	"strings"
 
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/util"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/util"
 )
 
 type Response struct {

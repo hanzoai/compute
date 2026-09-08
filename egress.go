@@ -22,8 +22,8 @@ import (
 
 	"github.com/hanzoai/egress/spend"
 
-	"github.com/hanzoai/visor/conf"
-	"github.com/hanzoai/visor/service"
+	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/service"
 )
 
 // carry sends every cloud call through hanzoai/egress, so this process stops

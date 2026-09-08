@@ -39,11 +39,11 @@ import (
 	"time"
 
 	"github.com/hanzoai/commerce/metering"
-	"github.com/hanzoai/visor/chain"
-	"github.com/hanzoai/visor/logs"
-	"github.com/hanzoai/visor/object"
-	"github.com/hanzoai/visor/service"
-	"github.com/hanzoai/visor/telemetry"
+	"github.com/hanzoai/compute/chain"
+	"github.com/hanzoai/compute/logs"
+	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/telemetry"
 )
 
 // Fleet-billing tiers (the metering line's Status + telemetry tier).

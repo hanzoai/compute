@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/digitalocean/godo"
-	"github.com/hanzoai/visor/logs"
+	"github.com/hanzoai/compute/logs"
 )
 
 // orgTagKey/orgTag namespace droplets by the Hanzo org that owns them. Per-org

@@ -19,7 +19,7 @@ import (
 
 	"github.com/zap-proto/zip/wsx"
 
-	"github.com/hanzoai/visor/util/guacamole"
+	"github.com/hanzoai/compute/util/guacamole"
 )
 
 type GuacamoleHandler struct {
