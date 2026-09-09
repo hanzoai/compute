@@ -1,6 +1,6 @@
 module github.com/hanzoai/compute
 
-go 1.26.5
+go 1.26.8
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
