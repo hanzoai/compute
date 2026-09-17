@@ -93,11 +93,9 @@ func signer(t *testing.T, issuer string) func(owner string) string {
 
 	return func(owner string) string {
 		claims := &iamsdk.Claims{
-			User: iamsdk.User{Owner: owner, Name: "alice"},
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    issuer,
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			},
+			Owner: owner, Name: "alice",
+			Issuer:    issuer,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		}
 		s, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
 		if err != nil {

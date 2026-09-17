@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/digitalocean/godo"
@@ -369,12 +370,7 @@ func nodePoolMachines(cluster *KubernetesCluster, pools []*NodePool) []*Machine 
 // clusterHasTag reports whether a cluster carries an exact tag — the membership
 // check that scopes a platform-account cluster to its owning org.
 func clusterHasTag(tags []string, want string) bool {
-	for _, t := range tags {
-		if t == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tags, want)
 }
 
 // kubernetesNodeMachinesByTag returns one Machine per DOKS worker node for every

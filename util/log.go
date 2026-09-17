@@ -22,7 +22,7 @@ import (
 
 // LogInfo writes a request-scoped info line prefixed with the caller IP, read
 // from the ZAP request context (x-forwarded-for, else the fasthttp remote addr).
-func LogInfo(c *zip.Ctx, f string, v ...interface{}) {
+func LogInfo(c *zip.Ctx, f string, v ...any) {
 	ipString := "(" + ClientIPFromCtx(c) + ") "
 	logs.Info(ipString+f, v...)
 }

@@ -675,12 +675,12 @@ func (c *ApiController) LaunchComputeMachine() {
 			spec.DisplayName = spec.Name
 			machine, err := launchMetered(ctx, org, project, &spec, si)
 			if err != nil {
-				c.ResponseOk(map[string]interface{}{"machines": machines, "quote": quote, "error": err.Error()})
+				c.ResponseOk(map[string]any{"machines": machines, "quote": quote, "error": err.Error()})
 				return
 			}
 			machines = append(machines, machine)
 		}
-		c.ResponseOk(map[string]interface{}{"machines": machines, "quote": quote})
+		c.ResponseOk(map[string]any{"machines": machines, "quote": quote})
 		return
 	}
 
@@ -696,7 +696,7 @@ func (c *ApiController) LaunchComputeMachine() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(map[string]interface{}{"machine": machine, "quote": quote})
+	c.ResponseOk(map[string]any{"machine": machine, "quote": quote})
 }
 
 // ListComputeKubernetesProviders

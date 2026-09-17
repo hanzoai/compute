@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,12 +53,7 @@ func imageInfo(i godo.Image, kind string) ImageInfo {
 }
 
 func hasTag(tags []string, want string) bool {
-	for _, t := range tags {
-		if t == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tags, want)
 }
 
 // ListImages returns what an org may launch: shared distributions + 1-click

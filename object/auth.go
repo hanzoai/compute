@@ -17,8 +17,8 @@ package object
 import (
 	"strings"
 
-	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 )
 
 // GetBearerUser validates an "Authorization: Bearer <IAM JWT>" header and
@@ -89,7 +89,7 @@ func matchIssuer(configured, tokenIssuer string) bool {
 	if raw == "" {
 		return false
 	}
-	for _, e := range strings.Split(raw, ",") {
+	for e := range strings.SplitSeq(raw, ",") {
 		if want := strings.TrimRight(strings.TrimSpace(e), "/"); want != "" && strings.EqualFold(got, want) {
 			return true
 		}

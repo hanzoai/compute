@@ -233,10 +233,10 @@ func AnalyticsConfigured() bool { return datastoreURL() != "" }
 // the ONE tag read-back parser; orgFromTag is defined in terms of it.
 func tagValue(tags, key string) string {
 	want := key + ":"
-	for _, t := range strings.Split(tags, ",") {
+	for t := range strings.SplitSeq(tags, ",") {
 		t = strings.TrimSpace(t)
-		if strings.HasPrefix(t, want) {
-			return strings.TrimPrefix(t, want)
+		if after, ok := strings.CutPrefix(t, want); ok {
+			return after
 		}
 	}
 	return ""

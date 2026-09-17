@@ -84,11 +84,11 @@ type hit struct{ path, why string }
 // through a dependency's own require. go.mod carries both.
 func bannedIn(goMod string) []hit {
 	var found []hit
-	for _, line := range strings.Split(goMod, "\n") {
+	for line := range strings.SplitSeq(goMod, "\n") {
 		if i := strings.Index(line, "//"); i >= 0 && !strings.Contains(line, "// indirect") {
 			line = line[:i]
 		}
-		for _, f := range strings.Fields(line) {
+		for f := range strings.FieldsSeq(line) {
 			for p, why := range banned {
 				if covers(p, f) {
 					found = append(found, hit{path: f, why: why})

@@ -34,7 +34,7 @@ import (
 //
 // Under Postgres the pull/ship are no-ops (the shared engine is already the single
 // linearizable coordination store) and this reduces to the historical insert-once wins.
-func claimLease(row interface{}) bool {
+func claimLease(row any) bool {
 	// (1) Gate: only the single elected writer bills. A non-owner never claims, so it
 	// never debits — the whole point of single-flight across replicas.
 	if !billingOwner() {

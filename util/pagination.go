@@ -20,10 +20,7 @@ package util
 // to the client as data2 for its own page math). page < 1 clamps to the first
 // page, matching Beego's Paginator.Page() lower bound.
 func Paginate(page string, perPage int, total int64) (offset int, nums int64) {
-	p := ParseInt(page)
-	if p < 1 {
-		p = 1
-	}
+	p := max(ParseInt(page), 1)
 	if perPage < 0 {
 		perPage = 0
 	}

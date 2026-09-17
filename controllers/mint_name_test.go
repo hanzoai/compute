@@ -48,7 +48,7 @@ func TestMintMachineNameIsAlwaysUsable(t *testing.T) {
 
 	// Two clicks in the same second must not collide.
 	seen := map[string]bool{}
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		n := mintMachineName("tab")
 		if seen[n] {
 			t.Fatalf("minted %q twice in 500 tries", n)

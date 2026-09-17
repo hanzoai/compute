@@ -74,7 +74,7 @@ func (r *azureCostReader) MonthToDateCents(ctx context.Context, _ time.Time) (in
 		Timeframe: to.Ptr(armcostmanagement.TimeframeTypeMonthToDate),
 		Dataset: &armcostmanagement.QueryDataset{
 			Aggregation: map[string]*armcostmanagement.QueryAggregation{
-				"totalCost": {Name: to.Ptr("Cost"), Function: to.Ptr(armcostmanagement.FunctionTypeSum)},
+				"totalCost": {Name: new("Cost"), Function: to.Ptr(armcostmanagement.FunctionTypeSum)},
 			},
 		},
 	}, nil)

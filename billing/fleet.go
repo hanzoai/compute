@@ -170,10 +170,9 @@ func meterWorkerDevice(ctx context.Context, w *object.FleetWorker, now time.Time
 		logs.Info("fleet billing: worker %s/%s validator status=%q — billed as device", w.Owner, w.Name, status)
 	}
 
-	devices := w.DeviceCount
-	if devices < 1 {
-		devices = 1 // a connected box is at least one device
-	}
+	devices := max(w.DeviceCount,
+		// a connected box is at least one device
+		1)
 	cents := int64(devices) * deviceMonthlyCents
 
 	month := now.UTC().Format("200601")

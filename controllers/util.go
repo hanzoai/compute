@@ -22,16 +22,16 @@ import (
 )
 
 type Response struct {
-	Status string      `json:"status"`
-	Msg    string      `json:"msg"`
-	Data   interface{} `json:"data"`
-	Data2  interface{} `json:"data2"`
+	Status string `json:"status"`
+	Msg    string `json:"msg"`
+	Data   any    `json:"data"`
+	Data2  any    `json:"data2"`
 }
 
 // serve writes payload as the JSON response (HTTP 200, the SDK contract branches
 // on the envelope status, not the code) and stashes it on the request context so
 // the record filter can capture the response envelope after the handler returns.
-func (c *ApiController) serve(payload interface{}) {
+func (c *ApiController) serve(payload any) {
 	if c.Ctx == nil {
 		return
 	}
@@ -45,7 +45,7 @@ func (c *ApiController) ServeJSON() {
 	c.serve(c.Data["json"])
 }
 
-func (c *ApiController) ResponseOk(data ...interface{}) {
+func (c *ApiController) ResponseOk(data ...any) {
 	resp := Response{Status: "ok"}
 	switch len(data) {
 	case 2:
@@ -57,7 +57,7 @@ func (c *ApiController) ResponseOk(data ...interface{}) {
 	c.serve(resp)
 }
 
-func (c *ApiController) ResponseError(error string, data ...interface{}) {
+func (c *ApiController) ResponseError(error string, data ...any) {
 	resp := Response{Status: "error", Msg: error}
 	switch len(data) {
 	case 2:

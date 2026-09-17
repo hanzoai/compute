@@ -24,6 +24,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -804,12 +805,7 @@ func ListMeteredMachines() ([]*Machine, error) {
 // tag-membership check, shared by the org-isolation guard and the project view
 // filter, so both compare tags identically.
 func dropletHasTag(d godo.Droplet, tag string) bool {
-	for _, t := range d.Tags {
-		if t == tag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(d.Tags, tag)
 }
 
 func dropletHasOrgTag(d *godo.Droplet, org string) bool {

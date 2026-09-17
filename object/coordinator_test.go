@@ -160,7 +160,7 @@ func TestSingleReplicaAlwaysOwner(t *testing.T) {
 func TestExactlyOneOwnerAcrossReplicas(t *testing.T) {
 	for _, n := range []int{1, 2, 3, 5} {
 		set := make([]ha.Member, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			set[i] = ha.Member{ID: "visor-" + string(rune('a'+i))}
 		}
 		owners := 0
@@ -200,15 +200,13 @@ func TestConcurrentClaimMeterHourExactlyOnce(t *testing.T) {
 	var wins int64
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < racers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range racers {
+		wg.Go(func() {
 			<-start
 			if ClaimMeterHour(now) {
 				atomic.AddInt64(&wins, 1)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -231,15 +229,13 @@ func TestConcurrentClaimBillingUnitExactlyOnce(t *testing.T) {
 	var wins int64
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < racers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range racers {
+		wg.Go(func() {
 			<-start
 			if ClaimBillingUnit(unit, now) {
 				atomic.AddInt64(&wins, 1)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

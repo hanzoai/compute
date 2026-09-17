@@ -27,8 +27,8 @@ import (
 // physical copy per org (its own SQLite file, routed by Owner); under Postgres
 // isolation is a WHERE owner=? clause over one shared table. Every model here
 // carries an Owner, so it routes cleanly to a per-org DB.
-func perOrgModels() []interface{} {
-	return []interface{}{
+func perOrgModels() []any {
+	return []any{
 		new(Asset),
 		new(Provider),
 		new(Machine),
@@ -48,8 +48,8 @@ func perOrgModels() []interface{} {
 //     winner per hour is the whole point, which per-pod SQLite cannot provide.
 //
 // See LLM.md (Base backend: shared vs per-org) for the full CTO rationale.
-func sharedModels() []interface{} {
-	return []interface{}{
+func sharedModels() []any {
+	return []any{
 		new(Plan),
 		new(MeterLease),
 		new(BillingLease),
@@ -62,7 +62,7 @@ func sharedModels() []interface{} {
 // tables, defined in exactly one place. The Postgres adapter (Adapter.createTable)
 // hosts every table and syncs this full set; the Base backend syncs only
 // perOrgModels into each org DB and leaves sharedModels on Postgres.
-func models() []interface{} {
+func models() []any {
 	return append(perOrgModels(), sharedModels()...)
 }
 

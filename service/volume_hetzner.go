@@ -123,7 +123,7 @@ func (c *VolumeHetznerClient) CreateVolume(spec *CreateVolumeSpec) (*Volume, err
 		Name:     spec.DisplayName,
 		Size:     spec.Size,
 		Location: &hcloud.Location{Name: location},
-		Format:   hcloud.Ptr(format),
+		Format:   new(format),
 		Labels: map[string]string{
 			"managed-by": "hanzo-visor",
 		},

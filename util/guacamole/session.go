@@ -92,7 +92,7 @@ func (m *Manager) Delete(id string) {
 }
 
 func (m *Manager) Clear() {
-	m.sessions.Range(func(key, value interface{}) bool {
+	m.sessions.Range(func(key, value any) bool {
 		if session, ok := value.(*Session); ok {
 			session.Close()
 		}
@@ -102,7 +102,7 @@ func (m *Manager) Clear() {
 }
 
 func (m *Manager) Range(f func(key string, value *Session)) {
-	m.sessions.Range(func(key, value interface{}) bool {
+	m.sessions.Range(func(key, value any) bool {
 		if session, ok := value.(*Session); ok {
 			f(key.(string), session)
 		}

@@ -62,12 +62,12 @@ func MigratePostgresToBase(src *relational.Engine, dst *baseStore) ([]MigrationR
 	return reports, nil
 }
 
-func migrateModel(src *relational.Engine, dst *baseStore, model interface{}) (MigrationReport, error) {
+func migrateModel(src *relational.Engine, dst *baseStore, model any) (MigrationReport, error) {
 	elemType := reflect.TypeOf(model).Elem()
 	rep := MigrationReport{Table: src.TableName(model, true)}
 
 	// A []*Model slice to receive every source row.
-	rowsPtr := reflect.New(reflect.SliceOf(reflect.PtrTo(elemType)))
+	rowsPtr := reflect.New(reflect.SliceOf(reflect.PointerTo(elemType)))
 	if err := src.Find(rowsPtr.Interface()); err != nil {
 		return rep, fmt.Errorf("visor: migrate: read %s: %w", rep.Table, err)
 	}

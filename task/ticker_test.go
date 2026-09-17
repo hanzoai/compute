@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/ha"
 	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/ha"
 )
 
 // TestMain gives this package a real store rooted in a temp dir, so ClaimMeterHour
@@ -167,13 +167,11 @@ func TestAnHourCannotBeBilledTwice(t *testing.T) {
 	const replicas = 16
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < replicas; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range replicas {
+		wg.Go(func() {
 			<-start
 			newHour().run(context.Background(), now)
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -209,7 +207,7 @@ func TestAnUnclaimedHourIsStillOneHour(t *testing.T) {
 	}
 
 	// Three failed hours spend nothing.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		h.run(context.Background(), now)
 	}
 	if got := billed.Load(); got != 0 {
@@ -218,7 +216,7 @@ func TestAnUnclaimedHourIsStillOneHour(t *testing.T) {
 
 	// The credential returns and stays. The hour is billed once, not four times.
 	h.reachable = reachable
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		h.run(context.Background(), now)
 	}
 	if got := billed.Load(); got != 1 {

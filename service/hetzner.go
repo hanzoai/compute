@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"strconv"
 
@@ -201,9 +202,7 @@ func (client MachineHetznerClient) CreateMachine(spec *CreateMachineSpec) (*Mach
 	if spec.OS != "" {
 		labels["os"] = spec.OS
 	}
-	for k, v := range spec.Tags {
-		labels[k] = v
-	}
+	maps.Copy(labels, spec.Tags)
 
 	opts := hcloud.ServerCreateOpts{
 		Name:       spec.DisplayName,

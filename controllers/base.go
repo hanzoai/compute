@@ -33,13 +33,13 @@ import (
 // is the ONE identity seam.
 type ApiController struct {
 	Ctx  *zip.Ctx
-	Data map[string]interface{}
+	Data map[string]any
 }
 
 // New builds a controller bound to a request context, with its response buffer
 // ready. This is the ONE construction path the route wrappers use.
 func New(c *zip.Ctx) *ApiController {
-	return &ApiController{Ctx: c, Data: map[string]interface{}{}}
+	return &ApiController{Ctx: c, Data: map[string]any{}}
 }
 
 func GetUserName(user *iamsdk.User) string {

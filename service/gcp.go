@@ -100,7 +100,7 @@ func newMachineGcpClient(projectID string, credentialsJSON string, zone string) 
 
 // do issues an authenticated JSON request and decodes a 2xx body into out
 // (out may be nil). A non-2xx response is a hard error with a bounded body.
-func (client MachineGcpClient) do(ctx context.Context, method string, endpoint string, out interface{}) error {
+func (client MachineGcpClient) do(ctx context.Context, method string, endpoint string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
 	if err != nil {
 		return err

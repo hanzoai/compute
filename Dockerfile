@@ -7,7 +7,7 @@ RUN apk add --no-cache python3 make g++ libc6-compat
 COPY ./web .
 RUN yarn install --frozen-lockfile --network-timeout 1000000 && yarn run build
 
-FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/golang:1.26-alpine AS back
+FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/mirror/golang:1.27.1-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS back
 ENV GOTOOLCHAIN=auto
 # build.sh is #!/bin/bash and fetches private modules over git (GOPRIVATE direct)
 RUN apk add --no-cache bash git ca-certificates tzdata

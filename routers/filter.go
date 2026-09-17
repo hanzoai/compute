@@ -67,8 +67,8 @@ func TransparentStatic(c *zip.Ctx) error {
 		}
 	}
 
-	if strings.HasPrefix(urlPath, "/swagger") {
-		return serveFrom(c, swaggerFS, strings.TrimPrefix(urlPath, "/swagger"), "")
+	if after, ok := strings.CutPrefix(urlPath, "/swagger"); ok {
+		return serveFrom(c, swaggerFS, after, "")
 	}
 	return serveFrom(c, webFS, urlPath, "index.html")
 }

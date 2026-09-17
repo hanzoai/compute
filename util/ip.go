@@ -54,19 +54,19 @@ func GetIPInfo(clientIP string) string {
 	}
 
 	ips := strings.Split(clientIP, ",")
-	res := ""
+	var res strings.Builder
 	for i := range ips {
 		ip := strings.TrimSpace(ips[i])
 		// desc := GetDescFromIP(ip)
 		ipstr := fmt.Sprintf("%s: %s", ip, "")
 		if i != len(ips)-1 {
-			res += ipstr + " -> "
+			res.WriteString(ipstr + " -> ")
 		} else {
-			res += ipstr
+			res.WriteString(ipstr)
 		}
 	}
 
-	return res
+	return res.String()
 }
 
 func GetIPFromRequest(req *http.Request) string {

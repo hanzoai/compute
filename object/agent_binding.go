@@ -18,9 +18,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hanzoai/orm/relational/schemas"
 	"github.com/hanzoai/compute/service"
 	"github.com/hanzoai/compute/util"
+	"github.com/hanzoai/orm/relational/schemas"
 )
 
 // Agent binding lifecycle states. Honest — each reflects a real, observable
@@ -118,7 +118,7 @@ func isTerminalMachineState(state string) bool {
 // comma-joined provider tag list.
 func machineHasBotRuntimeTag(machine *Machine, agentName string) bool {
 	want := fmt.Sprintf("%s:%s", BotRuntimeTag, agentName)
-	for _, tag := range strings.Split(machine.Tag, ",") {
+	for tag := range strings.SplitSeq(machine.Tag, ",") {
 		if strings.EqualFold(strings.TrimSpace(tag), want) {
 			return true
 		}

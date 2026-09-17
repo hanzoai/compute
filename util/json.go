@@ -16,7 +16,7 @@ package util
 
 import "encoding/json"
 
-func StructToJson(v interface{}) string {
+func StructToJson(v any) string {
 	data, err := json.MarshalIndent(v, "", "  ")
 	// data, err := json.Marshal(v)
 	if err != nil {
@@ -26,6 +26,6 @@ func StructToJson(v interface{}) string {
 	return string(data)
 }
 
-func JsonToStruct(data string, v interface{}) error {
+func JsonToStruct(data string, v any) error {
 	return json.Unmarshal([]byte(data), v)
 }

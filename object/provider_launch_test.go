@@ -30,8 +30,8 @@ func TestLaunchCredentials(t *testing.T) {
 			{Name: "a", Secret: "tok-a", Region: "nyc1"},          // own region
 			{Name: "b", Secret: "tok-b"},                          // inherits sfo3
 			{Name: "rl", Secret: "tok-rl", State: "rate-limited"}, // out of rotation
-			{Name: "empty"},                                       // no credential
-			{Name: "c", Secret: "tok-c", State: "active"},         // explicit active
+			{Name: "empty"}, // no credential
+			{Name: "c", Secret: "tok-c", State: "active"}, // explicit active
 		},
 	}
 	got := p.LaunchCredentials()
@@ -91,7 +91,7 @@ func TestPickLaunchCredentialRoundRobin(t *testing.T) {
 	}
 
 	seen := map[string]int{}
-	for cursor := uint64(0); cursor < 6; cursor++ { // two full turns
+	for cursor := range uint64(6) { // two full turns
 		c, ok := pickLaunchCredential(creds, cursor)
 		if !ok {
 			t.Fatalf("cursor %d: ok=false over a non-empty set", cursor)

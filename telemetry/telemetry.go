@@ -111,7 +111,7 @@ func Init(ctx context.Context) func(context.Context) error {
 	}
 
 	tracer, err := luxtrace.New(luxtrace.Config{
-		ExporterConfig:  luxtrace.ExporterConfig{Type: luxtrace.ZAP, Endpoint: endpoint},
+		Type: luxtrace.ZAP, Endpoint: endpoint,
 		TraceSampleRate: 1,
 		AppName:         serviceName(),
 	})

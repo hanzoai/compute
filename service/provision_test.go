@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,9 +43,7 @@ type ledger struct {
 func ledgerOf(t *testing.T, funded map[string]int64) *ledger {
 	t.Helper()
 	l := &ledger{available: map[string]int64{}, debits: map[string]int{}}
-	for org, cents := range funded {
-		l.available[org] = cents
-	}
+	maps.Copy(l.available, funded)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		org := r.Header.Get("X-Org-Id")
 		switch {
@@ -102,7 +101,7 @@ func TestProvisionSerialisesAnOrgSoOneBalanceBuysOneCluster(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	granted := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -155,7 +154,7 @@ func TestProvisionDoesNotRefuseAFundedOrgUnderLoad(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	granted := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -188,7 +187,7 @@ func TestProvisionHoldsPerOrgNotGlobally(t *testing.T) {
 	var mu sync.Mutex
 	granted := map[string]int{}
 	for _, org := range []string{"acme", "globex"} {
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			client := newDOKSTestClient(t, &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}})
 			wg.Add(1)
 			go func(org string) {
@@ -225,7 +224,7 @@ func TestProvisionHoldsPerOrgNotGlobally(t *testing.T) {
 func TestProvisionReleasesTheHoldOnRefusal(t *testing.T) {
 	ledgerOf(t, map[string]int64{"acme": 0})
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if err := Provision(context.Background(), "acme", "", 100, 100, "s", func() (string, error) {
 			t.Fatal("a refused provision must not run the provision")
 			return "", nil
