@@ -31,7 +31,7 @@
 // is (Owner, Name), and the Name comes from the customer's own create body. A row
 // a customer can name is a row a customer can collide with, delete, or leave
 // stale, and each of those turns into free compute. The provider knows what it is
-// actually running; the row does not. So for the configured cloud account the PROVIDER is
+// actually running; the row does not. So for the platform accounts the PROVIDER is
 // the authority and the row is a cache of it. See billableUnits.
 package billing
 
@@ -71,17 +71,18 @@ func MeterRunningNodePools(ctx context.Context, now time.Time) {
 		return
 	}
 
-	// The provider is the AUTHORITY for the configured cloud account, so a sweep that cannot
-	// reach it does not bill. Without the live pools there is no way to tell a
-	// running pool from a deleted one, or a pool that autoscaled from one that did
-	// not — and the rows alone are exactly the answer that was wrong. A missed
-	// hour is reconcilable; an hour billed against stale rows is a wrong invoice.
+	// The provider is the AUTHORITY for the platform accounts, so a sweep that
+	// cannot reach them does not bill. Without the live pools there is no way to
+	// tell a running pool from a deleted one, or a pool that autoscaled from one
+	// that did not — and the rows alone are exactly the answer that was wrong. A
+	// missed hour is reconcilable; an hour billed against stale rows is a wrong
+	// invoice.
 	//
-	// An UNCONFIGURED configured cloud account is not a failure: it means there are no platform
+	// No platform account is not a failure: it means there are no platform
 	// clusters at all, so the live set is legitimately empty and every row is a
 	// tenant's own (BYOC) pool.
 	var live []service.LivePool
-	if service.ComputeConfigured() {
+	if service.KubernetesConfigured() {
 		var err error
 		if live, err = service.ListLivePools(ctx); err != nil {
 			span.RecordError(err)
@@ -160,7 +161,7 @@ func meterPools(ctx context.Context, live []service.LivePool, rows []*object.Nod
 // billableUnits is the ONE answer to "what does this hour bill", and the whole
 // point is WHERE each field comes from.
 //
-// The PROVIDER is authoritative for the configured cloud account: which pools exist,
+// The PROVIDER is authoritative for the platform accounts: which pools exist,
 // which cluster and org they belong to, and how many nodes they are ACTUALLY
 // running. The stored row is a CACHE of that. It contributes the two things the
 // provider does not know — the rate the org was authorized at and the project the
@@ -181,7 +182,7 @@ func meterPools(ctx context.Context, live []service.LivePool, rows []*object.Nod
 //     because nothing writes the new count anywhere visor controls. Now the count
 //     comes from the provider, so it bills sixteen from the next hour.
 //
-// A row whose cluster the configured cloud account does NOT have is billed FROM THE ROW.
+// A row whose cluster no platform account has is billed FROM THE ROW.
 // That is a BYOC pool — provisioned on a tenant's own provider credentials and
 // invisible to the provider token — and the row is the only record of it there is.
 // Splitting on the CLUSTER rather than on anything written in the row is what

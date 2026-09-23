@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/digitalocean/godo"
 )
@@ -286,7 +287,7 @@ func poolsFromGodo(gpools []*godo.KubernetesNodePool) []*NodePool {
 // listClustersFull pages Kubernetes.List and re-Gets each cluster so RegionSlug,
 // Status and the node pools (with their nodes) reflect authoritative per-cluster
 // detail — List alone can return a lighter cluster. It is the ONE cluster
-// enumeration, shared by ListClusters and the platform-account node lister.
+// enumeration, shared by ListClusters and LivePools.
 func listClustersFull(ctx context.Context, client *godo.Client) ([]*godo.KubernetesCluster, error) {
 	opt := &godo.ListOptions{Page: 1, PerPage: 200}
 	var out []*godo.KubernetesCluster
@@ -319,10 +320,9 @@ func (c *DOKSClient) ListClusters(ctx context.Context) ([]*KubernetesCluster, er
 
 // clustersByTag returns every cluster reachable by client whose tags contain
 // wantTag, in the clean KubernetesCluster shape. An empty wantTag matches every
-// cluster. It shares the ONE authoritative enumeration (listClustersFull) with the
-// node lister, so a cluster's identity/region/status is sourced identically whether
-// it surfaces as a cluster row or as its worker nodes — the exact tag-scoping
-// kubernetesNodeMachinesByTag uses, hoisted to the cluster shape.
+// cluster. It shares the ONE authoritative enumeration (listClustersFull) with
+// LivePools, so a cluster's identity/region/status is sourced identically whether
+// it surfaces as a cluster row or as its pools.
 func clustersByTag(ctx context.Context, client *godo.Client, wantTag string) ([]*KubernetesCluster, error) {
 	full, err := listClustersFull(ctx, client)
 	if err != nil {
@@ -339,8 +339,8 @@ func clustersByTag(ctx context.Context, client *godo.Client, wantTag string) ([]
 }
 
 // nodePoolMachines expands a cluster's node pools into one Machine per worker
-// node — the SAME shape ListOrgMachines emits for a standalone droplet — so DOKS
-// nodes merge into the fleet exactly like droplets. Id is the node's DropletID
+// node — the SAME Machine shape every machine lister emits — so DOKS nodes merge
+// into the fleet exactly like machines. Id is the node's DropletID
 // (the dedup key against the droplet list); Size is the pool's slug; Region and
 // the owning cluster come from the cluster; State is the node's DO status. IPs are
 // empty — the managed-Kubernetes API does not expose per-node addresses here — and
@@ -373,23 +373,36 @@ func clusterHasTag(tags []string, want string) bool {
 	return slices.Contains(tags, want)
 }
 
-// kubernetesNodeMachinesByTag returns one Machine per DOKS worker node for every
-// cluster reachable by client whose tags contain wantTag. An empty wantTag matches
-// every cluster. Nodes are expanded from each cluster's own pools (returned by the
-// authoritative Get in listClustersFull), so no per-cluster pool re-list is needed.
-func kubernetesNodeMachinesByTag(ctx context.Context, client *godo.Client, wantTag string) ([]*Machine, error) {
-	clusters, err := listClustersFull(ctx, client)
+// LivePools is every node pool of every cluster this account runs, with the org
+// that owns each cluster and each pool's LIVE node count — this account's answer
+// to ListLivePools. A cluster with no hanzo-org tag yields pools with an empty
+// Org: they are returned rather than dropped, so the sweep can report them as
+// unattributable instead of silently running an untagged cluster for free.
+func (c *DOKSClient) LivePools(ctx context.Context) ([]LivePool, error) {
+	clusters, err := listClustersFull(ctx, c.Client)
 	if err != nil {
 		return nil, err
 	}
-	var machines []*Machine
+	var out []LivePool
 	for _, gc := range clusters {
-		if wantTag != "" && !clusterHasTag(gc.Tags, wantTag) {
-			continue
+		org := orgFromClusterTags(gc.Tags)
+		created := ""
+		if !gc.CreatedAt.IsZero() {
+			created = gc.CreatedAt.UTC().Format(time.RFC3339)
 		}
-		machines = append(machines, nodePoolMachines(clusterFromGodo(gc), poolsFromGodo(gc.NodePools))...)
+		for _, p := range poolsFromGodo(gc.NodePools) {
+			out = append(out, LivePool{
+				Org: org, ClusterID: gc.ID, PoolID: p.ID, Name: p.Name,
+				Size: p.Size, Nodes: liveNodes(p), Created: created,
+			})
+		}
 	}
-	return machines, nil
+	return out, nil
+}
+
+// InCluster is this account's client for the node pools of one cluster.
+func (c *DOKSClient) InCluster(clusterID string) *DOKSClient {
+	return &DOKSClient{Client: c.Client, ClusterID: clusterID}
 }
 
 // NodeMachines returns one Machine per worker node in THIS client's cluster — the
@@ -437,7 +450,7 @@ type CreateClusterNodePool struct {
 // expanded as fleet Machines — the ONE detail shape for GET .../clusters/:id. It
 // embeds KubernetesCluster so identity/region/status/tags flatten into the same
 // top-level JSON the list emits; NodePools carries the authoritative pool topology
-// and Nodes the per-worker machines (the SAME shape ListOrgMachines emits).
+// and Nodes the per-worker machines (the SAME Machine shape).
 type KubernetesClusterDetail struct {
 	KubernetesCluster
 	NodePools []*NodePool `json:"nodePools"`

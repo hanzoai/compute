@@ -239,14 +239,17 @@ func TestASoleAccountAnswersToItsCloudName(t *testing.T) {
 // accounts across many clouds without this package knowing where they are kept.
 func TestRegisteredCredentialsReplaceTheSingleToken(t *testing.T) {
 	t.Cleanup(func() { RegisterCredentials(nil) })
-	RegisterCredentials(func() []Credential {
+	RegisterCredentials(func() ([]Credential, error) {
 		return []Credential{
 			{Provider: "DigitalOcean", Name: "prod", Secret: "a"},
 			{Provider: "DigitalOcean", Name: "dev", Secret: "b"},
 			{Provider: "Hetzner", Name: "eu", Secret: "c"},
-		}
+		}, nil
 	})
-	got := cloudProviders()
+	got, err := cloudProviders()
+	if err != nil {
+		t.Fatalf("cloudProviders: %v", err)
+	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 accounts, got %d: %#v", len(got), got)
 	}
@@ -295,26 +298,48 @@ func TestOnlyOneFileMatchesProviderNames(t *testing.T) {
 	}
 }
 
-// An empty registration falls back to the platform account, which exists only
-// where a carrier can reach it. There is no token to fall back to any more, so
-// the two answers are "the platform account" and "nothing", and which one is
-// correct is decided by the carrier alone.
-func TestNoRegistrationFallsBackToThePlatformAccount(t *testing.T) {
+// The platform accounts are the registered ones and nothing else. A carrier is
+// how a registered account is reached; it is not an account of its own, so an
+// empty registration is no platform account whether or not egress is there.
+func TestNoRegistrationIsNoPlatformAccount(t *testing.T) {
 	t.Cleanup(func() { RegisterCredentials(nil); RegisterCarrier(nil) })
-	RegisterCredentials(func() []Credential { return nil })
+	RegisterCredentials(func() ([]Credential, error) { return nil, nil })
 
-	RegisterCarrier(nil)
-	if got := cloudProviders(); len(got) != 0 {
-		t.Errorf("no carrier and no registration should yield no accounts, got %d", len(got))
+	for _, carried := range []bool{false, true} {
+		RegisterCarrier(nil)
+		if carried {
+			RegisterCarrier(func(Credential) (*http.Client, error) { return &http.Client{}, nil })
+		}
+		got, err := cloudProviders()
+		if err != nil || len(got) != 0 {
+			t.Fatalf("carried=%v: an empty registration must be no account, got %+v, %v", carried, got, err)
+		}
+		if KubernetesConfigured() {
+			t.Fatalf("carried=%v: no account must read as unconfigured", carried)
+		}
 	}
+}
 
-	RegisterCarrier(func(Credential) (*http.Client, error) { return &http.Client{}, nil })
-	got := cloudProviders()
-	if len(got) != 1 || got[0].provider != providerDigitalOcean {
-		t.Fatalf("a carrier should yield exactly the platform account, got %+v", got)
+// Accounts that cannot be read are not "no accounts". The pool sweep bills from
+// the live pools of the platform accounts and, with none, from the stored rows;
+// reading an unreadable store as empty would bill the rows of clusters nobody
+// can see. So an unreadable store reads as configured, and every reader of the
+// plane is told why it cannot answer.
+func TestAnUnreadableAccountStoreIsAnError(t *testing.T) {
+	t.Cleanup(func() { RegisterCredentials(nil) })
+	RegisterCredentials(func() ([]Credential, error) { return nil, errors.New("store offline") })
+
+	if !KubernetesConfigured() {
+		t.Fatal("an unreadable store must read as configured, so its readers ask and are refused")
 	}
-	if got[0].secret != "" {
-		t.Error("the platform account must carry no secret: egress attaches it")
+	if _, err := ListLivePools(context.Background()); err == nil || !strings.Contains(err.Error(), "store offline") {
+		t.Fatalf("ListLivePools = %v, want the store's error", err)
+	}
+	if _, _, err := listClustersAcross(context.Background()); err == nil || !strings.Contains(err.Error(), "store offline") {
+		t.Fatalf("listClustersAcross = %v, want the store's error", err)
+	}
+	if err := (PlatformPools{ClusterID: "cl-1"}).DeleteNodePool("p-1"); err == nil {
+		t.Fatal("a pool on an unreadable account must not be taken for gone")
 	}
 }
 

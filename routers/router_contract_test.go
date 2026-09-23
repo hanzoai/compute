@@ -96,8 +96,6 @@ var apiContract = []route{
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
 	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},
 	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
-	{"GET", "/v1/images", "ListImages"},
-	{"POST", "/v1/images", "CreateImage"},
 	{"GET", "/v1/sessions", "GetSessions"},
 	{"GET", "/v1/sessions/:owner/:name", "GetConnSession"},
 	{"PUT", "/v1/sessions/:owner/:name", "UpdateSession"},
@@ -207,7 +205,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 69
+	const wantRoutes = 67
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -246,7 +244,12 @@ func TestAPIContractVerbMix(t *testing.T) {
 	//
 	// GET falls for the first time in this migration, and only here — two
 	// addresses answered the same question and one of them is gone.
-	want := map[string]int{"GET": 31, "POST": 13, "DELETE": 12, "PUT": 13}
+	//
+	// Hosted machines run on EC2 and boot the configured image, so there is no
+	// image catalog to browse or upload to: /v1/images serves nothing.
+	//
+	//	GET 31 -> 30    POST 13 -> 12    PUT 13 unchanged    DELETE 12 unchanged
+	want := map[string]int{"GET": 30, "POST": 12, "DELETE": 12, "PUT": 13}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

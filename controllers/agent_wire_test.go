@@ -49,12 +49,9 @@ import (
 // cleanup had already deleted — which reads as a SQLite "disk I/O error" in a
 // LATER test and disappears the moment either test is run alone.
 //
-// The store is the Base backend at a temp dataRoot: no Postgres, no provider
-// credential, nothing to reach. That bounds what can be tested here to the paths
-// that do not consult the cloud — which is exactly the three answers whose shape
-// changed (absent read, unbind, list). A bind resolves the machine at
-// DigitalOcean, so it has no honest answer without a provider and is not faked
-// into one.
+// The store is the Base backend at a temp dataRoot: no Postgres, nothing to
+// reach. The hosted account is ec2test's fake (startHosted, hosted_test.go), one
+// for the whole binary, because the hosted client is built once per process.
 func TestMain(m *testing.M) {
 	root, err := os.MkdirTemp("", "visor-agent-wire")
 	if err != nil {
@@ -62,7 +59,9 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.Setenv("dataRoot", root)
 	object.InitAdapter()
+	stop := startHosted()
 	code := m.Run()
+	stop()
 	_ = os.RemoveAll(root)
 	os.Exit(code)
 }

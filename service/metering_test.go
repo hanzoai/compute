@@ -25,27 +25,6 @@ import (
 	"github.com/hanzoai/compute/service/commercetest"
 )
 
-func TestPriceToCents(t *testing.T) {
-	cases := []struct {
-		price float64
-		want  int64
-	}{
-		{0.07, 7},     // whole-cent: float overshoot must NOT ceil to 8
-		{0.29, 29},    // whole-cent
-		{33.60, 3360}, // monthly-scale whole cents
-		{4.2375, 424}, // H100/hr -> 423.75 -> 424
-		{0.04999, 5},  // 4.999 -> 5
-		{0.00833, 1},  // true sub-cent still charges >= 1
-		{0.0, 0},      // free -> 0 (no charge)
-		{-1.0, 0},     // guard: negative -> 0
-	}
-	for _, c := range cases {
-		if got := PriceToCents(c.price); got != c.want {
-			t.Fatalf("PriceToCents(%v) = %d, want %d", c.price, got, c.want)
-		}
-	}
-}
-
 func TestOrgFromTag(t *testing.T) {
 	cases := []struct {
 		tags string
@@ -118,7 +97,7 @@ func TestNormalizeProject(t *testing.T) {
 // org — one org balance covers all its projects.
 func TestMeterMachines_AttributesProjectViaActor(t *testing.T) {
 	recs, mu := fakeCommerce(t)
-	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
+	seedCatalog(t, priced("s", 5))
 
 	now := time.Date(2026, 7, 2, 15, 30, 0, 0, time.UTC)
 	machines := []*Machine{{Id: "p1", Size: "s", Tag: "hanzo-org:acme,hanzo-project:web,"}}
@@ -182,30 +161,29 @@ func fakeCommerce(t *testing.T) (got *[]recorded, mu *sync.Mutex) {
 	return &recs, &m
 }
 
-// seedCatalog pre-populates the package catalog cache so SizeBySlug resolves
-// without a live DigitalOcean call.
-func seedCatalog(t *testing.T, sizes ...SizeInfo) {
+// seedCatalog replaces the catalog for one test, so a size prices at exactly
+// what the test says.
+func seedCatalog(t *testing.T, sale ...offer) {
 	t.Helper()
-	catalog.mu.Lock()
-	catalog.sizes = sizes
-	catalog.fetchedAt = time.Now()
-	catalog.mu.Unlock()
-	t.Cleanup(func() {
-		catalog.mu.Lock()
-		catalog.sizes = nil
-		catalog.fetchedAt = time.Time{}
-		catalog.mu.Unlock()
-	})
+	saved := offers
+	offers = sale
+	t.Cleanup(func() { offers = saved })
 }
 
-// A running machine debits its OWNING org one hour of resale price, attributed
+// priced is an offer whose Hanzo price is exactly cents per hour: its list price
+// is the cost that the fee turns into that many cents, with no disk.
+func priced(slug string, cents int64) offer {
+	return offer{slug: slug, listMicros: cents * microsPerCent * feeDen / feeNum}
+}
+
+// A running machine debits its OWNING org one hour of its price, attributed
 // product "compute" / model <size>, with an hour-bucketed idempotency RequestID.
 func TestMeterMachines_DebitsRunningMachinePerOrg(t *testing.T) {
 	recs, mu := fakeCommerce(t)
-	seedCatalog(t, SizeInfo{Slug: "s-2vcpu-4gb", PriceHourly: 0.05, Currency: "USD"})
+	seedCatalog(t, priced("m7i.large", 5))
 
 	now := time.Date(2026, 7, 2, 15, 30, 0, 0, time.UTC)
-	machines := []*Machine{{Id: "111", Size: "s-2vcpu-4gb", Tag: "hanzo-org:acme,"}}
+	machines := []*Machine{{Id: "111", Size: "m7i.large", Tag: "hanzo-org:acme,"}}
 
 	metered, skipped := meterMachines(context.Background(), machines, now)
 	if metered != 1 || skipped != 0 {
@@ -230,8 +208,8 @@ func TestMeterMachines_DebitsRunningMachinePerOrg(t *testing.T) {
 	if u.Service != "compute" {
 		t.Fatalf("service = %q, want compute", u.Service)
 	}
-	if u.Model != "s-2vcpu-4gb" {
-		t.Fatalf("model = %q, want s-2vcpu-4gb", u.Model)
+	if u.Model != "m7i.large" {
+		t.Fatalf("model = %q, want m7i.large", u.Model)
 	}
 	if u.Amount.Decimal != "0.05" || u.Amount.Currency != "usd" || u.Cents() != 5 { // $0.05 -> 5 cents
 		t.Fatalf("amount = %+v, want 0.05 usd", u.Amount)
@@ -245,9 +223,9 @@ func TestMeterMachines_DebitsRunningMachinePerOrg(t *testing.T) {
 // one id once), and changes in the NEXT hour (a new billable unit).
 func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
 	recs, mu := fakeCommerce(t)
-	seedCatalog(t, SizeInfo{Slug: "s-1vcpu-1gb", PriceHourly: 0.01, Currency: "USD"})
+	seedCatalog(t, priced("t3.medium", 1))
 
-	m := []*Machine{{Id: "222", Size: "s-1vcpu-1gb", Tag: "hanzo-org:acme"}}
+	m := []*Machine{{Id: "222", Size: "t3.medium", Tag: "hanzo-org:acme"}}
 	h15 := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
 	meterMachines(context.Background(), m, h15)
 	meterMachines(context.Background(), m, h15.Add(50*time.Minute)) // same hour
@@ -272,7 +250,7 @@ func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
 // is skipped for that hour; the NEXT hour it is metered normally.
 func TestMeterMachines_SkipsLaunchHour(t *testing.T) {
 	recs, mu := fakeCommerce(t)
-	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
+	seedCatalog(t, priced("s", 5))
 
 	// Launched at 15:05; the sweep fires later in the SAME clock hour (15:40).
 	launched := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
@@ -331,8 +309,8 @@ func TestCreatedInHour(t *testing.T) {
 func TestMeterMachines_SkipsUnattributableAndUnpriceable(t *testing.T) {
 	recs, mu := fakeCommerce(t)
 	seedCatalog(t,
-		SizeInfo{Slug: "paid", PriceHourly: 0.05, Currency: "USD"},
-		SizeInfo{Slug: "zero", PriceHourly: 0.0, Currency: "USD"},
+		priced("paid", 5),
+		priced("zero", 0),
 	)
 
 	now := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
@@ -363,7 +341,7 @@ func TestMeterMachines_SkipsUnattributableAndUnpriceable(t *testing.T) {
 // fold in a mixed sweep.
 func TestMeterMachines_TenantIsolation(t *testing.T) {
 	recs, mu := fakeCommerce(t)
-	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
+	seedCatalog(t, priced("s", 5))
 
 	now := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
 	machines := []*Machine{

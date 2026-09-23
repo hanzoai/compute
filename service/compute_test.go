@@ -15,84 +15,22 @@
 package service
 
 import (
-	"math"
 	"testing"
 
 	"github.com/digitalocean/godo"
 )
 
-func almost(a, b float64) bool { return math.Abs(a-b) < 1e-6 }
-
-func TestHanzoPriceMarkup(t *testing.T) {
-	// Standard sizes use the base markup; GPU sizes the gentler GPU markup.
-	if got := HanzoPrice(48.0, false); !almost(got, 64.0) {
-		t.Fatalf("base monthly markup: got %v want 64.0", got)
-	}
-	if got := HanzoPrice(0.00744, false); !almost(got, 0.00992) {
-		t.Fatalf("base hourly markup: got %v want 0.00992", got)
-	}
-	if got := HanzoPrice(3.0, true); !almost(got, 4.0) {
-		t.Fatalf("gpu markup: got %v want 4.0", got)
-	}
-	// Resale price must always exceed wholesale — the margin invariant.
-	for _, do := range []float64{0.007, 0.5, 48, 3200} {
-		if HanzoPrice(do, false) <= do || HanzoPrice(do, true) <= do {
-			t.Fatalf("resale price must exceed wholesale for %v", do)
-		}
-	}
-}
-
-func TestIsGPUSize(t *testing.T) {
-	cases := []struct {
-		size godo.Size
-		want bool
-	}{
-		{godo.Size{Slug: "s-2vcpu-4gb"}, false},
-		{godo.Size{Slug: "gpu-h100x1-80gb"}, true},
-		{godo.Size{Slug: "g-2vcpu-8gb", GPUInfo: &godo.GPUInfo{Count: 1, Model: "H100"}}, true},
-	}
-	for _, c := range cases {
-		if got := isGPUSize(c.size); got != c.want {
-			t.Fatalf("isGPUSize(%q)=%v want %v", c.size.Slug, got, c.want)
-		}
-	}
-}
-
-func TestSizeInfoFromDO_GPU(t *testing.T) {
-	s := godo.Size{
-		Slug:         "gpu-h100x1-80gb",
-		Vcpus:        20,
-		Memory:       240 * 1024,
-		Disk:         720,
-		Available:    true,
-		Regions:      []string{"nyc2", "tor1"},
-		PriceHourly:  3.0,
-		PriceMonthly: 2000.0,
-		GPUInfo:      &godo.GPUInfo{Count: 1, Model: "H100", VRAM: &godo.VRAM{Amount: 80, Unit: "GiB"}},
-	}
-	si := sizeInfoFromDO(s)
-	if si.GPU == nil || si.GPU.Model != "H100" || si.GPU.Count != 1 || si.GPU.Vram != 80 {
-		t.Fatalf("gpu spec not mapped: %+v", si.GPU)
-	}
-	if !almost(si.PriceHourly, HanzoPrice(3.0, true)) {
-		t.Fatalf("gpu hourly resale: got %v", si.PriceHourly)
-	}
-	if !almost(si.PriceMonthly, HanzoPrice(2000.0, true)) {
-		t.Fatalf("gpu monthly resale: got %v", si.PriceMonthly)
-	}
-}
-
 // TestBuildDropletTags_AttributionUnforgeable proves a tenant cannot forge,
-// strip, or DUPLICATE the hanzo-org billing-attribution tag through the launch
-// body: the authoritative org (injected by LaunchOrgMachine under the reserved
-// map key) is the ONLY hanzo-org token emitted, and any client tag that could
+// strip, or DUPLICATE the hanzo-org attribution tag through the launch body of a
+// DigitalOcean provider: the authoritative org (set under the reserved map key)
+// is the ONLY hanzo-org token emitted, and any client tag that could
 // smuggle a second attribution token via the meter's "," / ":" separators is
 // dropped — so orgFromTag reads back exactly the server-resolved org.
 func TestBuildDropletTags_AttributionUnforgeable(t *testing.T) {
-	// Simulates the post-LaunchOrgMachine state: server has set the reserved key,
+	// Simulates the state after the launch set the reserved key:
 	// client tried to smuggle a second attribution token and to override the key.
 	spec := &CreateMachineSpec{Tags: map[string]string{
-		orgTagKey:  "acme",               // authoritative (LaunchOrgMachine overwrote any client value)
+		orgTagKey:  "acme",               // authoritative (the launch overwrote any client value)
 		"note":     "y,hanzo-org:victim", // comma-smuggle a 2nd attribution token -> must be DROPPED
 		"role":     "svc:admin",          // colon-smuggle a fake key:value -> must be DROPPED
 		"team":     "platform",           // clean -> kept
@@ -157,89 +95,6 @@ func TestValidOrgSlug(t *testing.T) {
 		if validOrgSlug(s) {
 			t.Fatalf("validOrgSlug(%q) = true, want false (billing key / tag must be a clean slug)", s)
 		}
-	}
-}
-
-// TestOrgIsolationPredicate proves the per-tenant isolation invariant: a droplet
-// tagged for one org is visible ONLY to that org. This is the security boundary
-// RED must verify end-to-end; here it is asserted at the data layer.
-func TestOrgIsolationPredicate(t *testing.T) {
-	if orgTag("maxpower") != "hanzo-org:maxpower" {
-		t.Fatalf("orgTag format: got %q", orgTag("maxpower"))
-	}
-	d := &godo.Droplet{Tags: []string{"managed-by:hanzo-visor", "hanzo-org:maxpower"}}
-	if !dropletHasOrgTag(d, "maxpower") {
-		t.Fatal("owner org must see its own machine")
-	}
-	if dropletHasOrgTag(d, "hanzo") {
-		t.Fatal("cross-tenant leak: another org must NOT see this machine")
-	}
-	if dropletHasOrgTag(&godo.Droplet{Tags: nil}, "maxpower") {
-		t.Fatal("untagged droplet must not match any org")
-	}
-}
-
-// ---- exactly one meter per node ----
-
-// A cluster's worker droplets carry the cluster's tags, hanzo-org among them, so
-// the droplet sweep can see the very same nodes the node-pool sweep bills as part
-// of their pool. Two meters on one node is a double charge every hour, forever,
-// and it is invisible from inside either sweep.
-//
-// The node-pool sweep is the meter of record for a cluster's nodes, so the
-// machine meter must not admit a Kubernetes worker — whether or not DigitalOcean
-// propagates the tag. That is what makes this a property of visor.
-func TestBillableDroplet_KubernetesWorkersAreNotOnTheMachineMeter(t *testing.T) {
-	for name, tc := range map[string]struct {
-		droplet godo.Droplet
-		want    bool
-	}{
-		"a running resell droplet is billed": {
-			godo.Droplet{Status: "active", Tags: []string{"managed-by:hanzo-visor", "hanzo-org:acme"}}, true},
-		"a DOKS worker carrying the cluster's org tag is NOT": {
-			godo.Droplet{Status: "active", Tags: []string{"k8s", "k8s-worker", "k8s:cl-1", "hanzo-org:acme"}}, false},
-		"the bare k8s tag alone is enough to exclude it": {
-			godo.Droplet{Status: "active", Tags: []string{"k8s", "hanzo-org:acme"}}, false},
-		"so is k8s-worker alone": {
-			godo.Droplet{Status: "active", Tags: []string{"k8s-worker", "hanzo-org:acme"}}, false},
-		"a stopped resell droplet is not billed": {
-			godo.Droplet{Status: "off", Tags: []string{"hanzo-org:acme"}}, false},
-		"an untagged platform droplet is never billed to a tenant": {
-			godo.Droplet{Status: "active", Tags: []string{"managed-by:hanzo-visor"}}, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := billableDroplet(tc.droplet); got != tc.want {
-				t.Fatalf("billableDroplet(%v) = %v, want %v", tc.droplet.Tags, got, tc.want)
-			}
-		})
-	}
-}
-
-// The exclusion must not become an opt-out. A tenant who could put the bare `k8s`
-// tag on its own droplet would run it free forever — the guard would do the
-// hiding for them.
-//
-// It cannot: every client tag reaches DigitalOcean as "key:value", so a customer
-// asking for `k8s` gets `k8s:<something>`, which is not one of the bare automatic
-// tags DigitalOcean applies. This is why the guard matches exactly and never on a
-// prefix.
-func TestBuildDropletTags_ACustomerCannotForgeTheKubernetesExclusion(t *testing.T) {
-	spec := &CreateMachineSpec{Tags: map[string]string{
-		orgTagKey:    "acme",
-		"k8s":        "",    // bare-tag attempt
-		"k8s-worker": "",    // bare-tag attempt
-		"k8s2":       "k8s", // value-side attempt
-	}}
-	tags := buildDropletTags(spec)
-
-	for _, tg := range tags {
-		if kubernetesAutoTags[tg] {
-			t.Fatalf("a client produced the bare exclusion tag %q — its droplet would run free: %v", tg, tags)
-		}
-	}
-	// And the droplet those tags describe is still on the meter.
-	if !billableDroplet(godo.Droplet{Status: "active", Tags: tags}) {
-		t.Fatalf("a customer escaped the machine meter with launch tags: %v", tags)
 	}
 }
 

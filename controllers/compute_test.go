@@ -42,88 +42,6 @@ func TestBatchMemberName(t *testing.T) {
 	}
 }
 
-// botMachine fakes a launched machine as ListOrgMachines returns it: DisplayName
-// is the droplet name and Tag is the comma-joined tag string carrying hanzo-kind.
-func botMachine(name, kind string) *service.Machine {
-	return &service.Machine{DisplayName: name, Tag: "hanzo-kind:" + kind + ",hanzo-org:acme,"}
-}
-
-// projMachine fakes a launched machine scoped to a project: Tag carries the
-// hanzo-project scope tag SetScope injects at launch, alongside org and kind.
-func projMachine(name, project string) *service.Machine {
-	return &service.Machine{DisplayName: name, Tag: "hanzo-kind:machine,hanzo-org:acme,hanzo-project:" + project + ","}
-}
-
-// filterMachines is the ONLY grouping of a batch — no fleet entity. Launch 3
-// named crawler-000..002 (kind=bot) plus one unrelated machine, then list by
-// ?name= prefix, by ?kind=, and after deleting one member.
-func TestFilterMachinesBatch(t *testing.T) {
-	all := []*service.Machine{
-		botMachine("crawler-000", service.KindBot),
-		botMachine("crawler-001", service.KindBot),
-		botMachine("crawler-002", service.KindBot),
-		botMachine("db-1", service.KindMachine),
-	}
-
-	// ?name=crawler groups the batch (prefix match on DisplayName).
-	byName := filterMachines(all, "", "crawler", "")
-	if len(byName) != 3 {
-		t.Fatalf("?name=crawler = %d machines, want 3", len(byName))
-	}
-	for i, m := range byName {
-		if w := batchMemberName("crawler", i); m.DisplayName != w {
-			t.Errorf("member %d = %q, want %q", i, m.DisplayName, w)
-		}
-	}
-
-	// ?kind=bot selects the 3 bots and excludes the plain machine.
-	if bots := filterMachines(all, service.KindBot, "", ""); len(bots) != 3 {
-		t.Fatalf("?kind=bot = %d machines, want 3", len(bots))
-	}
-	if machines := filterMachines(all, service.KindMachine, "", ""); len(machines) != 1 || machines[0].DisplayName != "db-1" {
-		t.Fatalf("?kind=machine = %v, want [db-1]", machines)
-	}
-
-	// No filter passes everything (identity).
-	if len(filterMachines(all, "", "", "")) != len(all) {
-		t.Fatalf("empty filter changed the list")
-	}
-
-	// Delete one member (scale down = delete): the ?name= group drops to 2.
-	remaining := []*service.Machine{all[0], all[2], all[3]} // crawler-001 destroyed
-	got := filterMachines(remaining, "", "crawler", "")
-	if len(got) != 2 || got[0].DisplayName != "crawler-000" || got[1].DisplayName != "crawler-002" {
-		t.Fatalf("after delete ?name=crawler = %v, want [crawler-000 crawler-002]", got)
-	}
-}
-
-// ?project= groups a batch by the hanzo-project scope tag SetScope injected —
-// the org > app > project attribution surfacing back through the list filter, and
-// composing with ?kind=. A machine with no project tag never matches.
-func TestFilterMachinesByProject(t *testing.T) {
-	all := []*service.Machine{
-		projMachine("api-1", "api"),
-		projMachine("api-2", "api"),
-		projMachine("web-1", "web"),
-		botMachine("scopeless", service.KindMachine), // no project tag
-	}
-
-	if got := filterMachines(all, "", "", "api"); len(got) != 2 {
-		t.Fatalf("?project=api = %d machines, want 2", len(got))
-	}
-	if got := filterMachines(all, "", "", "web"); len(got) != 1 || got[0].DisplayName != "web-1" {
-		t.Fatalf("?project=web = %v, want [web-1]", got)
-	}
-	// project + kind compose (both must match).
-	if got := filterMachines(all, service.KindMachine, "", "api"); len(got) != 2 {
-		t.Fatalf("?kind=machine&project=api = %d machines, want 2", len(got))
-	}
-	// a machine carrying no project tag never matches a project filter.
-	if got := filterMachines(all, "", "", "nope"); len(got) != 0 {
-		t.Fatalf("?project=nope = %d machines, want 0 (scopeless must not match)", len(got))
-	}
-}
-
 // newLaunchCtx builds a ZAP request context the way the router hands one to a
 // handler, so resolveComputeApp/Project can read the threaded tenant scope.
 func newLaunchCtx() *zip.Ctx {
@@ -234,8 +152,8 @@ func TestNodesIsAlwaysAnArray(t *testing.T) {
 
 // launchCommerce stands up a fake commerce and reports what the launch path
 // asked it. Counting balance READS is what tells "the gate looked and refused"
-// apart from "the gate is not there" — with no platform DigitalOcean token both
-// end in an error, and only the reads distinguish them.
+// apart from "the gate is not there" — both end in an error, and only the reads
+// distinguish them.
 type launchCommerce struct {
 	mu     sync.Mutex
 	reads  int
@@ -260,9 +178,6 @@ func launchCommerceOf(t *testing.T, availableCents int64) *launchCommerce {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	// No provider token: LaunchOrgMachine cannot reach DigitalOcean, so if the
-	// launch ever gets that far it fails for a DIFFERENT reason — which is
-	// exactly what the read count is here to detect.
 	return c
 }
 
@@ -274,13 +189,13 @@ func (c *launchCommerce) state() (reads, debits int) {
 
 // A machine is not launched for an org that cannot pay for its first hour, and
 // the refusal costs nothing. Remove the gate and no balance is ever read — the
-// launch goes straight at DigitalOcean.
+// launch goes straight at the cloud.
 func TestLaunchMeteredRefusesBeforeItProvisions(t *testing.T) {
 	c := launchCommerceOf(t, 0) // broke
 
 	machine, err := launchMetered(context.Background(), "acme", "",
-		&service.CreateMachineSpec{Name: "box", InstanceType: "gpu-h100x8-640gb"},
-		&service.SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+		&service.CreateMachineSpec{Name: "box", InstanceType: "p5.48xlarge"},
+		service.SizeBySlug("p5.48xlarge"))
 
 	if err == nil || machine != nil {
 		t.Fatalf("an unfunded org must be refused, got machine=%+v err=%v", machine, err)
@@ -303,8 +218,8 @@ func TestLaunchMeteredRefusesAnUnpriceableSize(t *testing.T) {
 	c := launchCommerceOf(t, 100000000)
 
 	_, err := launchMetered(context.Background(), "acme", "",
-		&service.CreateMachineSpec{Name: "box", InstanceType: "gpu-h200x8-1128gb"},
-		&service.SizeInfo{Slug: "gpu-h200x8-1128gb"})
+		&service.CreateMachineSpec{Name: "box", InstanceType: "p5en.48xlarge"},
+		&service.SizeInfo{Slug: "p5en.48xlarge"})
 
 	if err == nil {
 		t.Fatal("a size with no price must be refused")

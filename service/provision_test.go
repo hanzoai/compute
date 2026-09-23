@@ -82,7 +82,7 @@ func (l *ledger) state(org string) (available int64, debits int) {
 // GPU. The hold makes authorize→provision→record atomic per org, so the balance
 // the first request spends is the balance the second one reads.
 func TestProvisionSerialisesAnOrgSoOneBalanceBuysOneCluster(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	l := ledgerOf(t, map[string]int64{"acme": 3178}) // exactly one node-hour
 
 	const n = 16
@@ -137,7 +137,7 @@ func TestProvisionSerialisesAnOrgSoOneBalanceBuysOneCluster(t *testing.T) {
 // cluster-hours all succeed. A gate that refuses everyone is not fail-closed,
 // it is broken, and concurrency is where that is easiest to ship by accident.
 func TestProvisionDoesNotRefuseAFundedOrgUnderLoad(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	const n = 16
 	l := ledgerOf(t, map[string]int64{"acme": 3178 * n})
 
@@ -175,7 +175,7 @@ func TestProvisionDoesNotRefuseAFundedOrgUnderLoad(t *testing.T) {
 // The hold is per ORG: one tenant's provisions never serialise behind another's,
 // so two orgs each funded for one cluster each get one.
 func TestProvisionHoldsPerOrgNotGlobally(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	l := ledgerOf(t, map[string]int64{"acme": 3178, "globex": 3178})
 
 	var wg sync.WaitGroup

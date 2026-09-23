@@ -12,21 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// compute.go is the canonical /v1 resell compute surface: the cached
-// DigitalOcean catalog (regions/sizes/GPUs, resale-priced) and per-org machine
-// operations backed by the configured cloud account. Every machine endpoint is
-// scoped to the caller's org, which is derived from the authenticated IAM
-// identity (never trusted from a client-supplied field). Beneath org, an OPTIONAL
-// app > project scope (from the gateway-threaded tenant context, or the launch
-// body as a fallback) sharpens the analytics rollup without ever gating a launch.
+// compute.go is the canonical /v1 hosted compute surface: the catalog
+// (regions/sizes/GPUs, at Hanzo's price) and per-org machines in Hanzo's own EC2
+// account. Every machine endpoint is scoped to the caller's org, which is derived
+// from the authenticated IAM identity (never trusted from a client-supplied
+// field). Beneath org, an OPTIONAL app > project scope (from the gateway-threaded
+// tenant context, or the launch body as a fallback) sharpens the analytics rollup
+// without ever gating a launch.
 // Launch is metered through commerce (per-org debit); a dryRun returns a price
 // quote and spends nothing.
 //
 // A "fleet" is not a separate entity — it is just N machines launched in one
-// batch (count>1) named "<name>-000", "<name>-001", … and grouped by the
-// ?name= (prefix) / ?kind= / ?project= list filters. There is exactly ONE way a
-// machine is launched, billed and destroyed (launchMetered), whether alone or as
-// one of a batch.
+// batch (count>1) named "<name>-000", "<name>-001", …, sharing a name prefix.
+// There is exactly ONE way a machine is launched, billed and destroyed
+// (launchMetered), whether alone or as one of a batch.
 package controllers
 
 import (
@@ -96,12 +95,12 @@ func (c *ApiController) resolveComputeProject(fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
-// ---- Catalog (cached, resale-priced) ----
+// ---- Catalog (at Hanzo's price) ----
 
 // GetComputeRegions
 // @Title GetComputeRegions
 // @Tag Compute API
-// @Description list DigitalOcean regions (cached)
+// @Description list the regions hosted machines launch in
 // @Success 200 {object} controllers.Response
 // @router /regions [get]
 func (c *ApiController) GetComputeRegions() {
@@ -109,18 +108,13 @@ func (c *ApiController) GetComputeRegions() {
 		c.ResponseError(refuseNoCompute)
 		return
 	}
-	regions, err := service.ListRegions()
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-	c.ResponseOk(regions)
+	c.ResponseOk(service.ListRegions())
 }
 
 // GetComputeSizes
 // @Title GetComputeSizes
 // @Tag Compute API
-// @Description list resale-priced sizes (cached)
+// @Description list the sizes for sale, at Hanzo's price
 // @Success 200 {object} controllers.Response
 // @router /sizes [get]
 func (c *ApiController) GetComputeSizes() {
@@ -128,18 +122,13 @@ func (c *ApiController) GetComputeSizes() {
 		c.ResponseError(refuseNoCompute)
 		return
 	}
-	sizes, err := service.ListSizes()
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-	c.ResponseOk(sizes)
+	c.ResponseOk(service.ListSizes())
 }
 
 // GetComputeGPUs
 // @Title GetComputeGPUs
 // @Tag Compute API
-// @Description list resale-priced GPU sizes (cached)
+// @Description list the GPU sizes for sale, at Hanzo's price
 // @Success 200 {object} controllers.Response
 // @router /gpus [get]
 func (c *ApiController) GetComputeGPUs() {
@@ -147,77 +136,15 @@ func (c *ApiController) GetComputeGPUs() {
 		c.ResponseError(refuseNoCompute)
 		return
 	}
-	gpus, err := service.ListGPUSizes()
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-	c.ResponseOk(gpus)
-}
-
-// ---- Machines (per-org, configured cloud account) ----
-
-// filterMachines narrows a machine list by an optional kind (exact, matched on
-// the machine's canonical kind), an optional name prefix (matched on the droplet
-// DisplayName), and an optional project (exact, matched on the machine's
-// hanzo-project scope tag). Empty filters pass everything — so a batch launched as
-// "<name>-000", "<name>-001", … is listable and groupable purely by its ?name=
-// prefix (and ?kind= / ?project=). This is the ONLY grouping; there is no fleet
-// entity.
-func filterMachines(machines []*service.Machine, kind, namePrefix, project string) []*service.Machine {
-	kind = strings.TrimSpace(kind)
-	namePrefix = strings.TrimSpace(namePrefix)
-	project = strings.TrimSpace(project)
-	if kind == "" && namePrefix == "" && project == "" {
-		return machines
-	}
-	want := service.CanonicalKind(kind)
-	out := make([]*service.Machine, 0, len(machines))
-	for _, m := range machines {
-		if namePrefix != "" && !strings.HasPrefix(m.DisplayName, namePrefix) {
-			continue
-		}
-		if kind != "" && service.MachineKind(m) != want {
-			continue
-		}
-		if project != "" && service.MachineProject(m) != project {
-			continue
-		}
-		out = append(out, m)
-	}
-	return out
-}
-
-// ListComputeMachines
-// @Title ListComputeMachines
-// @Tag Compute API
-// @Description list the caller org's machines, optionally filtered by ?kind=, ?name= (prefix) and ?project=
-// @Success 200 {object} controllers.Response
-// @router /machines [get]
-func (c *ApiController) ListComputeMachines() {
-	org := c.resolveComputeOrg()
-	if org == "" {
-		c.ResponseError(refuseNoOrg)
-		return
-	}
-	if !service.ComputeConfigured() {
-		c.ResponseError(refuseNoCompute)
-		return
-	}
-	machines, err := service.ListOrgMachines(org, c.resolveComputeProject(""))
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-	c.ResponseOk(filterMachines(machines, c.Ctx.Query("kind"), c.Ctx.Query("name"), c.Ctx.Query("project")))
+	c.ResponseOk(service.ListGPUSizes())
 }
 
 // unionMachines merges machine lists from independent sources into ONE deduped
 // slice: a machine is claimed by provider id OR name, and the FIRST source to
 // carry it wins (later sources contribute only what is not already present). This
-// is the visor-side analogue of the cloud fleet dedup — a DOKS node whose droplet
-// is also in the droplet list appears once (deduped by droplet id). Ordered
-// sources let the caller pick the winner.
+// is the visor-side analogue of the cloud fleet dedup — a worker node listed by
+// two sources appears once (deduped by its id). Ordered sources let the caller
+// pick the winner.
 func unionMachines(sources ...[]*service.Machine) []*service.Machine {
 	out := []*service.Machine{}
 	seen := map[string]struct{}{}
@@ -264,22 +191,22 @@ type Nodes struct {
 	Nodes []*service.Machine `json:"nodes"`
 }
 
-// ListNodes lists the caller org's DOKS worker nodes as machines: the deduped
-// union of the configured cloud account (clusters carrying the hanzo-org tag) and BYOC
-// providers (clusters named by Provider.ClusterID). A DOKS node's droplet carries
-// k8s tags rather than a hanzo-org droplet tag, so it appears on no other list —
-// this op is how a cluster's workers are visible as machines at all.
+// ListNodes lists the caller org's Kubernetes worker nodes as machines: the
+// deduped union of the platform accounts (clusters carrying the hanzo-org tag)
+// and BYOC providers (clusters named by Provider.ClusterID). A worker node
+// appears on no other list — this op is how a cluster's workers are visible as
+// machines at all.
 //
-// The two sources are independent, and the platform one needs the platform DO token: an
-// unconfigured compute deployment skips it rather than failing the whole read and
-// hiding the BYOC nodes behind an error.
+// The two sources are independent, and the platform one needs a platform
+// account: a deployment with none skips it rather than failing the whole read
+// and hiding the BYOC nodes behind an error.
 func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
 	_, org := principal(in.Authorization, in.Owner)
 	if org == "" {
 		return nil, zip.ErrForbidden("no org context")
 	}
 	var platform []*service.Machine
-	if service.ComputeConfigured() {
+	if service.KubernetesConfigured() {
 		var err error
 		platform, err = service.ListOrgKubernetesNodes(org)
 		if err != nil {
@@ -293,18 +220,19 @@ func ListNodes(_ context.Context, in *Scope) (*Nodes, error) {
 	return &Nodes{Nodes: unionMachines(platform, byoc)}, nil
 }
 
-// ---- k8s clusters (platform-account DOKS lifecycle, org-scoped) ----
+// ---- k8s clusters (platform-account lifecycle, org-scoped) ----
 //
 // The unified /v1/k8s noun: list clusters, one cluster's detail (pools + worker
-// nodes) and DEPLOY (create) / delete DOKS clusters. Every handler is org-scoped by
-// resolveComputeOrg (fail-closed on no org context) — the SAME tenant model the rest
-// of the resell compute surface uses. Per-org isolation lives in the service layer
-// (the hanzo-org cluster tag): a tenant can only ever see or mutate its OWN clusters.
+// nodes) and DEPLOY (create) / delete clusters on the platform accounts. Every
+// handler is org-scoped by resolveComputeOrg (fail-closed on no org context) —
+// the SAME tenant model the rest of the resell compute surface uses. Per-org
+// isolation lives in the service layer (the hanzo-org cluster tag): a tenant can
+// only ever see or mutate its OWN clusters.
 
 // ListComputeKubernetesClusters
 // @Title ListComputeKubernetesClusters
 // @Tag Compute API
-// @Description list the caller org's DOKS clusters (configured cloud account, hanzo-org tag)
+// @Description list the caller org's clusters on the platform accounts (hanzo-org tag)
 // @Success 200 {object} controllers.Response
 // @router /k8s/clusters [get]
 func (c *ApiController) ListComputeKubernetesClusters() {
@@ -328,7 +256,7 @@ func (c *ApiController) ListComputeKubernetesClusters() {
 // GetComputeKubernetesCluster
 // @Title GetComputeKubernetesCluster
 // @Tag Compute API
-// @Description get one of the caller org's DOKS clusters by id — detail incl. node pools and worker nodes
+// @Description get one of the caller org's clusters by id — detail incl. node pools and worker nodes
 // @router /k8s/clusters/:id [get]
 func (c *ApiController) GetComputeKubernetesCluster() {
 	org := c.resolveComputeOrg()
@@ -356,7 +284,7 @@ func (c *ApiController) GetComputeKubernetesCluster() {
 // CreateComputeKubernetesCluster
 // @Title CreateComputeKubernetesCluster
 // @Tag Compute API
-// @Description provision a DOKS cluster for the caller org (body: name, region, version, nodePool{size,count})
+// @Description provision a cluster for the caller org (body: name, region, version, nodePool{size,count})
 // @router /k8s/clusters [post]
 func (c *ApiController) CreateComputeKubernetesCluster() {
 	org := c.resolveComputeOrg()
@@ -404,7 +332,7 @@ func (c *ApiController) CreateComputeKubernetesCluster() {
 // DeleteComputeKubernetesCluster
 // @Title DeleteComputeKubernetesCluster
 // @Tag Compute API
-// @Description delete one of the caller org's DOKS clusters by id
+// @Description delete one of the caller org's clusters by id
 // @router /k8s/clusters/:id [delete]
 func (c *ApiController) DeleteComputeKubernetesCluster() {
 	org := c.resolveComputeOrg()
@@ -424,54 +352,11 @@ func (c *ApiController) DeleteComputeKubernetesCluster() {
 	c.ResponseOk("deleted")
 }
 
-// GetComputeMachine
-// @Title GetComputeMachine
-// @Tag Compute API
-// @Description get one of the caller org's machines by id
-// @router /machines/:id [get]
-func (c *ApiController) GetComputeMachine() {
-	org := c.resolveComputeOrg()
-	if org == "" {
-		c.ResponseError(refuseNoOrg)
-		return
-	}
-	id := c.Ctx.Param("id")
-	machine, err := service.GetOrgMachine(org, id)
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-	if machine == nil {
-		c.ResponseError("machine not found")
-		return
-	}
-	c.ResponseOk(machine)
-}
-
-// DeleteComputeMachine
-// @Title DeleteComputeMachine
-// @Tag Compute API
-// @Description delete one of the caller org's machines by id
-// @router /machines/:id [delete]
-func (c *ApiController) DeleteComputeMachine() {
-	org := c.resolveComputeOrg()
-	if org == "" {
-		c.ResponseError(refuseNoOrg)
-		return
-	}
-	id := c.Ctx.Param("id")
-	if err := service.DeleteOrgMachine(org, id); err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-	c.ResponseOk("deleted")
-}
-
 // launchComputeRequest is the body for POST /v1/machines. It embeds the
 // provider spec and adds a size alias, a kind, an optional app/project scope, a
 // dryRun flag (quote only, no spend) and a batch launch: count>1 launches N
 // machines named "<name>-000", "<name>-001", … (a "fleet" is just this batch,
-// grouped by the ?name= prefix). App/Project are a body-level FALLBACK for a
+// sharing the name prefix). App/Project are a body-level FALLBACK for a
 // direct API caller — the gateway-threaded X-App-ID / X-Project-ID header wins
 // when present (resolveComputeApp / resolveComputeProject).
 type launchComputeRequest struct {
@@ -485,38 +370,38 @@ type launchComputeRequest struct {
 	DryRun  bool   `json:"dryRun"`
 }
 
-// LaunchQuote is the resale price quote for a size in a region (Hanzo price
-// only — wholesale/provider never surfaced).
+// LaunchQuote is the price of a size in a region: Hanzo's price only, never what
+// the size costs Hanzo. CentsHourly is exactly what the launch debits for its
+// first hour and the meter for every hour after.
 type LaunchQuote struct {
 	Org          string           `json:"org"`
 	Size         string           `json:"size"`
 	Region       string           `json:"region"`
 	Currency     string           `json:"currency"`
+	CentsHourly  int64            `json:"centsHourly"`
 	PriceHourly  float64          `json:"priceHourly"`
 	PriceMonthly float64          `json:"priceMonthly"`
 	GPU          *service.GPUSpec `json:"gpu,omitempty"`
 }
 
+// maxBatch bounds one batch launch. A batch runs member by member under the
+// org's provisioning hold, so its size is how long that hold is held.
+const maxBatch = 32
+
 // batchMemberName is the canonical name of batch member i: "<name>-NNN". A batch
 // launched with count N is just N machines sharing this name prefix — there is
-// no separate fleet entity; the ?name= list filter re-groups them.
+// no separate fleet entity.
 func batchMemberName(name string, i int) string {
 	return fmt.Sprintf("%s-%03d", name, i)
 }
 
 // mintMachineName names a machine whose caller did not name it.
 //
-// A droplet MUST have a name — DigitalOcean answers 422 "Droplet must have a
-// name" without one. The BATCH path has always refused an empty name; the single
-// path passed it straight through to the provider, so every launch that omitted
-// one failed at the far end with a provider error rather than here with ours.
-// Tabs is exactly that caller: it opens a scratch terminal and has no name to
-// give, so its button failed on every click.
-//
-// Naming a throwaway is not the caller's job, so the server does it. The kind
-// says what it is, and four random bytes keep two clicks in the same second
-// apart. Lowercased, and anything a hostname will not carry becomes a dash —
-// which is the intersection of what a droplet name and a hostname both allow.
+// Tabs opens a scratch terminal and has no name to give, and a machine with no
+// name is a blank row in every list. Naming a throwaway is not the caller's job,
+// so the server does it. The kind says what it is, and four random bytes keep
+// two clicks in the same second apart. Lowercased, and anything a hostname will
+// not carry becomes a dash.
 func mintMachineName(kind string) string {
 	k := strings.ToLower(strings.TrimSpace(kind))
 	if k == "" {
@@ -560,10 +445,10 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 		return nil, err
 	}
 	var machine *service.Machine
-	// A droplet has one fixed size and does not grow on its own, so the ceiling
+	// A machine has one fixed size and does not grow on its own, so the ceiling
 	// the org is authorized for and the hour it is charged are the same number.
 	err = service.Provision(ctx, org, project, firstHourCents, firstHourCents, spec.InstanceType, func() (string, error) {
-		m, err := service.LaunchOrgMachine(org, project, spec)
+		m, err := service.LaunchOrgMachine(ctx, org, project, spec)
 		if err != nil {
 			return "", err
 		}
@@ -603,39 +488,39 @@ func (c *ApiController) LaunchComputeMachine() {
 	}
 	if size == "" {
 		// A launcher with no size picker — the tabs "New cloud machine" button, a
-		// bare CLI launch — still gets a machine. This is the same default the DO
-		// service falls back to (service/digitalocean.go), so the quote the handler
-		// computes and the droplet the service creates name one size, not two.
+		// bare CLI launch — still gets a machine, of the catalog's default size, so
+		// the quote and the machine name one size.
 		size = service.DefaultLaunchSize
 	}
-	if size == "" {
-		c.ResponseError("size is required")
-		return
-	}
 
-	si, err := service.SizeBySlug(size)
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
+	si := service.SizeBySlug(size)
 	if si == nil {
 		c.ResponseError("unknown size: " + size)
 		return
 	}
 
+	region := strings.TrimSpace(req.Region)
 	quote := LaunchQuote{
 		Org:          org,
 		Size:         size,
-		Region:       req.Region,
+		Region:       region,
 		Currency:     si.Currency,
+		CentsHourly:  si.CentsHourly,
 		PriceHourly:  si.PriceHourly,
 		PriceMonthly: si.PriceMonthly,
 		GPU:          si.GPU,
 	}
+	if region == "" && len(si.Regions) > 0 {
+		quote.Region = si.Regions[0]
+	}
 
-	// Dry run: prove resale pricing without provisioning or billing.
+	// Dry run: the price, without provisioning or billing anything.
 	if req.DryRun {
 		c.ResponseOk(quote)
+		return
+	}
+	if req.Count > maxBatch {
+		c.ResponseError(fmt.Sprintf("a batch launches at most %d machines", maxBatch))
 		return
 	}
 
@@ -647,19 +532,28 @@ func (c *ApiController) LaunchComputeMachine() {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// One base spec — size, kind and the optional app>project scope set once,
-	// shared by the single and every batch member. SetKind default is machine
-	// (kind=bot bootstraps the @hanzo/bot agent); SetScope injects the resolved
-	// app/project as hanzo-app/hanzo-project tags so the droplet self-describes its
-	// org>app>project scope, exactly as org is injected in LaunchOrgMachine. Both
-	// launch surfaces (single + batch) flow through this SAME base, so scope is set
-	// exactly one way.
+	// One base spec — size, region, kind and the optional app>project scope set
+	// once, shared by the single and every batch member. SetKind default is
+	// machine (kind=bot bootstraps the @hanzo/bot agent); SetScope records the
+	// resolved app/project so the machine self-describes its org>app>project
+	// scope, exactly as org is set in LaunchOrgMachine. Both launch surfaces
+	// (single + batch) flow through this SAME base, so scope is set exactly one way.
 	base := req.CreateMachineSpec
 	base.InstanceType = size
+	base.Region = region
 	service.SetKind(&base, req.Kind)
 	project := c.resolveComputeProject(req.Project)
 	service.SetScope(&base, c.resolveComputeApp(req.App), project)
 	name := strings.TrimSpace(req.Name)
+
+	// Everything a launch can be refused for without asking anyone — a size not
+	// for sale here, a region not offered, an account setting missing, an image
+	// or key the account cannot honour — is refused here, before the balance is
+	// read or the cloud is called.
+	if err := service.LaunchReady(&base); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
 
 	// Batch: count>1 launches N members named "<name>-NNN" through the SAME
 	// metered primitive. A per-member failure returns what launched plus the error.

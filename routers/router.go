@@ -166,8 +166,8 @@ func registerAPI(app *zip.App) {
 	app.Put("/v1/providers/:owner/:name", h((*controllers.ApiController).UpdateProvider))
 	app.Delete("/v1/providers/:owner/:name", h((*controllers.ApiController).DeleteProvider))
 
-	// Canonical /v1 resell compute surface — cached DigitalOcean catalog and
-	// per-org machines over the configured cloud account (controllers/compute.go).
+	// Canonical /v1 hosted compute surface — the catalog and per-org machines in
+	// Hanzo's own EC2 account (controllers/compute.go).
 	app.Get("/v1/regions", h((*controllers.ApiController).GetComputeRegions))
 	app.Get("/v1/sizes", h((*controllers.ApiController).GetComputeSizes))
 	app.Get("/v1/gpus", h((*controllers.ApiController).GetComputeGPUs))
@@ -180,8 +180,9 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/machines/:owner/:name", h((*controllers.ApiController).GetMachine))
 	app.Put("/v1/machines/:owner/:name", h((*controllers.ApiController).UpdateMachine))
 	app.Delete("/v1/machines/:owner/:name", h((*controllers.ApiController).DeleteMachine))
-	// Unified /v1/k8s noun — the ONE Kubernetes surface: DOKS cluster lifecycle
-	// (list / detail+nodes / create / delete) plus the worker NODES on the fleet.
+	// Unified /v1/k8s noun — the ONE Kubernetes surface: cluster lifecycle on the
+	// platform accounts (list / detail+nodes / create / delete) plus the worker
+	// NODES on the fleet.
 	app.Get("/v1/k8s/providers", h((*controllers.ApiController).ListComputeKubernetesProviders))
 	app.Get("/v1/k8s/clusters", h((*controllers.ApiController).ListComputeKubernetesClusters))
 	app.Post("/v1/k8s/clusters", h((*controllers.ApiController).CreateComputeKubernetesCluster))
@@ -198,8 +199,6 @@ func registerAPI(app *zip.App) {
 		zip.WithOperationID("nodes"),
 		zip.WithTags("Compute"),
 	)
-	app.Get("/v1/images", h((*controllers.ApiController).ListImages))
-	app.Post("/v1/images", h((*controllers.ApiController).CreateImage))
 
 	app.Get("/v1/sessions", h((*controllers.ApiController).GetSessions))
 	app.Get("/v1/sessions/:owner/:name", h((*controllers.ApiController).GetConnSession))

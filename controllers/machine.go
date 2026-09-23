@@ -15,12 +15,21 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"strings"
+	"time"
 
 	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 )
 
 // UpdateMachine replaces one machine.
+//
+// A hosted machine has one writable property, its state: "Running" starts it
+// (a metered start) and "Stopped" stops it. Any other machine is a row of the
+// organization's own providers, replaced as a whole.
 //
 // @Title UpdateMachine
 // @Tag Machine API
@@ -30,8 +39,6 @@ import (
 // @Success 200 {object} controllers.Response The Response object
 // @router /machines/{owner}/{name} [put]
 func (c *ApiController) UpdateMachine() {
-	id := c.Id()
-
 	var machine object.Machine
 	err := json.Unmarshal(c.Ctx.Body(), &machine)
 	if err != nil {
@@ -39,11 +46,29 @@ func (c *ApiController) UpdateMachine() {
 		return
 	}
 
-	c.Data["json"] = wrapActionResponse(object.UpdateMachine(id, &machine))
+	if service.ComputeConfigured() {
+		org, name := c.resolveComputeOrg(), strings.TrimSpace(c.Ctx.Param("name"))
+		if org == "" || name == "" {
+			c.ResponseError(refuseNoOrg)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		affected, err := service.SetOrgMachineState(ctx, org, name, machine.State)
+		if !errors.Is(err, service.ErrNoMachine) {
+			c.Data["json"] = wrapActionResponse(affected, err)
+			c.ServeJSON()
+			return
+		}
+	}
+
+	c.Data["json"] = wrapActionResponse(object.UpdateMachine(c.Id(), &machine))
 	c.ServeJSON()
 }
 
-// DeleteMachine removes one machine.
+// DeleteMachine removes one machine: a hosted machine is terminated, a row of
+// the organization's own providers is dropped. The machine is the one the
+// address names, in the caller's organization; the request carries no body.
 //
 // @Title DeleteMachine
 // @Tag Machine API
@@ -52,13 +77,21 @@ func (c *ApiController) UpdateMachine() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /machines/{owner}/{name} [delete]
 func (c *ApiController) DeleteMachine() {
-	var machine object.Machine
-	err := json.Unmarshal(c.Ctx.Body(), &machine)
-	if err != nil {
-		c.ResponseError(err.Error())
+	org, name := c.resolveComputeOrg(), strings.TrimSpace(c.Ctx.Param("name"))
+	if org == "" || name == "" {
+		c.ResponseError(refuseNoOrg)
 		return
 	}
 
-	c.Data["json"] = wrapActionResponse(object.DeleteMachine(&machine))
+	if service.ComputeConfigured() {
+		err := service.DeleteOrgMachine(org, name)
+		if !errors.Is(err, service.ErrNoMachine) {
+			c.Data["json"] = wrapActionResponse(err == nil, err)
+			c.ServeJSON()
+			return
+		}
+	}
+
+	c.Data["json"] = wrapActionResponse(object.DeleteMachine(&object.Machine{Owner: org, Name: name}))
 	c.ServeJSON()
 }

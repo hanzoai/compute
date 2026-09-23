@@ -12,393 +12,420 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package service — compute.go is Hanzo's resell compute surface over a single
-// PLATFORM DigitalOcean account. It is distinct from the per-owner "bring your own
-// cloud" Provider path (machine_cloud.go): here ONE Hanzo DO token (from KMS)
-// backs every tenant, and droplets are namespaced by an org tag so list/get/
-// delete are scoped to the caller's org at the DigitalOcean layer — never the
-// whole account. The catalog (regions/sizes/GPUs) is fetched once and cached
-// so the dashboard is fast and DO is not hammered.
+// Package service — compute.go is Hanzo's hosted compute surface: machines Hanzo
+// launches for an org in Hanzo's own EC2 account (ec2.go) and bills to that org,
+// and the clusters of the platform Kubernetes accounts (kubernetes.go). It is
+// distinct from the per-org "bring your own cloud" Provider path
+// (object/machine_cloud.go), where an org's machines run on its own credentials.
+//
+// Every operation is scoped to one org. A machine is found by its org and
+// machine id tags, never by id alone, so a tenant can never read, stop or
+// terminate another tenant's machine by guessing an id.
 package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"slices"
-	"strconv"
+	"maps"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/digitalocean/godo"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+
 	"github.com/hanzoai/compute/logs"
 )
 
-// orgTagKey/orgTag namespace droplets by the Hanzo org that owns them. Per-org
-// isolation is enforced by querying DigitalOcean with this exact tag, so one
-// tenant can never enumerate another's machines.
+// orgTagKey/orgTag namespace resources by the Hanzo org that owns them.
 const orgTagKey = "hanzo-org"
 
 func orgTag(org string) string { return orgTagKey + ":" + org }
 
-// projectTag namespaces a droplet by the project (WITHIN its org) that owns it,
-// using the same "key:value" tag shape as orgTag. projectTagKey ("hanzo-project")
-// is defined in analytics.go — the ONE tenant-hierarchy tag vocabulary shared by
-// billing, metering and analytics. Only written for a NAMED project; the default
-// (empty) project writes no project tag.
-func projectTag(project string) string { return projectTagKey + ":" + project }
+// ErrNoMachine is a hosted machine that the org does not have.
+var ErrNoMachine = errors.New("no such hosted machine")
 
-// newDigitalOceanClient builds a DigitalOcean client for Hanzo's own account.
-//
-// There is no token here and no way to supply one. The credential belongs to
-// hanzoai/egress, which holds it on a host that is not a resource of the cloud
-// it holds keys for; this process describes the call and egress attaches the
-// key. So the client is the carrier's, and without a carrier there is nothing
-// to build — refusing is the only honest answer, and it is a clean one.
-func newDigitalOceanClient() (MachineDigitalOceanClient, error) {
-	if !carrierRegistered() {
-		return MachineDigitalOceanClient{}, fmt.Errorf("hanzo compute is not configured: set egressAddress — a provider key is spent through egress, never held here")
-	}
-	hc, err := httpFor(Credential{Provider: providerDigitalOcean})
-	if err != nil {
-		return MachineDigitalOceanClient{}, err
-	}
-	return newMachineDigitalOceanClient("", "", "", hc)
-}
+// ComputeConfigured reports whether the hosted account is configured at all, so
+// callers answer "not configured" instead of a cryptic client error. It says
+// nothing about whether the account answers; ComputeReachable does.
+func ComputeConfigured() bool { return hostedConfig().Region != "" }
 
-// ComputeConfigured reports whether this process can reach the platform account
-// at all, so callers return a clean 503 instead of a cryptic client error.
-//
-// It is one question now — is there a carrier — because there is one way to
-// reach a cloud. It was two while a token could also be held here, and the token
-// half was the misleading one: a revoked key is still a non-empty string, so it
-// answered "configured" through a revocation and every caller took the
-// configured branch and failed inside it, reporting zeros that read as real data
-// instead of "not connected". See ComputeReachable for the live question.
-func ComputeConfigured() bool { return carrierRegistered() }
-
-// ComputeReachable proves the provider credential actually works, by spending one
-// authenticated round trip on it rather than inspecting its length.
-//
-// It exists because presence is not reachability. `token != ""` cannot tell a
-// live token from a revoked one, so every caller that gated on ComputeConfigured
-// took the configured branch and failed INSIDE it — reporting zeros that read as
-// real data instead of "not connected". The hourly money sweep is where that is
-// most expensive, so the sweep asks this question before it commits to an hour.
+// ComputeReachable proves the hosted account's credentials work by spending one
+// authenticated round trip on them.
 //
 // The two answers a caller must tell apart:
 //
-//	nil   — either the configured cloud account has nothing to ask (no token configured, so
-//	        there are no platform resources at all and an empty answer is the TRUE
-//	        one), or the provider answered. Both mean: proceed.
-//	error — a credential IS configured and did not work. Nothing about the platform
-//	        account can be known this hour.
-//
-// That distinction is the whole point and it is the same one livePools already
-// draws one level down: "there is nothing to ask" and "the answer did not come
-// back" are different facts, and only the second is an error.
-//
-// Account.Get is the cheapest call that proves the credential itself: O(1), no
-// paging, and it is what a revoked token 401s on. The client is built through the
-// one constructor, so this inherits the 30s bound every other DigitalOcean call
-// gets and cannot wedge the caller.
+//	nil   — either the account is not configured (there are no hosted machines,
+//	        so an empty answer is the TRUE one), or EC2 answered. Both mean proceed.
+//	error — the account is configured and did not answer. Nothing about the
+//	        hosted machines can be known this hour.
 func ComputeReachable(ctx context.Context) error {
 	if !ComputeConfigured() {
 		return nil // nothing to ask
 	}
-	client, err := newDigitalOceanClient()
+	api, _, err := hostedEC2(ctx)
 	if err != nil {
 		return err
 	}
-	if _, _, err := client.Client.Account.Get(ctx); err != nil {
-		return fmt.Errorf("configured cloud account unreachable: %w", err)
+	_, err = api.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		Filters:    []ec2Types.Filter{filter("tag:"+managedByKey, managedBy)},
+		MaxResults: aws.Int32(5),
+	})
+	if err != nil {
+		return fmt.Errorf("hosted compute account unreachable: %w", err)
 	}
 	return nil
 }
 
-// ---- Catalog types (resellable) ----
-
-// GPUSpec is the GPU detail for a GPU-backed size.
-type GPUSpec struct {
-	Count    int    `json:"count"`
-	Model    string `json:"model"`
-	Vram     int    `json:"vram"`
-	VramUnit string `json:"vramUnit"`
+// bounded is a context for one hosted-account operation that has no caller
+// deadline, so a hung API cannot hold an org's provisioning lease.
+func bounded() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), providerTimeout)
 }
 
-// SizeInfo is a resellable compute size. Only Hanzo's resale price is exposed —
-// the wholesale cost and the upstream provider are never surfaced (brand policy;
-// margin stays private). Markup is applied once in pricing.go.
-// DefaultLaunchSize is the size a launch gets when the caller names none — the
-// tabs "New cloud machine" button, a bare CLI launch. It is a real DO slug so the
-// quote the launch handler computes and the droplet the provider creates agree on
-// one size. A tab runs `hanzo link` and a terminal; this is the smallest tier that
-// comfortably does that.
-const DefaultLaunchSize = "s-2vcpu-4gb"
+// ---- org-scoped hosted machines ----
 
-type SizeInfo struct {
-	Slug         string   `json:"slug"`
-	Vcpus        int      `json:"vcpus"`
-	MemoryMB     int      `json:"memoryMb"`
-	DiskGB       int      `json:"diskGb"`
-	Available    bool     `json:"available"`
-	Regions      []string `json:"regions"`
-	GPU          *GPUSpec `json:"gpu,omitempty"`
-	Currency     string   `json:"currency"`
-	PriceHourly  float64  `json:"priceHourly"`
-	PriceMonthly float64  `json:"priceMonthly"`
-}
-
-// RegionInfo is a resellable region.
-type RegionInfo struct {
-	Slug      string   `json:"slug"`
-	Name      string   `json:"name"`
-	Available bool     `json:"available"`
-	Features  []string `json:"features"`
-	Sizes     []string `json:"sizes"`
-}
-
-func isGPUSize(s godo.Size) bool {
-	return s.GPUInfo != nil || strings.HasPrefix(s.Slug, "gpu-")
-}
-
-func sizeInfoFromDO(s godo.Size) SizeInfo {
-	gpu := isGPUSize(s)
-	si := SizeInfo{
-		Slug:         s.Slug,
-		Vcpus:        s.Vcpus,
-		MemoryMB:     s.Memory,
-		DiskGB:       s.Disk,
-		Available:    s.Available,
-		Regions:      s.Regions,
-		Currency:     "USD",
-		PriceHourly:  HanzoPrice(s.PriceHourly, gpu),
-		PriceMonthly: HanzoPrice(s.PriceMonthly, gpu),
-	}
-	if s.GPUInfo != nil {
-		g := &GPUSpec{Count: s.GPUInfo.Count, Model: s.GPUInfo.Model}
-		if s.GPUInfo.VRAM != nil {
-			g.Vram = s.GPUInfo.VRAM.Amount
-			g.VramUnit = s.GPUInfo.VRAM.Unit
-		}
-		si.GPU = g
-	}
-	return si
-}
-
-// ---- Catalog cache ----
+// ListOrgMachines returns org's hosted machines, optionally narrowed to one
+// project. The org is a filter on EC2 and is checked again on every answer.
 //
-// Regions and sizes change rarely, so the catalog is cached for a long TTL and
-// refreshed lazily on first access after expiry. Live droplets are never cached
-// (ListOrgMachines always hits DO) so machine state is always current.
-
-const catalogTTL = 24 * time.Hour
-
-type catalogCache struct {
-	mu        sync.RWMutex
-	regions   []RegionInfo
-	sizes     []SizeInfo
-	fetchedAt time.Time
-}
-
-var catalog catalogCache
-
-func (c *catalogCache) refresh() error {
-	client, err := newDigitalOceanClient()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-
-	var regions []RegionInfo
-	ropt := &godo.ListOptions{Page: 1, PerPage: 200}
-	for {
-		list, resp, err := client.Client.Regions.List(ctx, ropt)
-		if err != nil {
-			return fmt.Errorf("list DigitalOcean regions: %w", err)
-		}
-		for _, r := range list {
-			regions = append(regions, RegionInfo{
-				Slug:      r.Slug,
-				Name:      r.Name,
-				Available: r.Available,
-				Features:  r.Features,
-				Sizes:     r.Sizes,
-			})
-		}
-		if resp.Links == nil || resp.Links.IsLastPage() {
-			break
-		}
-		ropt.Page++
-	}
-
-	var sizes []SizeInfo
-	sopt := &godo.ListOptions{Page: 1, PerPage: 200}
-	for {
-		list, resp, err := client.Client.Sizes.List(ctx, sopt)
-		if err != nil {
-			return fmt.Errorf("list DigitalOcean sizes: %w", err)
-		}
-		for _, s := range list {
-			sizes = append(sizes, sizeInfoFromDO(s))
-		}
-		if resp.Links == nil || resp.Links.IsLastPage() {
-			break
-		}
-		sopt.Page++
-	}
-
-	c.mu.Lock()
-	c.regions = regions
-	c.sizes = sizes
-	c.fetchedAt = time.Now()
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *catalogCache) ensureFresh() error {
-	c.mu.RLock()
-	fresh := len(c.sizes) > 0 && time.Since(c.fetchedAt) < catalogTTL
-	c.mu.RUnlock()
-	if fresh {
-		return nil
-	}
-	return c.refresh()
-}
-
-// ListRegions returns the cached DigitalOcean regions catalog.
-func ListRegions() ([]RegionInfo, error) {
-	if err := catalog.ensureFresh(); err != nil {
-		return nil, err
-	}
-	catalog.mu.RLock()
-	defer catalog.mu.RUnlock()
-	out := make([]RegionInfo, len(catalog.regions))
-	copy(out, catalog.regions)
-	return out, nil
-}
-
-// ListSizes returns the cached, resale-priced sizes catalog.
-func ListSizes() ([]SizeInfo, error) {
-	if err := catalog.ensureFresh(); err != nil {
-		return nil, err
-	}
-	catalog.mu.RLock()
-	defer catalog.mu.RUnlock()
-	out := make([]SizeInfo, len(catalog.sizes))
-	copy(out, catalog.sizes)
-	return out, nil
-}
-
-// ListGPUSizes returns only the GPU-backed sizes from the catalog.
-func ListGPUSizes() ([]SizeInfo, error) {
-	sizes, err := ListSizes()
-	if err != nil {
-		return nil, err
-	}
-	gpus := make([]SizeInfo, 0, 8)
-	for _, s := range sizes {
-		if s.GPU != nil || strings.HasPrefix(s.Slug, "gpu-") {
-			gpus = append(gpus, s)
-		}
-	}
-	return gpus, nil
-}
-
-// SizeBySlug returns the resale size for a slug, or nil if unknown. Used to
-// price launch quotes.
-func SizeBySlug(slug string) (*SizeInfo, error) {
-	sizes, err := ListSizes()
-	if err != nil {
-		return nil, err
-	}
-	for i := range sizes {
-		if sizes[i].Slug == slug {
-			s := sizes[i]
-			return &s, nil
-		}
-	}
-	return nil, nil
-}
-
-// ---- Org-scoped machine operations (configured cloud account) ----
-
-// ListOrgMachines returns the droplets tagged for org — per-org isolation enforced
-// at the DigitalOcean layer via an exact tag query — optionally narrowed to a
-// single project.
-//
-// project scopes the result WITHIN the org: the empty project is the org's default
-// and returns EVERY org machine (today's behavior — a machine launched before the
-// project dimension carries no hanzo-project tag), while a named project returns
-// only the machines carrying that hanzo-project tag. Project is an attribution and
-// view dimension, not a second isolation boundary — org is the tenant boundary, so
-// get/delete stay org-scoped and only listing narrows by project.
+// project scopes the result WITHIN the org: the empty project returns every org
+// machine, a named project only the machines carrying that hanzo-project tag.
+// Project is an attribution and view dimension, not a second isolation boundary.
 func ListOrgMachines(org, project string) ([]*Machine, error) {
+	if !validOrgSlug(org) || !validFilterValue(org) {
+		return nil, fmt.Errorf("invalid org %q", org)
+	}
+	filters := []ec2Types.Filter{
+		filter("tag:"+orgTagKey, org),
+		filter("instance-state-name", liveStates...),
+	}
+	if project != "" {
+		if !validProjectSlug(project) || !validFilterValue(project) {
+			return nil, fmt.Errorf("invalid project %q", project)
+		}
+		filters = append(filters, filter("tag:"+projectTagKey, project))
+	}
+	ctx, cancel := bounded()
+	defer cancel()
+	api, region, err := hostedEC2(ctx)
+	if err != nil {
+		return nil, err
+	}
+	found, err := describe(ctx, api, filters...)
+	if err != nil {
+		return nil, refusal("list machines", err, "", "")
+	}
+	out := make([]*Machine, 0, len(found))
+	for _, inst := range found {
+		m := machineFromInstance(inst, region)
+		if m.Owner != org || m.Id == "" {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// GetOrgMachine returns org's hosted machine id, or nil when org has none by
+// that id. An id that is not a hosted machine id is answered nil without a call.
+func GetOrgMachine(org, id string) (*Machine, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newDigitalOceanClient()
+	if !machineIDPattern.MatchString(id) {
+		return nil, nil
+	}
+	ctx, cancel := bounded()
+	defer cancel()
+	api, region, err := hostedEC2(ctx)
 	if err != nil {
 		return nil, err
 	}
-	want := ""
-	if project != "" {
-		want = projectTag(project)
+	inst, err := findInstance(ctx, api, org, id)
+	if err != nil || inst == nil {
+		return nil, err
 	}
-	var machines []*Machine
-	opt := &godo.ListOptions{Page: 1, PerPage: 200}
-	for {
-		droplets, resp, err := client.Client.Droplets.ListByTag(context.Background(), orgTag(org), opt)
+	return machineFromInstance(*inst, region), nil
+}
+
+// DeleteOrgMachine terminates org's hosted machine id. ErrNoMachine when org has
+// none by that id, answered without a call when id is not a hosted machine id. A
+// terminated machine is no longer running, so the hourly meter stops with it.
+func DeleteOrgMachine(org, id string) error {
+	if !machineIDPattern.MatchString(id) {
+		return ErrNoMachine
+	}
+	ctx, cancel := bounded()
+	defer cancel()
+	api, region, err := hostedEC2(ctx)
+	if err != nil {
+		return err
+	}
+	inst, err := findInstance(ctx, api, org, id)
+	if err != nil {
+		return err
+	}
+	if inst == nil {
+		return ErrNoMachine
+	}
+	m := machineFromInstance(*inst, region)
+	if err := terminate(ctx, api, inst); err != nil {
+		return err
+	}
+	// Roll a destroyed event into the analytics datastore (best-effort; never
+	// blocks or fails the delete).
+	EmitCompute(org, ComputeDestroyed, m, 0)
+	return nil
+}
+
+// SetOrgMachineState starts ("Running") or stops ("Stopped") org's hosted
+// machine id, and reports whether anything changed. ErrNoMachine when org has
+// none by that id, answered without a call when id is not a hosted machine id.
+//
+// A start is a provision: the org is authorized for the machine's first hour
+// and debited it under the hour's meter id — the id the hourly sweep uses — so a
+// start and the sweep can never charge one hour twice. A stop charges nothing:
+// the hour the machine ran in is already paid.
+func SetOrgMachineState(ctx context.Context, org, id, state string) (bool, error) {
+	if !machineIDPattern.MatchString(id) {
+		return false, ErrNoMachine
+	}
+	var want string
+	switch {
+	case strings.EqualFold(state, "Running"):
+		want = "Running"
+	case strings.EqualFold(state, "Stopped"):
+		want = "Stopped"
+	default:
+		return false, fmt.Errorf("a hosted machine's state is Running or Stopped, not %q", state)
+	}
+	api, region, err := hostedEC2(ctx)
+	if err != nil {
+		return false, err
+	}
+	inst, err := findInstance(ctx, api, org, id)
+	if err != nil {
+		return false, err
+	}
+	if inst == nil {
+		return false, ErrNoMachine
+	}
+	m := machineFromInstance(*inst, region)
+	switch {
+	case m.State == want:
+		return false, nil
+	case want == "Running" && m.State == "Stopped":
+		cents, err := HourlyCents(m.Size)
 		if err != nil {
-			return nil, fmt.Errorf("list droplets for org %q: %w", org, err)
+			return false, err
 		}
-		for _, d := range droplets {
-			if want != "" && !dropletHasTag(d, want) {
-				continue // narrow to the requested project
+		err = Provision(ctx, org, MachineProject(m), cents, cents, m.Size, func() (string, error) {
+			if err := setState(ctx, api, inst, true); err != nil {
+				return "", err
 			}
-			machines = append(machines, getMachineFromDroplet(d))
+			return MeterID(m.Id, time.Now()), nil
+		})
+		return err == nil, err
+	case want == "Stopped" && m.State == "Running":
+		if err := setState(ctx, api, inst, false); err != nil {
+			return false, err
 		}
-		if resp.Links == nil || resp.Links.IsLastPage() {
-			break
+		return true, nil
+	}
+	return false, fmt.Errorf("machine %s is %s; set it %s once that settles", id, m.State, want)
+}
+
+// LaunchReady reports why spec cannot launch, before anything is asked of
+// commerce or the cloud: a size that is not for sale, a region that is not
+// offered, an image or SSH key the account cannot honour, and every account
+// setting that is missing, by name.
+//
+// The machine boots the configured image: a body naming its own image or SSH
+// keys is refused, because neither can be honoured in an account the caller does
+// not own.
+func LaunchReady(spec *CreateMachineSpec) error {
+	o, ok := offerFor(spec.InstanceType)
+	if !ok {
+		return fmt.Errorf("unknown size: %s", spec.InstanceType)
+	}
+	if spec.ImageID != "" {
+		return fmt.Errorf("hosted machines boot the configured image; imageId is not accepted")
+	}
+	if len(spec.SSHKeyIDs) > 0 {
+		return fmt.Errorf("hosted machines take no provider SSH keys; sshKeyIds is not accepted")
+	}
+	acct := hostedConfig()
+	if err := acct.launchable(o); err != nil {
+		return err
+	}
+	if spec.Region != "" && spec.Region != acct.Region {
+		return fmt.Errorf("region %s is not offered: hosted machines launch in %s", spec.Region, acct.Region)
+	}
+	return nil
+}
+
+// LaunchOrgMachine starts a hosted machine for org, attributed to project, and
+// returns it. The scope tags are set here from the resolved org and project,
+// never from the body, so the machine is always billed to the right tenant.
+// Customer tags are not written to the instance; the tags on it are the ones the
+// meter and the isolation filters read.
+func LaunchOrgMachine(ctx context.Context, org, project string, spec *CreateMachineSpec) (*Machine, error) {
+	if !validOrgSlug(org) || !validFilterValue(org) {
+		return nil, fmt.Errorf("invalid org slug %q", org)
+	}
+	if !validProjectSlug(project) || (project != "" && !validFilterValue(project)) {
+		return nil, fmt.Errorf("invalid project slug %q", project)
+	}
+	if err := LaunchReady(spec); err != nil {
+		return nil, err
+	}
+	o, _ := offerFor(spec.InstanceType)
+	acct := hostedConfig()
+	api, region, err := hostedEC2(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	id := mintMachineID()
+	tags := map[string]string{
+		orgTagKey:     org,
+		machineTagKey: id,
+		managedByKey:  managedBy,
+		kindTagKey:    CanonicalKind(spec.Tags[kindTagKey]),
+	}
+	if project != "" {
+		tags[projectTagKey] = project
+	}
+	if app := strings.TrimSpace(spec.Tags[appTagKey]); app != "" && safeTagField(app) {
+		tags[appTagKey] = app
+	}
+	// The bot bootstrap reads the org off the spec's tags; it gets its own copy so
+	// a batch sharing one tag map is never written through.
+	boot := *spec
+	boot.Tags = maps.Clone(spec.Tags)
+	if boot.Tags == nil {
+		boot.Tags = map[string]string{}
+	}
+	boot.Tags[orgTagKey] = org
+
+	inst, err := run(ctx, api, acct, launch{
+		id:       id,
+		offer:    o,
+		name:     firstNonEmpty(spec.DisplayName, spec.Name, id),
+		tags:     tags,
+		userData: buildBotUserData(&boot),
+	})
+	if err != nil {
+		return nil, err
+	}
+	machine := machineFromInstance(*inst, region)
+	// A launched bot is an org member AND a playground node: register it as an
+	// IAM agent-user (surfaces in hanzo.team) and plant it in the org playground
+	// node registry attributed to org. Both best-effort — a registration failure
+	// never fails the launch; each registry reconciles later.
+	if specIsBot(spec) {
+		registerBotUser(org, spec.Name, spec.DisplayName)
+		registerPlaygroundNode(org, spec.Name)
+	}
+	return machine, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
 		}
-		opt.Page++
+	}
+	return ""
+}
+
+// ListMeteredMachines returns every running machine hosted compute launched, in
+// every org — the set the hourly meter debits. The org is recovered per machine
+// from its own tag, so ONE sweep meters every tenant. A running instance with no
+// machine id has no meter id either, so it is reported and left out rather than
+// billed under an id another instance could share.
+func ListMeteredMachines() ([]*Machine, error) {
+	ctx, cancel := bounded()
+	defer cancel()
+	api, region, err := hostedEC2(ctx)
+	if err != nil {
+		return nil, err
+	}
+	found, err := describe(ctx, api,
+		filter("tag:"+managedByKey, managedBy),
+		filter("instance-state-name", string(ec2Types.InstanceStateNameRunning)))
+	if err != nil {
+		return nil, refusal("list running machines", err, "", "")
+	}
+	machines := make([]*Machine, 0, len(found))
+	for _, inst := range found {
+		m := machineFromInstance(inst, region)
+		if !machineIDPattern.MatchString(m.Id) {
+			logs.Warning("compute metering: running instance %s carries no machine id; not billed", aws.ToString(inst.InstanceId))
+			continue
+		}
+		machines = append(machines, m)
 	}
 	return machines, nil
 }
 
-// ListOrgKubernetesNodes returns one Machine per DOKS worker node for every
-// cluster in Hanzo's PLATFORM DigitalOcean account tagged for org — the platform
-// analogue of ListOrgMachines, but for managed-Kubernetes nodes. DOKS worker
-// droplets carry k8s tags, not a hanzo-org DROPLET tag, so they never surface
-// through ListOrgMachines; this lists them via the managed-Kubernetes API and maps
-// each node to the same Machine shape. Per-org isolation is by the cluster's
-// hanzo-org tag — a tenant can only ever see its own clusters' nodes.
+// ---- platform Kubernetes accounts ----
+
+// ListOrgKubernetesNodes returns one Machine per worker node of every platform
+// cluster tagged for org, across every platform account. An account that cannot
+// answer fails the read rather than silently shrinking it.
 func ListOrgKubernetesNodes(org string) ([]*Machine, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
-	client, err := newDigitalOceanClient()
+	ctx := context.Background()
+	clients, err := platformClients()
 	if err != nil {
 		return nil, err
 	}
-	return kubernetesNodeMachinesByTag(context.Background(), client.Client, orgTag(org))
-}
-
-// NewDOKSClientFromConfig builds a DOKS client on Hanzo's provider token. It is the
-// cluster analogue of newDigitalOceanClient; per-org isolation is enforced by the
-// callers via the hanzo-org tag, never by this client.
-//
-// clusterID is empty for ACCOUNT-level operations (list/get/create/delete), which
-// address a cluster by id, and set for the pool operations bound to one cluster.
-func NewDOKSClientFromConfig(clusterID string) (*DOKSClient, error) {
-	client, err := newDigitalOceanClient()
-	if err != nil {
-		return nil, err
+	tag := orgTag(org)
+	var out []*Machine
+	for _, c := range clients {
+		clusters, err := c.ListClusters(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", c.Provider(), err)
+		}
+		for _, k := range clusters {
+			if !clusterHasTag(k.Tags, tag) {
+				continue
+			}
+			detail, err := c.GetCluster(ctx, k.ID)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", c.Provider(), err)
+			}
+			out = append(out, detail.Nodes...)
+		}
 	}
-	return &DOKSClient{Client: client.Client, ClusterID: clusterID}, nil
+	return out, nil
 }
 
-// LivePool is ONE node pool in the configured cloud account as the PROVIDER reports it
+// platformClients is every platform Kubernetes account, or an error naming the
+// first one that could not be built.
+func platformClients() ([]KubernetesClientInterface, error) {
+	clients, status := kubernetesClients()
+	for _, s := range status {
+		if !s.OK {
+			return nil, fmt.Errorf("platform account %s unavailable: %s", s.Provider, s.Reason)
+		}
+	}
+	return clients, nil
+}
+
+// unwrap is the provider client under the account that names it.
+func unwrap(c KubernetesClientInterface) KubernetesClientInterface {
+	if a, ok := c.(account); ok {
+		return a.KubernetesClientInterface
+	}
+	return c
+}
+
+// LivePool is ONE node pool in a platform account as the PROVIDER reports it
 // right now — which cluster it belongs to, which org owns that cluster, its node
 // slug, and how many nodes it is ACTUALLY running.
 //
@@ -425,53 +452,84 @@ type LivePool struct {
 	Created string
 }
 
-// ListLivePools returns every node pool of every cluster in Hanzo's platform
+// livePooler is a platform account that reports the node pools it runs.
+type livePooler interface {
+	LivePools(ctx context.Context) ([]LivePool, error)
+}
+
+// ListLivePools returns every node pool of every cluster in every platform
 // account, with the org that owns it and its LIVE node count — the authoritative
-// answer to "what is this account running, for whom, and how much of it".
+// answer to "what is Hanzo running, for whom, and how much of it".
 //
-// It is the node-pool analogue of ListMeteredMachines and shares the ONE
-// cluster enumeration (listClustersFull) with the cluster and node listers, so a
-// pool's identity is sourced identically wherever it surfaces.
-//
-// A cluster with no hanzo-org tag yields pools with an empty Org: they are
-// returned rather than dropped, so the sweep can report them as unattributable
-// instead of silently running an untagged cluster for free.
+// It is all or nothing: the pool sweep bills from this answer, and a pool on an
+// account that did not answer cannot be told from a pool that is gone.
 func ListLivePools(ctx context.Context) ([]LivePool, error) {
-	client, err := newDigitalOceanClient()
-	if err != nil {
-		return nil, err
-	}
-	clusters, err := listClustersFull(ctx, client.Client)
+	clients, err := platformClients()
 	if err != nil {
 		return nil, err
 	}
 	var out []LivePool
-	for _, gc := range clusters {
-		org := orgFromClusterTags(gc.Tags)
-		created := ""
-		if !gc.CreatedAt.IsZero() {
-			created = gc.CreatedAt.UTC().Format(time.RFC3339)
+	for _, c := range clients {
+		lp, ok := unwrap(c).(livePooler)
+		if !ok {
+			return nil, fmt.Errorf("platform account %s cannot report its node pools", c.Provider())
 		}
-		for _, p := range poolsFromGodo(gc.NodePools) {
-			out = append(out, LivePool{
-				Org: org, ClusterID: gc.ID, PoolID: p.ID, Name: p.Name,
-				Size: p.Size, Nodes: liveNodes(p), Created: created,
-			})
+		pools, err := lp.LivePools(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", c.Provider(), err)
 		}
+		out = append(out, pools...)
 	}
 	return out, nil
 }
 
+// clusterScoped is a platform account that can act on one cluster's pools.
+type clusterScoped interface {
+	InCluster(clusterID string) *DOKSClient
+}
+
+// PlatformPools is the node-pool surface of one platform cluster, on whichever
+// platform account holds it. A cluster's seed pool is recorded with no Provider
+// row, and this is how it is reached.
+type PlatformPools struct{ ClusterID string }
+
+// DeleteNodePool deletes one pool of the cluster. A cluster no platform account
+// has is gone, and so are its pools. An account that cannot answer is an error,
+// never taken for absence, so a billable row is not dropped on a guess.
+func (p PlatformPools) DeleteNodePool(poolID string) error {
+	ctx := context.Background()
+	clients, err := platformClients()
+	if err != nil {
+		return err
+	}
+	if len(clients) == 0 {
+		return fmt.Errorf("no platform account is configured: cannot confirm pool %s of cluster %s is gone", poolID, p.ClusterID)
+	}
+	for _, c := range clients {
+		if _, err := c.GetCluster(ctx, p.ClusterID); err != nil {
+			if IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("%s: %w", c.Provider(), err)
+		}
+		scoped, ok := unwrap(c).(clusterScoped)
+		if !ok {
+			return fmt.Errorf("platform account %s cannot act on node pools", c.Provider())
+		}
+		return scoped.InCluster(p.ClusterID).DeleteNodePool(poolID)
+	}
+	return nil
+}
+
 // orgFromClusterTags recovers the owning org from a cluster's tag LIST, through
-// the SAME hanzo-org read-back the droplet path uses on its comma-joined string
-// form. One parser, so a cluster and a droplet can never disagree about who owns
+// the SAME hanzo-org read-back the machine path uses on its comma-joined string
+// form. One parser, so a cluster and a machine can never disagree about who owns
 // them.
 func orgFromClusterTags(tags []string) string {
 	return orgFromTag(strings.Join(tags, ","))
 }
 
-// ListOrgKubernetesClusters returns every DOKS cluster in the configured cloud account
-// tagged for org — the platform analogue of ListOrgMachines for whole clusters. Per-org
+// ListOrgKubernetesClusters returns every platform cluster tagged for org. Per-org
 // isolation is by the cluster's hanzo-org tag: a tenant only ever sees its own
 // clusters, never another org's.
 func ListOrgKubernetesClusters(org string) ([]*KubernetesCluster, error) {
@@ -551,14 +609,14 @@ type recordSeed func(SeedPool) error
 
 type forgetCluster func(org, clusterID string) error
 
-// CreateOrgKubernetesCluster provisions a DOKS cluster in the configured cloud account for
-// org, stamping it managed-by + hanzo-org:<org> so it associates to the tenant
-// exactly like a droplet — which is what makes it visible to that org's cluster and
-// node listers (and invisible to every other org).
+// CreateOrgKubernetesCluster provisions a cluster on a platform account for org,
+// stamping it managed-by + hanzo-org:<org> so it associates to the tenant — which
+// is what makes it visible to that org's cluster and node listers (and invisible
+// to every other org).
 //
-// PLATFORM ACCOUNT means Hanzo pays the upstream bill for every node in the seed
-// pool, so this goes through the money gate exactly like a droplet launch — and
-// records the pool it provisioned, so the sweep keeps billing it.
+// A platform account means Hanzo pays the upstream bill for every node in the
+// seed pool, so this goes through the money gate exactly like a machine launch —
+// and records the pool it provisioned, so the sweep keeps billing it.
 func CreateOrgKubernetesCluster(org, project string, spec *CreateClusterSpec, record recordSeed) (*KubernetesCluster, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
@@ -581,7 +639,7 @@ func CreateOrgKubernetesCluster(org, project string, spec *CreateClusterSpec, re
 }
 
 // createClusterMetered is the ONE metered cluster provision: price the seed pool
-// from the resale catalog, authorize the org for its first hour at that price,
+// from the catalog, authorize the org for its first hour at that price,
 // provision, PERSIST the pool as a billable row, then record the first hour.
 // Fail-closed on the balance AND on the price — an org that cannot be authorized
 // and a size that cannot be priced both provision nothing.
@@ -592,10 +650,8 @@ func CreateOrgKubernetesCluster(org, project string, spec *CreateClusterSpec, re
 //
 // Hour one is this function's. EVERY HOUR AFTER IS THE SWEEP'S, and the sweep
 // reads node-pool rows — so the row is not bookkeeping, it IS the recurring bill.
-// Without it a cluster was gated and debited exactly once and then ran free: it
-// writes no droplet tag either, so neither meter could see it. The row is written
-// BEFORE the debit, because a debit with no row is a cluster that bills once, and
-// a row with no debit is one reconciled hour.
+// The row is written BEFORE the debit, because a debit with no row is a cluster
+// that bills once, and a row with no debit is one reconciled hour.
 func createClusterMetered(ctx context.Context, client clusterCreator, record recordSeed, org, project string, spec *CreateClusterSpec) (*KubernetesCluster, error) {
 	count := seedPoolCount(spec)
 	hourly, err := HourlyCents(spec.NodePool.Size)
@@ -697,211 +753,4 @@ func stopClusterMeter(forget forgetCluster, org, id string) {
 	if err := forget(org, id); err != nil {
 		logs.Warning("compute metering: cluster %s (org %s) deleted but its node-pool rows were NOT cleared — they will keep billing: %v", id, org, err)
 	}
-}
-
-// kubernetesAutoTags are the BARE tags DigitalOcean puts on the droplets it
-// creates as managed-Kubernetes node-pool workers. They are DO's, not ours: every
-// node pool (and the workers it creates) is automatically tagged `k8s`,
-// `k8s-worker` and `k8s:<cluster-id>`.
-//
-// Only the bare ones are listed, and that is what makes the guard safe rather
-// than merely convenient: a client's launch tags always reach DigitalOcean as
-// "key:value" (buildDropletTags formats every one of them with a colon), so a
-// customer can produce `k8s:anything` but can NEVER produce the bare `k8s`. A
-// prefix match here would hand every tenant a way to opt their own droplets out
-// of the meter.
-var kubernetesAutoTags = map[string]bool{"k8s": true, "k8s-worker": true}
-
-// isKubernetesWorker reports whether a droplet is a managed-Kubernetes node-pool
-// worker rather than a standalone resell machine.
-func isKubernetesWorker(d godo.Droplet) bool {
-	for _, t := range d.Tags {
-		if kubernetesAutoTags[t] {
-			return true
-		}
-	}
-	return false
-}
-
-// dropletHasAnyOrgTag reports whether a droplet is attributed to SOME Hanzo org —
-// the "is this a resell machine at all" question, as opposed to dropletHasOrgTag's
-// "is it THIS org's".
-func dropletHasAnyOrgTag(d godo.Droplet) bool {
-	for _, t := range d.Tags {
-		if strings.HasPrefix(t, orgTagKey+":") {
-			return true
-		}
-	}
-	return false
-}
-
-// billableDroplet reports whether a droplet in the configured cloud account is on
-// the hourly MACHINE meter. It is the ONE answer to that question, kept pure and
-// separate from the DigitalOcean enumeration so "exactly one meter per node" is a
-// property a test can check rather than a claim about a loop.
-//
-// Three conditions, each excluding a different way of not being a billable resell
-// machine:
-//
-//   - RUNNING. A stopped droplet consumes no compute-hour.
-//
-//   - NOT a managed-Kubernetes worker. This is the one that is easy to get wrong,
-//     and getting it wrong bills the customer twice. A cluster's worker nodes ARE
-//     droplets, and DigitalOcean propagates a cluster's tags to them — hanzo-org
-//     among them, because that is the tag the cluster create stamps. So the same
-//     node is reachable by two sweeps: this one, as a droplet, and the node-pool
-//     sweep, as one node of its pool. The node-pool sweep is the meter of record
-//     for a cluster's nodes — it is the one that knows the pool, its size and its
-//     live count — so a Kubernetes worker is not a machine here.
-//
-//     Skipping it is now a property of VISOR, not of how DigitalOcean happens to
-//     tag things: the guard holds whether or not the cluster tag propagates. It
-//     used to rest on the unverified belief that worker droplets carry no
-//     hanzo-org tag, which is a claim about somebody else's product.
-//
-//   - carries a hanzo-org tag. An untagged platform droplet is not a resell machine
-//     and is never billed to a tenant.
-func billableDroplet(d godo.Droplet) bool {
-	if d.Status != "active" { // godo "active" == running
-		return false
-	}
-	if isKubernetesWorker(d) {
-		return false // the pool sweep bills this node, as part of its pool
-	}
-	return dropletHasAnyOrgTag(d)
-}
-
-// ListMeteredMachines returns every droplet in the configured cloud account that
-// billableDroplet admits — the set the recurring hourly meter debits. It
-// lists across ALL orgs (no per-org tag filter): the org is recovered per machine
-// from its own tag, so ONE sweep meters every tenant's running machines.
-func ListMeteredMachines() ([]*Machine, error) {
-	client, err := newDigitalOceanClient()
-	if err != nil {
-		return nil, err
-	}
-	var machines []*Machine
-	opt := &godo.ListOptions{Page: 1, PerPage: 200}
-	for {
-		droplets, resp, err := client.Client.Droplets.List(context.Background(), opt)
-		if err != nil {
-			return nil, fmt.Errorf("list platform droplets: %w", err)
-		}
-		for _, d := range droplets {
-			if !billableDroplet(d) {
-				continue
-			}
-			machines = append(machines, getMachineFromDroplet(d))
-		}
-		if resp.Links == nil || resp.Links.IsLastPage() {
-			break
-		}
-		opt.Page++
-	}
-	return machines, nil
-}
-
-// dropletHasTag reports whether a droplet carries an exact tag. It is the ONE
-// tag-membership check, shared by the org-isolation guard and the project view
-// filter, so both compare tags identically.
-func dropletHasTag(d godo.Droplet, tag string) bool {
-	return slices.Contains(d.Tags, tag)
-}
-
-func dropletHasOrgTag(d *godo.Droplet, org string) bool {
-	return dropletHasTag(*d, orgTag(org))
-}
-
-// GetOrgMachine returns a single machine only if it belongs to org; otherwise
-// nil (no cross-tenant leak, even to a valid caller of another org).
-func GetOrgMachine(org, id string) (*Machine, error) {
-	if org == "" {
-		return nil, fmt.Errorf("org is required")
-	}
-	dropletID, err := strconv.Atoi(id)
-	if err != nil {
-		return nil, fmt.Errorf("invalid machine id: %s", id)
-	}
-	client, err := newDigitalOceanClient()
-	if err != nil {
-		return nil, err
-	}
-	d, _, err := client.Client.Droplets.Get(context.Background(), dropletID)
-	if err != nil {
-		return nil, err
-	}
-	if d == nil || !dropletHasOrgTag(d, org) {
-		return nil, nil
-	}
-	return getMachineFromDroplet(*d), nil
-}
-
-// DeleteOrgMachine deletes a machine only after confirming it belongs to org.
-func DeleteOrgMachine(org, id string) error {
-	m, err := GetOrgMachine(org, id)
-	if err != nil {
-		return err
-	}
-	if m == nil {
-		return fmt.Errorf("machine %q not found for this org", id)
-	}
-	client, err := newDigitalOceanClient()
-	if err != nil {
-		return err
-	}
-	dropletID, _ := strconv.Atoi(id)
-	if _, err := client.Client.Droplets.Delete(context.Background(), dropletID); err != nil {
-		return fmt.Errorf("delete droplet %s: %w", id, err)
-	}
-	// Roll a destroyed event into the analytics datastore (best-effort; never
-	// blocks or fails the delete). m is the ownership-checked machine, so its
-	// size and app/project tags are available.
-	EmitCompute(org, ComputeDestroyed, m, 0)
-	return nil
-}
-
-// LaunchOrgMachine provisions a droplet in the configured cloud account, tagged so it
-// is owned by org and attributed to project. Both attribution tags are injected
-// here (never trusted from the client body) so the machine is always attributable
-// to the right tenant AND project.
-//
-// org is validated as a clean slug first: it becomes BOTH the hanzo-org
-// attribution tag (read back by the hourly meter) AND the commerce billing key,
-// so a value carrying the meter's "," / ":" separators must never reach the tag.
-// A validated IAM owner claim is already a DNS-label slug, so this only rejects a
-// malformed/forged org — it never breaks a real tenant. project is validated the
-// same way; the EMPTY project is the org's default and writes no hanzo-project tag
-// (backward-compatible with every machine launched before the project dimension).
-func LaunchOrgMachine(org, project string, spec *CreateMachineSpec) (*Machine, error) {
-	if !validOrgSlug(org) {
-		return nil, fmt.Errorf("invalid org slug %q", org)
-	}
-	if !validProjectSlug(project) {
-		return nil, fmt.Errorf("invalid project slug %q", project)
-	}
-	client, err := newDigitalOceanClient()
-	if err != nil {
-		return nil, err
-	}
-	if spec.Tags == nil {
-		spec.Tags = map[string]string{}
-	}
-	spec.Tags[orgTagKey] = org
-	if project != "" {
-		spec.Tags[projectTagKey] = project
-	}
-	machine, err := client.CreateMachine(spec)
-	if err != nil {
-		return nil, err
-	}
-	// A launched bot is an org member AND a playground node: register it as an
-	// IAM agent-user (surfaces in hanzo.team) and plant it in the org playground
-	// node registry attributed to org. Both best-effort — a registration failure
-	// never fails the launch; the bot still runs and each registry reconciles
-	// later (IAM on next sync, playground on the runtime heartbeat).
-	if specIsBot(spec) {
-		registerBotUser(org, spec.Name, spec.DisplayName)
-		registerPlaygroundNode(org, spec.Name)
-	}
-	return machine, nil
 }

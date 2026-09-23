@@ -14,29 +14,40 @@
 
 package service
 
-import "math"
-
-// Resell markup — the ONE place Hanzo's compute margin over DigitalOcean's
-// list price is defined. DigitalOcean is the wholesale cost; Hanzo resells at
-// list * markup. Current policy is a single FLAT markup (+33.3%, one-third) across all SKUs
-// — standard droplets and GPU alike — for one honest, predictable price.
+// pricing.go is the one place Hanzo's price for hosted compute is defined.
 //
-// Keep this as the single source of truth for compute pricing. The base/GPU
-// split is retained (currently equal) so pricing can return to per-SKU tiers by
-// changing a constant here — never scatter markups across controllers or the
-// dashboard.
+// A hosted machine costs Hanzo two things by the hour: the instance, at AWS's
+// on-demand list price, and its root volume, gp3 storage billed by the GB-month.
+// Hanzo sells the sum at list plus the platform fee of one third, rounded UP to
+// the whole cent: the ledger debits whole cents and a paid product never
+// under-charges. All arithmetic is integer, so the price a quote shows is the
+// price the meter debits, to the cent.
 const (
-	resellMarkupBase = 4.0 / 3.0
-	resellMarkupGPU  = 4.0 / 3.0
+	// feeNum/feeDen is the multiplier over cost: 4/3, list plus one third.
+	feeNum = 4
+	feeDen = 3
+
+	// microsPerCent converts micro-dollars to cents.
+	microsPerCent = 10_000
+
+	// hoursPerMonth is the month AWS prices storage in and quotes monthly figures by.
+	hoursPerMonth = 730
+
+	// gp3MicrosPerGBMonth is EBS gp3 storage in us-east-1: $0.08 per GB-month.
+	gp3MicrosPerGBMonth = 80_000
 )
 
-// HanzoPrice converts a DigitalOcean list price (USD) into Hanzo's resale
-// price (USD). isGPU selects the GPU multiplier. Rounded to 5 decimals so
-// hourly micro-prices (e.g. $0.00744/hr) survive while monthly stays clean.
-func HanzoPrice(doPrice float64, isGPU bool) float64 {
-	m := resellMarkupBase
-	if isGPU {
-		m = resellMarkupGPU
+// hourlyCents is Hanzo's price in whole cents per hour for an instance listed at
+// listMicros micro-dollars per hour with a diskGB gp3 root volume. Zero when
+// there is nothing to charge for.
+func hourlyCents(listMicros, diskGB int64) int64 {
+	// Cost over one 730-hour month in micro-dollars, so the storage rate needs no
+	// division before the fee is applied.
+	monthMicros := listMicros*hoursPerMonth + diskGB*gp3MicrosPerGBMonth
+	if monthMicros <= 0 {
+		return 0
 	}
-	return math.Round(doPrice*m*1e5) / 1e5
+	num := monthMicros * feeNum
+	den := int64(hoursPerMonth * feeDen * microsPerCent)
+	return (num + den - 1) / den
 }

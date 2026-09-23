@@ -676,15 +676,15 @@ func confirmCloudPoolDeleted(client cloudNodePoolDeleter, poolID string) error {
 }
 
 // poolCloudClient builds the cloud client that can delete a STORED pool: the
-// per-org Provider named on the row, or the configured cloud account when the row names
-// none (a cluster's seed pool is recorded by the platform cluster create, which has
-// no Provider row to name).
+// per-org Provider named on the row, or the platform account that holds the
+// cluster when the row names none (a cluster's seed pool is recorded by the
+// platform cluster create, which has no Provider row to name).
 //
 // A Provider the row names but the store does not have is an ERROR, never a skip.
 // Skipping is how a row gets dropped while its pool keeps running.
 func poolCloudClient(stored *NodePool) (cloudNodePoolDeleter, error) {
 	if stored.Provider == "" {
-		return service.NewDOKSClientFromConfig(stored.ClusterID)
+		return service.PlatformPools{ClusterID: stored.ClusterID}, nil
 	}
 	provider, err := getProvider(stored.Owner, stored.Provider)
 	if err != nil {

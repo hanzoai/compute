@@ -83,19 +83,15 @@ func commerceOf(t *testing.T, mood commerceMood, availableCents int64) (debits *
 
 // ---- the price half of the gate ----
 
-// A GPU slug in the catalog resolves to its resale rate. This is the headline:
-// the price table that used to answer this question had 32 hardcoded droplet
-// slugs and not one GPU, so every GPU resource priced at zero.
+// A GPU size in the catalog resolves to its price: every GPU the hosted account
+// sells is priced, and the price is the catalog's, to the cent.
 func TestHourlyCents_ResolvesGPU(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD",
-		GPU: &GPUSpec{Count: 8, Model: "H100"}})
-
-	cents, err := HourlyCents("gpu-h100x8-640gb")
+	cents, err := HourlyCents("p4d.24xlarge")
 	if err != nil {
 		t.Fatalf("a catalog GPU size must price, got %v", err)
 	}
-	if cents != 3178 { // ceil(3177.24)
-		t.Fatalf("HourlyCents = %d, want 3178", cents)
+	if cents != 2943 { // ($21.957642 + 1000 GB gp3) x 4/3, rounded up to the cent
+		t.Fatalf("HourlyCents = %d, want 2943", cents)
 	}
 }
 
@@ -103,7 +99,7 @@ func TestHourlyCents_ResolvesGPU(t *testing.T) {
 // catalog does not carry, and a slug the catalog prices at zero. Billing either
 // one as free is how an H100 runs for nothing.
 func TestHourlyCents_RefusesRatherThanZero(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "zero", PriceHourly: 0, Currency: "USD"})
+	seedCatalog(t, priced("zero", 0))
 
 	for _, slug := range []string{"gpu-h100x8-640gb", "zero", ""} {
 		cents, err := HourlyCents(slug)
@@ -214,7 +210,7 @@ func (l *clusterLedger) forget(org, clusterID string) error {
 // nothing else catches it, because a DOKS cluster writes no org-tagged droplet
 // either. So the row is not bookkeeping; it is the recurring bill.
 func TestCreateClusterMetered_RecordsTheSeedPoolItProvisioned(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	commerceOf(t, funded, 10000000)
 	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 	pools := newPoolLedger()
@@ -247,7 +243,7 @@ func TestCreateClusterMetered_RecordsTheSeedPoolItProvisioned(t *testing.T) {
 // The count floor is ONE expression now, so the pool the upstream gets, the
 // quantity the org is charged, and the quantity the row meters cannot disagree.
 func TestCreateClusterMetered_RecordedCountIsTheProvisionedCount(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	commerceOf(t, funded, 10000000)
 
 	for name, tc := range map[string]struct{ ask, want int }{
@@ -273,7 +269,7 @@ func TestCreateClusterMetered_RecordedCountIsTheProvisionedCount(t *testing.T) {
 // A named seed pool keeps its name, so the row and the upstream pool are the
 // same pool whichever way the caller spelled it.
 func TestCreateClusterMetered_RecordsANamedSeedPool(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	commerceOf(t, funded, 10000000)
 	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 	pools := newPoolLedger()
@@ -293,7 +289,7 @@ func TestCreateClusterMetered_RecordsANamedSeedPool(t *testing.T) {
 // must be told so — but it also never silently passes: the cluster is returned
 // and the debit still happens, and the operator gets the loudest line in the file.
 func TestCreateClusterMetered_StoreFailureStillReturnsTheCluster(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	debits, mu := commerceOf(t, funded, 10000000)
 	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 	pools := &poolLedger{err: errors.New("disk on fire")}
@@ -378,7 +374,7 @@ func TestCreateClusterMetered_ProvisionsNothingWhenRefused(t *testing.T) {
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+			seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 			debits, mu := commerceOf(t, c.mood, 0)
 			do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 			client := newDOKSTestClient(t, do)
@@ -413,7 +409,7 @@ func TestCreateClusterMetered_ProvisionsNothingWhenRefused(t *testing.T) {
 // the upstream receives exactly the requested pool, and the org is billed the
 // REAL rate for all four nodes — not zero.
 func TestCreateClusterMetered_FundedOrgLaunchesAndPaysTheRealRate(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	debits, mu := commerceOf(t, funded, 1000000)
 	do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 	client := newDOKSTestClient(t, do)
@@ -431,7 +427,7 @@ func TestCreateClusterMetered_FundedOrgLaunchesAndPaysTheRealRate(t *testing.T) 
 	if do.created.NodePools[0].Count != 4 || do.created.NodePools[0].Size != "gpu-h100x8-640gb" {
 		t.Fatalf("upstream got the wrong pool: %+v", do.created.NodePools[0])
 	}
-	if !hasTag(do.created.Tags, "hanzo-org:acme") {
+	if !clusterHasTag(do.created.Tags, "hanzo-org:acme") {
 		t.Fatalf("the ownership tag must reach upstream: %v", do.created.Tags)
 	}
 	mu.Lock()
@@ -445,7 +441,7 @@ func TestCreateClusterMetered_FundedOrgLaunchesAndPaysTheRealRate(t *testing.T) 
 // floor the upstream request applies is applied to the charge too — so the
 // quantity authorized is always the quantity provisioned.
 func TestCreateClusterMetered_BillsEveryNodeAndFloorsTheCount(t *testing.T) {
-	seedCatalog(t, SizeInfo{Slug: "gpu-h100x8-640gb", PriceHourly: 31.7724, Currency: "USD"})
+	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 
 	for name, tc := range map[string]struct{ ask, want int }{
 		"four nodes":       {4, 4},

@@ -126,20 +126,20 @@ func machineHasBotRuntimeTag(machine *Machine, agentName string) bool {
 	return false
 }
 
-// resolveBoundMachine resolves the machine a binding targets from the RESELL
-// compute surface — the Hanzo configured cloud account, where a machine is a
-// droplet identified by its integer id and owned by an org via the
-// `hanzo-org:<org>` tag. This is the SAME source the bind routes are scoped to
-// (`service.GetOrgMachine` verifies the droplet carries the caller org's tag),
-// NOT the BYOC `object.Machine` table (whose owner semantics and identity are a
-// different machine population). Using the resell source is what makes the
-// binding operate on the machine the operator actually launched, and it enforces
-// tenant isolation a second way: even with the id owner already pinned to the
-// caller org, GetOrgMachine returns nil for a droplet that is not tagged to that
-// org, so a binding can never attach to another tenant's machine.
+// resolveBoundMachine resolves the machine a binding targets from the HOSTED
+// compute surface — Hanzo's own EC2 account, where a machine is identified by its
+// machine id and owned by an org through its `hanzo-org` tag. This is the SAME
+// source the bind routes are scoped to (`service.GetOrgMachine` finds the machine
+// by the caller org's tag), NOT the BYOC `object.Machine` table (whose owner
+// semantics and identity are a different machine population). Using the hosted
+// source is what makes the binding operate on the machine the operator actually
+// launched, and it enforces tenant isolation a second way: even with the id owner
+// already pinned to the caller org, GetOrgMachine returns nil for a machine that
+// is not tagged to that org, so a binding can never attach to another tenant's
+// machine.
 //
-// It never panics on caller input: a non-numeric droplet id yields a clean error
-// from GetOrgMachine, and an unowned/absent droplet yields (nil, nil).
+// It never panics on caller input: an id that is not a machine id and an
+// unowned/absent machine both yield (nil, nil).
 func resolveBoundMachine(owner string, name string) (*Machine, error) {
 	if owner == "" || name == "" {
 		return nil, nil
@@ -151,15 +151,14 @@ func resolveBoundMachine(owner string, name string) (*Machine, error) {
 	if m == nil {
 		return nil, nil
 	}
-	// Convert the service view to the object view. Resell machines are always in
-	// the configured cloud account, so Provider is fixed here (getMachineFromDroplet
-	// leaves it empty). Only the fields reconcile + the denormalized snapshot need
-	// are carried.
+	// Convert the service view to the object view. Only the fields reconcile + the
+	// denormalized snapshot need are carried; a hosted machine names no upstream
+	// provider.
 	return &Machine{
 		Owner:       owner,
 		Name:        m.Name,
 		Id:          m.Id,
-		Provider:    "digitalocean",
+		Provider:    m.Provider,
 		DisplayName: m.DisplayName,
 		Region:      m.Region,
 		Size:        m.Size,

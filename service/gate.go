@@ -14,8 +14,8 @@
 
 // gate.go is the compute money gate: ONE price resolver, ONE pre-provision
 // balance check, ONE debit. Every compute resource visor provisions rides
-// through it — droplet launch, DOKS cluster create, node pool create, node pool
-// scale — so there is a single answer to "what does this cost?" and a single
+// through it — machine launch and start, cluster create, node pool create, node
+// pool scale — so there is a single answer to "what does this cost?" and a single
 // answer to "is this org good for it?".
 //
 // Two invariants, and both halves matter:
@@ -44,20 +44,17 @@ import (
 // provision on this error — they never fall back to zero.
 var ErrPriceUnavailable = errors.New("price unavailable")
 
-// HourlyCents resolves a size slug to Hanzo's resale price in cents per hour,
-// from the SAME catalog the POST /v1/machines quote and debit read
-// (SizeBySlug → PriceToCents). There is no second price table.
+// HourlyCents resolves a size slug to Hanzo's price in cents per hour, from the
+// SAME catalog the POST /v1/machines quote and debit read (SizeBySlug). There is
+// no second price table.
 //
-// Both a slug absent from the catalog AND a slug whose resolved price is <= 0
-// yield ErrPriceUnavailable. The upstream publishes no zero-priced size, so a
-// zero here means the price did not resolve — calling that "free by policy" is
-// precisely the mistake this function exists to prevent. A genuinely free SKU
-// would be a catalog decision, expressed in the catalog, not an absence.
+// Both a slug absent from the catalog AND a slug whose price is <= 0 yield
+// ErrPriceUnavailable. Every size for sale has a price, so a zero here means the
+// price did not resolve — calling that "free by policy" is precisely the mistake
+// this function exists to prevent. A genuinely free size would be a catalog
+// decision, expressed in the catalog, not an absence.
 func HourlyCents(slug string) (int64, error) {
-	si, err := SizeBySlug(slug)
-	if err != nil {
-		return 0, fmt.Errorf("%w: resolving size %q: %v", ErrPriceUnavailable, slug, err)
-	}
+	si := SizeBySlug(slug)
 	if si == nil {
 		return 0, fmt.Errorf("%w: size %q is not in the catalog", ErrPriceUnavailable, slug)
 	}
@@ -72,11 +69,10 @@ func RateOf(si *SizeInfo) (int64, error) {
 	if si == nil {
 		return 0, fmt.Errorf("%w: size is not in the catalog", ErrPriceUnavailable)
 	}
-	cents := PriceToCents(si.PriceHourly)
-	if cents <= 0 {
+	if si.CentsHourly <= 0 {
 		return 0, fmt.Errorf("%w: size %q resolved to a zero price", ErrPriceUnavailable, si.Slug)
 	}
-	return cents, nil
+	return si.CentsHourly, nil
 }
 
 // AuthorizeCompute is the pre-provision balance gate, and it is FAIL-CLOSED:
@@ -186,7 +182,7 @@ func holdOrg(org string) func() {
 }
 
 // Provision is the ONE metered provision, and every compute resource visor
-// creates rides it: a droplet launch, a DOKS cluster, a node pool, a scale-up.
+// creates rides it: a machine launch or start, a cluster, a node pool, a scale-up.
 // Under the org's hold it authorizes, provisions, and debits — in that order, so
 // the money moves before the next request reads the balance.
 //

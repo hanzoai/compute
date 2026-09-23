@@ -37,10 +37,6 @@ type KubernetesClientInterface interface {
 	NodeMachines(ctx context.Context) ([]*Machine, error)
 }
 
-// KubernetesCapable is a provider client that ALSO speaks Kubernetes. Not every
-// cloud sells managed clusters, so this is an assertion on the one provider
-// client, never a second registry of clouds — NewMachineClient is the registry,
-// and a second switch beside it would be a second list of vendor names to drift.
 // providerDigitalOcean is DigitalOcean's name as NewMachineClient spells it.
 // Stated once so the k8s side cannot drift from the machine side.
 const providerDigitalOcean = "DigitalOcean"
@@ -60,6 +56,10 @@ type LoadBalancerCapable interface {
 	LoadBalancers() LoadBalancerClientInterface
 }
 
+// KubernetesCapable is a provider client that ALSO speaks Kubernetes. Not every
+// cloud sells managed clusters, so this is an assertion on the one provider
+// client, never a second registry of clouds — NewMachineClient is the registry,
+// and a second switch beside it would be a second list of vendor names to drift.
 type KubernetesCapable interface {
 	Kubernetes() KubernetesClientInterface
 }
@@ -86,8 +86,8 @@ type ProviderStatus struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// cloudProvider is one platform-account cloud: its provider name and the credentials
-// Visor holds for it.
+// cloudProvider is one platform account: its provider name and the credentials
+// registered for it.
 type cloudProvider struct {
 	provider string
 	name     string
@@ -112,44 +112,42 @@ type Credential struct {
 
 var (
 	credentialsMu sync.RWMutex
-	credentials   func() []Credential
+	credentials   func() ([]Credential, error)
 )
 
 // RegisterCredentials teaches this process which cloud accounts it may spend on.
 // A deployment that can enumerate them (object, from its Provider rows) registers
-// the reader; nothing here knows how they are stored.
-func RegisterCredentials(f func() []Credential) {
+// the reader; nothing here knows how they are stored. A reader that fails says
+// so: accounts that could not be read are not the same as no accounts.
+func RegisterCredentials(f func() ([]Credential, error)) {
 	credentialsMu.Lock()
 	defer credentialsMu.Unlock()
 	credentials = f
 }
 
-// cloudProviders lists every cloud account, from the registered source when there
-// is one. Falling back to the single configured DigitalOcean token keeps a
-// deployment that registers nothing working exactly as it did.
-func cloudProviders() []cloudProvider {
+// cloudProviders lists every platform account, from the registered source. A
+// deployment that registers none has no platform clusters; a source that cannot
+// be read is an error.
+func cloudProviders() ([]cloudProvider, error) {
 	credentialsMu.RLock()
 	f := credentials
 	credentialsMu.RUnlock()
 
-	if f != nil {
-		if creds := f(); len(creds) > 0 {
-			out := make([]cloudProvider, 0, len(creds))
-			for _, c := range creds {
-				out = append(out, cloudProvider{
-					provider: c.Provider, name: c.Name,
-					keyID: c.KeyID, secret: c.Secret, region: c.Region,
-				})
-			}
-			return out
-		}
+	if f == nil {
+		return nil, nil
 	}
-	// The platform account carries no secret: egress attaches it. Without a
-	// carrier there is no way to reach it, so there is nothing to name.
-	if carrierRegistered() {
-		return []cloudProvider{{provider: providerDigitalOcean}}
+	creds, err := f()
+	if err != nil {
+		return nil, fmt.Errorf("platform accounts cannot be read: %w", err)
 	}
-	return nil
+	out := make([]cloudProvider, 0, len(creds))
+	for _, c := range creds {
+		out = append(out, cloudProvider{
+			provider: c.Provider, name: c.Name,
+			keyID: c.KeyID, secret: c.Secret, region: c.Region,
+		})
+	}
+	return out, nil
 }
 
 // account pairs a client with the credential row it was built from. The client
@@ -171,11 +169,16 @@ func (a account) ref() string {
 
 // kubernetesClients builds a client per configured cloud. Construction failures
 // are returned beside the clients rather than aborting: one cloud with a bad
-// credential must not hide the others.
+// credential must not hide the others. Accounts that cannot be read at all are
+// one failed status.
 func kubernetesClients() ([]KubernetesClientInterface, []ProviderStatus) {
+	providers, err := cloudProviders()
+	if err != nil {
+		return nil, []ProviderStatus{{Provider: "platform", OK: false, Reason: err.Error()}}
+	}
 	var clients []KubernetesClientInterface
 	var status []ProviderStatus
-	for _, b := range cloudProviders() {
+	for _, b := range providers {
 		// ONE registry. A cloud reaches visor exactly once, through the same
 		// factory the machine plane uses, so there is never a second way to DO.
 		mc, err := NewMachineClient(Credential{Provider: b.provider, Name: b.name, KeyID: b.keyID, Secret: b.secret, Region: b.region})
@@ -196,8 +199,23 @@ func kubernetesClients() ([]KubernetesClientInterface, []ProviderStatus) {
 }
 
 // KubernetesConfigured reports whether any cloud is configured, so a caller can
-// answer "not configured" distinctly from "configured and empty".
-func KubernetesConfigured() bool { return len(cloudProviders()) > 0 }
+// answer "not configured" distinctly from "configured and empty". Accounts that
+// cannot be read count as configured: the caller asks, and is told why not.
+func KubernetesConfigured() bool {
+	providers, err := cloudProviders()
+	return err != nil || len(providers) > 0
+}
+
+// noAccounts is why there is no client to ask: the first account that failed,
+// or that none is configured.
+func noAccounts(status []ProviderStatus) error {
+	for _, s := range status {
+		if !s.OK {
+			return fmt.Errorf("%s: %s", s.Provider, s.Reason)
+		}
+	}
+	return fmt.Errorf("no cloud provider is configured")
+}
 
 // KubernetesProviderStatus reports every configured cloud and whether it answers
 // right now, by making the cheapest real call each one has. This is the health
@@ -224,9 +242,9 @@ func KubernetesProviderStatus(ctx context.Context) []ProviderStatus {
 // and naming what did not. err is non-nil only when NO backend answered, so one
 // unreachable cloud costs its own rows and not the whole fleet.
 func listClustersAcross(ctx context.Context) ([]*KubernetesCluster, []string, error) {
-	clients, _ := kubernetesClients()
+	clients, status := kubernetesClients()
 	if len(clients) == 0 {
-		return nil, nil, fmt.Errorf("no cloud provider is configured")
+		return nil, nil, noAccounts(status)
 	}
 	return gather(ctx, clients)
 }
@@ -258,9 +276,9 @@ func gather(ctx context.Context, clients []KubernetesClientInterface) ([]*Kubern
 // owns it. Ids are provider-scoped, so this asks each in turn; a miss everywhere
 // is (nil, nil, nil) and the caller renders "not found".
 func findCluster(ctx context.Context, id string) (KubernetesClientInterface, *KubernetesClusterDetail, error) {
-	clients, _ := kubernetesClients()
+	clients, status := kubernetesClients()
 	if len(clients) == 0 {
-		return nil, nil, fmt.Errorf("no cloud provider is configured")
+		return nil, nil, noAccounts(status)
 	}
 	return locate(ctx, clients, id)
 }

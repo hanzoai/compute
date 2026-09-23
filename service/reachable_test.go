@@ -12,75 +12,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// reachable_test.go pins the difference between "a credential is SET" and "a
-// credential WORKS" — the distinction the whole estate was missing when a revoked
-// DigitalOcean token kept every presence check returning true.
+// reachable_test.go pins the difference between "the account is CONFIGURED" and
+// "the account ANSWERS" — the question the hourly sweep asks before it spends an
+// hour.
 package service
 
 import (
 	"context"
-	"net/http"
 	"testing"
 )
 
-// reachableBy makes the platform account reachable for one test, or not. Reaching
-// a cloud is the carrier's job and only the carrier's, so this is the whole of
-// what "configured" means now.
-func reachableBy(t *testing.T, carried bool) {
-	t.Helper()
-	t.Cleanup(func() { RegisterCarrier(nil) })
-	if !carried {
-		RegisterCarrier(nil)
-		return
-	}
-	RegisterCarrier(func(Credential) (*http.Client, error) { return &http.Client{}, nil })
-}
-
-// TestPresenceCannotSeeARevocation is the mechanism finding, as a test.
-//
-// Every "is DO configured?" check in the estate is a PRESENCE check, and presence
-// cannot see a revocation: a carrier is registered whether or not egress is up and
-// whether or not the credential it holds still works — so ComputeConfigured stays
-// true through a revocation, the code takes the configured branch, and fails
-// inside it. That is why so much of this reported zeros that read as real data
-// rather than "not connected". ComputeReachable is the question that actually
-// distinguishes them.
-//
-// The context is cancelled before the call, so this is hermetic: no network, no
-// DigitalOcean, no token minted. Cancellation can only produce an error if a call
-// was actually ATTEMPTED, which is exactly the property under test — a presence
-// check would sail through it, which is the point.
+// Presence cannot see a revocation: a configured region reads as configured
+// whether or not the role still works. ComputeReachable spends a real, signed
+// round trip, so a role EC2 refuses is an unreachable account.
 func TestPresenceCannotSeeARevocation(t *testing.T) {
-	reachableBy(t, true)
+	f := hostedFake(t)
 
+	if err := ComputeReachable(context.Background()); err != nil {
+		t.Fatalf("a working account reported unreachable: %v", err)
+	}
+	if n := len(f.Calls("DescribeInstances")); n != 1 {
+		t.Fatalf("reachability made %d calls, want exactly one", n)
+	}
+
+	f.Refuse("DescribeInstances", "UnauthorizedOperation")
 	if !ComputeConfigured() {
-		t.Fatal("a registered carrier must read as configured — that is the premise: presence cannot see a revocation")
+		t.Fatal("a configured region must read as configured — that is the premise")
+	}
+	if err := ComputeReachable(context.Background()); err == nil {
+		t.Fatal("ComputeReachable answered without reaching the account — the hourly sweep would " +
+			"claim (and destroy) an hour it cannot bill")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := ComputeReachable(ctx); err == nil {
-		t.Fatal("ComputeReachable answered without reaching the provider — it is a presence check wearing a reachability name, " +
-			"and the hourly sweep would claim (and destroy) an hour it cannot bill")
+		t.Fatal("a call that never happened was reported as an answer")
 	}
 }
 
-// TestNothingToAskIsNotAFailure keeps the two negative cases apart. An UNCONFIGURED
-// configured cloud account is not an unreachable one: it means there are no platform resources at
-// all, so an empty answer is the TRUE answer and the hour must still be claimed —
-// otherwise a deployment with no carrier stops billing its tenants' own
-// resources forever, which trades one revenue outage for another.
+// An UNCONFIGURED account is not an unreachable one: there are no hosted
+// machines, so an empty answer is the TRUE answer and the hour must still be
+// claimed — otherwise a deployment with no hosted account stops billing its
+// tenants' own resources forever.
 func TestNothingToAskIsNotAFailure(t *testing.T) {
-	reachableBy(t, false)
+	f := hostedFake(t)
+	t.Setenv(keyRegion, "")
 
 	if ComputeConfigured() {
-		t.Fatal("no carrier must read as unconfigured — there is no other way to reach a cloud")
+		t.Fatal("no region must read as unconfigured")
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // even cancelled: with nothing to ask, nothing is asked.
 	if err := ComputeReachable(ctx); err != nil {
-		t.Fatalf("an unconfigured configured cloud account reported unreachable (%v) — "+
+		t.Fatalf("an unconfigured account reported unreachable (%v) — "+
 			"'there is nothing to ask' and 'the answer did not come back' are different facts", err)
+	}
+	if n := len(f.Calls("")); n != 0 {
+		t.Fatalf("an unconfigured account was asked %d times", n)
 	}
 }

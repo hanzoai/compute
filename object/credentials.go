@@ -26,22 +26,20 @@ import (
 // service cannot import object (object imports service), so the source is handed
 // inward — the same direction, and for the same reason, as RegisterMembership.
 //
-// An empty owner registers nothing, and service falls back to the single
-// configured DigitalOcean token. That is the deployment that has not been told
-// which org holds its accounts, and it behaves exactly as it did before.
+// An empty owner registers nothing: the deployment has no platform accounts.
 func RegisterCloudCredentials(owner string) {
 	if owner == "" {
 		return
 	}
-	service.RegisterCredentials(func() []service.Credential {
+	service.RegisterCredentials(func() ([]service.Credential, error) {
 		providers, err := getActiveCloudProviders(owner)
 		if err != nil {
-			// Loud, and not fatal. service falls back to the single token, so a
-			// store that cannot be read costs the extra accounts rather than
-			// every account — but an operator has to know the difference, or a
-			// fleet that quietly shrank to one cloud reads as one cloud.
-			logs.Warning("cloud credentials: cannot read providers for %s, falling back to the configured token: %v", owner, err)
-			return nil
+			// Loud, and returned. Accounts that cannot be read are not "no
+			// accounts": the pool sweep bills from the live pools of these
+			// accounts, and reading an unreadable store as empty would bill
+			// stale rows instead.
+			logs.Warning("cloud credentials: cannot read providers for %s: %v", owner, err)
+			return nil, err
 		}
 		out := make([]service.Credential, 0, len(providers))
 		for _, p := range providers {
@@ -53,6 +51,6 @@ func RegisterCloudCredentials(owner string) {
 				Region:   p.Region,
 			})
 		}
-		return out
+		return out, nil
 	})
 }

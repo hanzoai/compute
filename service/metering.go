@@ -12,41 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// metering.go is the ONE commerce metering path for resell compute. Both the
-// launch debit (controllers/compute.go) and the recurring hourly debit
-// (MeterRunningMachines, driven by task/ticker) price with PriceToCents and debit
-// through RecordCompute on cloud's commerce API (commerce.go) — there is no
-// second metering path for /v1 machines. Fleet billing (billing/) debits through
-// the same client.
+// metering.go is the ONE commerce metering path for hosted compute. The launch
+// debit (controllers/compute.go), the start debit (SetOrgMachineState) and the
+// recurring hourly debit (MeterRunningMachines, driven by task/ticker) all price
+// from the catalog (HourlyCents) and debit through RecordCompute on cloud's
+// commerce API (commerce.go) — there is no second metering path for /v1
+// machines. Fleet billing (billing/) debits through the same client.
 package service
 
 import (
 	"context"
-	"fmt"
-	"math"
 	"time"
 
 	"github.com/hanzoai/compute/logs"
 	"github.com/hanzoai/compute/telemetry"
 )
 
-// meteringProvider labels resell-compute usage in the commerce ledger so spend
-// is attributable to this surface (product), independent of the DO size recorded
-// as the Model.
+// meteringProvider labels hosted-compute usage in the commerce ledger so spend
+// is attributable to this surface (product), independent of the size recorded as
+// the Model.
 const meteringProvider = "compute"
-
-// PriceToCents converts a USD price to whole cents for billing. It Ceils (a paid
-// product never under-charges) but subtracts a 1e-9 epsilon first so float64
-// overshoot on a whole-cent price (0.07*100 = 7.00000000000000089) does not round
-// up to 8. A true sub-cent price still ceils to >= 1; a $0 price yields 0 (free,
-// no charge). This is the ONE price→cents rule shared by launch and recurring
-// metering.
-func PriceToCents(price float64) int64 {
-	if price <= 0 {
-		return 0
-	}
-	return int64(math.Ceil(price*100 - 1e-9))
-}
 
 // HourStamp is the per-hour bucket in the usage id: the same running resource
 // metered twice within one wall-clock hour carries the SAME id, and cloud debits
@@ -54,6 +39,13 @@ func PriceToCents(price float64) int64 {
 // a second replica from sweeping at all; the id is what makes a retried debit
 // harmless.
 func HourStamp(now time.Time) string { return now.UTC().Format("2006010215") }
+
+// MeterID names one running hour of a machine: the usage id the hourly sweep
+// debits, and the id a start debits its first hour under, so the two can never
+// charge the same hour twice.
+func MeterID(machineID string, now time.Time) string {
+	return "compute-" + machineID + "-" + HourStamp(now)
+}
 
 // CreatedInHour reports whether an RFC3339 create time falls in the same UTC
 // hour bucket as stamp ("YYYYMMDDHH"). An empty or unparseable time is NOT in the
@@ -75,14 +67,14 @@ func CreatedInHour(createdTime, stamp string) bool {
 }
 
 // MeterRunningMachines debits every RUNNING metered machine one hour of its
-// resale price to its OWNING org — the recurring counterpart to the launch debit.
+// price to its OWNING org — the recurring counterpart to the launch debit.
 // It is the "a running bound machine debits the org" rule: a machine that stays
 // up keeps drawing down the org's credit balance, hour by hour.
 //
 // Per machine: org is recovered from the machine's own hanzo-org tag (never
-// trusted from a client — it is the tag LaunchOrgMachine injected), the hourly
-// price comes from the resale catalog (SizeBySlug → PriceToCents), and the debit
-// carries the usage id "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled
+// trusted from a client — it is the tag LaunchOrgMachine set), the hourly price
+// comes from the catalog (HourlyCents), and the debit carries the usage id
+// MeterID: "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled
 // from gating (the machine already ran that hour, so the cost must be recorded);
 // enforcement/suspend on a depleted balance is a separate control. A per-machine
 // error is logged and does not abort the sweep.
@@ -93,8 +85,8 @@ func CreatedInHour(createdTime, stamp string) bool {
 // and the LAUNCH hour is skipped here because the launch path already billed it
 // under a different id.
 //
-// No-op when metering is unconfigured or when compute is unconfigured (no platform
-// token) — nothing to enumerate, nothing to debit.
+// No-op when metering is unconfigured or when the hosted account is unconfigured
+// — nothing to enumerate, nothing to debit.
 func MeterRunningMachines(ctx context.Context) {
 	if !ComputeConfigured() || !Billable(ctx, "compute.hourly") {
 		return
@@ -113,10 +105,10 @@ func MeterRunningMachines(ctx context.Context) {
 
 // meterMachines is the pure sweep over a machine set at a fixed wall-clock `now`
 // (injected so the idempotency bucket is deterministic under test). It resolves
-// each machine's org from its tag, prices it from the resale catalog, and records
+// each machine's org from its tag, prices it from the catalog, and records
 // one hour's debit with an hour-bucketed RequestID. Returns (metered, skipped).
 // A per-machine failure is logged and skipped — one bad machine never aborts the
-// sweep. Isolated from the DO enumeration so the billing contract is testable
+// sweep. Isolated from the EC2 enumeration so the billing contract is testable
 // against a fake commerce API.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
 	stamp := HourStamp(now)
@@ -135,10 +127,10 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		// Skip the LAUNCH hour: the launch path already debited this machine one
 		// hour at create time (usage id = machine id). Metering it again for the
 		// same wall-clock hour would double-charge the launch hour (the launch and
-		// sweep ids differ, so the ledger sees two acts). A
-		// machine with no parseable create time (older rows / test doubles) is
-		// metered normally — a launch is never billed unless the launch path ran,
-		// so failing to skip only risks the historical status quo, never a miss.
+		// sweep ids differ, so the ledger sees two acts). CreatedTime is the last
+		// start, so a started machine's first hour — debited by the start under
+		// this very MeterID — is skipped too. A machine with no parseable create
+		// time is metered normally.
 		if CreatedInHour(m.CreatedTime, stamp) {
 			continue
 		}
@@ -151,8 +143,7 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			logs.Warning("compute metering: machine %s not billed: %v", m.Id, err)
 			continue
 		}
-		if err := RecordCompute(ctx, org, project, cents, m.Size,
-			fmt.Sprintf("compute-%s-%s", m.Id, stamp)); err != nil {
+		if err := RecordCompute(ctx, org, project, cents, m.Size, MeterID(m.Id, now)); err != nil {
 			skipped++
 			logs.Warning("compute metering: debit machine %s (org %s): %v", m.Id, org, err)
 			continue

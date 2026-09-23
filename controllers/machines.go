@@ -20,6 +20,7 @@ package controllers
 import (
 	"strings"
 
+	"github.com/hanzoai/compute/logs"
 	"github.com/hanzoai/compute/object"
 	"github.com/hanzoai/compute/service"
 )
@@ -63,23 +64,26 @@ func (c *ApiController) machines(org string) ([]*object.Machine, error) {
 	}
 	// The house account is a second source, not a second collection. It is read
 	// only when it is configured, and a failure there does not lose the rows
-	// that were already found — a partial answer is what having two addresses
-	// used to force on every caller.
+	// that were already found; it is logged, because the answer is then short
+	// by every hosted machine the org has.
 	if service.ComputeConfigured() {
 		live, err := service.ListOrgMachines(org, c.resolveComputeProject(""))
-		if err == nil {
-			for _, m := range live {
-				if seen[m.Owner+"/"+m.Name] {
-					continue
-				}
-				rows = append(rows, &object.Machine{
-					Owner: m.Owner, Name: m.Name, Id: m.Id, Provider: m.Provider,
-					Region: m.Region, Zone: m.Zone, Category: m.Category, Type: m.Type,
-					Size: m.Size, State: m.State, Tag: m.Tag,
-					CreatedTime: m.CreatedTime, ExpireTime: m.ExpireTime,
-					DisplayName: m.DisplayName, Source: sourceLive,
-				})
+		if err != nil {
+			logs.Warning("machines: hosted machines of %s not listed: %v", org, err)
+		}
+		for _, m := range live {
+			if seen[m.Owner+"/"+m.Name] {
+				continue
 			}
+			rows = append(rows, &object.Machine{
+				Owner: m.Owner, Name: m.Name, Id: m.Id, Provider: m.Provider,
+				Region: m.Region, Zone: m.Zone, Category: m.Category, Type: m.Type,
+				Size: m.Size, State: m.State, Tag: m.Tag,
+				CreatedTime: m.CreatedTime, ExpireTime: m.ExpireTime,
+				DisplayName: m.DisplayName, Image: m.Image, Os: m.Os,
+				PublicIp: m.PublicIp, PrivateIp: m.PrivateIp,
+				CpuSize: m.CpuSize, MemSize: m.MemSize, Source: sourceLive,
+			})
 		}
 	}
 	return rows, nil
