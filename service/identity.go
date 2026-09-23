@@ -95,7 +95,9 @@ func (i *Identity) mint() (string, time.Duration, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	req.SetBasicAuth(i.id, i.secret) // client_secret_basic
+	// client_secret_basic: RFC 6749 §2.3.1 form-urlencodes both halves before
+	// base64, and IAM decodes them, so a secret carrying '+' or '%' authenticates.
+	req.SetBasicAuth(url.QueryEscape(i.id), url.QueryEscape(i.secret))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := i.client.Do(req)

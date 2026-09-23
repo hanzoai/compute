@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -96,5 +97,27 @@ func TestIdentityRefusalNamesTheClient(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}
+	}
+}
+
+// The credential is form-urlencoded before base64, as RFC 6749 §2.3.1 requires
+// and IAM decodes: a secret carrying '+', '/', '=', ':' or '%' must arrive whole.
+func TestIdentityFormEncodesTheClientCredential(t *testing.T) {
+	const secret = "a+b/c=d:e%f g"
+	var gotID, gotSecret string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, sec, _ := r.BasicAuth()
+		gotID, _ = url.QueryUnescape(id)
+		gotSecret, _ = url.QueryUnescape(sec)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"tok","expires_in":3600}`)
+	}))
+	defer srv.Close()
+
+	if _, err := NewIdentity(srv.URL, "hanzo-visor", secret, "", srv.Client()).Token(); err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	if gotID != "hanzo-visor" || gotSecret != secret {
+		t.Fatalf("IAM decoded %q/%q, want hanzo-visor/%q", gotID, gotSecret, secret)
 	}
 }
