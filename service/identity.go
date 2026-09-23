@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package service
 
 import (
 	"encoding/json"
@@ -24,24 +24,25 @@ import (
 	"time"
 )
 
-// identity mints the access token visor presents to egress.
+// Identity mints the access tokens visor presents to other Hanzo services:
+// egress, and cloud's commerce API.
 //
 // It is visor's OWN IAM identity — the clientId and clientSecret this process
 // already signs in with — exchanged for an access token, not a second
-// credential minted for this purpose. Egress verifies it the way every other
-// service verifies a caller: `iss` against the issuer, `aud` against the
-// audience, signature against the published JWKS. So there is one authority,
-// one kind of token, and nothing to paste into a config file.
+// credential minted for this purpose. A service verifies it the way it verifies
+// every caller: `iss` against the issuer, signature against the published JWKS,
+// and — where it names one — `aud` against the audience. So there is one
+// authority, one kind of token, and nothing to paste into a config file.
 //
 // A static bearer would be the alternative and it is worse in the way that
 // matters: it does not expire, so it is a credential in a config value that
 // nobody rotates, and it says nothing about WHO is calling — which is the one
-// question egress exists to answer before it spends money.
-type identity struct {
+// question a service that spends or charges money must answer first.
+type Identity struct {
 	endpoint string // IAM, e.g. https://hanzo.id
 	id       string // clientId
 	secret   string // clientSecret
-	audience string // the `aud` egress requires (RFC 8707 resource)
+	audience string // the `aud` the receiving service requires (RFC 8707 resource); empty names none
 
 	client *http.Client
 
@@ -50,14 +51,24 @@ type identity struct {
 	until time.Time
 }
 
+// NewIdentity is the identity the client credential (id, secret) holds at the
+// IAM endpoint, scoped to audience when one is named. client nil takes a 30s
+// default.
+func NewIdentity(endpoint, id, secret, audience string, client *http.Client) *Identity {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &Identity{endpoint: endpoint, id: id, secret: secret, audience: audience, client: client}
+}
+
 // early is how long before expiry a held token stops being offered. A token that
 // expires in flight is a 401 the caller cannot distinguish from a revoked
 // identity, so it is replaced while it still works.
 const early = 60 * time.Second
 
-// token returns a live access token, minting one when what is held is gone or
+// Token returns a live access token, minting one when what is held is gone or
 // nearly so.
-func (i *identity) token() (string, error) {
+func (i *Identity) Token() (string, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.held != "" && time.Now().Before(i.until.Add(-early)) {
@@ -71,10 +82,9 @@ func (i *identity) token() (string, error) {
 	return tok, nil
 }
 
-// mint performs the client_credentials exchange (HIP-0111), scoped to egress by
-// RFC 8707 `resource` so the token names what it may spend at and is useless
-// anywhere else.
-func (i *identity) mint() (string, time.Duration, error) {
+// mint performs the client_credentials exchange (HIP-0111), scoped by RFC 8707
+// `resource` when an audience is named, so such a token is useless anywhere else.
+func (i *Identity) mint() (string, time.Duration, error) {
 	form := url.Values{"grant_type": {"client_credentials"}}
 	if i.audience != "" {
 		form.Set("resource", i.audience)
@@ -90,7 +100,7 @@ func (i *identity) mint() (string, time.Duration, error) {
 
 	resp, err := i.client.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("egress identity: %w", err)
+		return "", 0, fmt.Errorf("iam identity: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -101,13 +111,13 @@ func (i *identity) mint() (string, time.Duration, error) {
 		Description string `json:"error_description"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", 0, fmt.Errorf("egress identity: %s answered %d with no readable body", i.endpoint, resp.StatusCode)
+		return "", 0, fmt.Errorf("iam identity: %s answered %d with no readable body", i.endpoint, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK || out.AccessToken == "" {
 		// Say which identity was refused. A 401 here reads identically whether
 		// the client id is wrong, the secret is stale, or the app may not use
 		// this grant, and the reader is holding none of those.
-		return "", 0, fmt.Errorf("egress identity: %s refused client %q: %d %s %s",
+		return "", 0, fmt.Errorf("iam identity: %s refused client %q: %d %s %s",
 			i.endpoint, i.id, resp.StatusCode, out.Error, out.Description)
 	}
 	ttl := time.Duration(out.ExpiresIn) * time.Second

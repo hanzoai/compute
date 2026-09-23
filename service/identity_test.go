@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package service
 
 import (
 	"fmt"
@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-func TestEgressIdentityIsMintedFromIAM(t *testing.T) {
+func TestIdentityIsMintedFromIAM(t *testing.T) {
 	var calls int
 	var gotUser, gotPass, gotGrant, gotResource, gotPath string
 
@@ -38,12 +38,9 @@ func TestEgressIdentityIsMintedFromIAM(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	who := &identity{
-		endpoint: srv.URL, id: "visor", secret: "shh",
-		audience: "hanzo-egress", client: srv.Client(),
-	}
+	who := NewIdentity(srv.URL, "visor", "shh", "hanzo-egress", srv.Client())
 
-	tok, err := who.token()
+	tok, err := who.Token()
 	if err != nil {
 		t.Fatalf("token: %v", err)
 	}
@@ -68,13 +65,13 @@ func TestEgressIdentityIsMintedFromIAM(t *testing.T) {
 
 	// Held while it is live: a mint per cloud call would put IAM in the path of
 	// every request egress already authenticates.
-	if _, err := who.token(); err != nil || calls != 1 {
+	if _, err := who.Token(); err != nil || calls != 1 {
 		t.Errorf("second call minted again (calls=%d): a live token must be reused", calls)
 	}
 
 	// Replaced BEFORE it expires, so a token never dies in flight.
 	who.until = time.Now().Add(early / 2)
-	if tok, err := who.token(); err != nil || tok != "tok-2" {
+	if tok, err := who.Token(); err != nil || tok != "tok-2" {
 		t.Errorf("near expiry token = %q (calls=%d), want a fresh tok-2", tok, calls)
 	}
 }
@@ -82,7 +79,7 @@ func TestEgressIdentityIsMintedFromIAM(t *testing.T) {
 // A refusal names the identity that was refused. Without that, a 401 reads the
 // same whether the id is wrong, the secret is stale, or the app may not use this
 // grant — and the reader holds none of those.
-func TestEgressIdentityRefusalNamesTheClient(t *testing.T) {
+func TestIdentityRefusalNamesTheClient(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -90,8 +87,8 @@ func TestEgressIdentityRefusalNamesTheClient(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	who := &identity{endpoint: srv.URL, id: "visor", secret: "wrong", client: srv.Client()}
-	_, err := who.token()
+	who := NewIdentity(srv.URL, "visor", "wrong", "", srv.Client())
+	_, err := who.Token()
 	if err == nil {
 		t.Fatal("a refused exchange must not yield a token")
 	}

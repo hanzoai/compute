@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/hanzoai/egress/spend"
 
@@ -61,14 +60,10 @@ func carry() error {
 		return fmt.Errorf("egressAddress is set but visor has no IAM identity "+
 			"(clientId=%q iamEndpoint=%q): it cannot say who it is to egress", id, iam)
 	}
-	who := &identity{
-		endpoint: iam, id: id, secret: secret,
-		audience: strings.TrimSpace(conf.GetConfigString("egressAudience")),
-		client:   &http.Client{Timeout: 30 * time.Second},
-	}
+	who := service.NewIdentity(iam, id, secret, strings.TrimSpace(conf.GetConfigString("egressAudience")), nil)
 	network, address := dial(address)
 	service.RegisterCarrier(func(c service.Credential) (*http.Client, error) {
-		token, err := who.token()
+		token, err := who.Token()
 		if err != nil {
 			return nil, err
 		}
