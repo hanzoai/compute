@@ -332,6 +332,16 @@ func TestALaunchTheAccountCannotMakeChargesNothing(t *testing.T) {
 	}
 	t.Setenv("computeSubnet", ec2test.Subnet)
 
+	t.Setenv("computeRoleArn", "")
+	env = call(t, app, http.MethodPost, "/v1/machines?owner=acme", cloudLaunch{Name: "web-1", Size: "t3.medium"})
+	if env.Status != "error" || !strings.Contains(env.Msg, "computeRoleArn (COMPUTE_ROLE_ARN)") {
+		t.Fatalf("launch with no role = %+v", env)
+	}
+	if money.reads != 0 || len(hosted.Calls("")) != 0 {
+		t.Fatal("a launch with no role asked commerce, IAM, STS or EC2")
+	}
+	t.Setenv("computeRoleArn", ec2test.RoleARN)
+
 	env = call(t, app, http.MethodPost, "/v1/machines?owner=acme", cloudLaunch{Name: "web-1", Size: "t3.medium", Region: "sfo3"})
 	if env.Status != "error" || !strings.Contains(env.Msg, "region sfo3 is not offered") {
 		t.Fatalf("other-region launch = %+v", env)

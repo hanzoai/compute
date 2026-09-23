@@ -26,15 +26,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 
@@ -56,7 +54,7 @@ func hostedFake(t *testing.T) *ec2test.Fake {
 func forgetHostedClient() {
 	hosted.Lock()
 	defer hosted.Unlock()
-	hosted.client, hosted.region = nil, ""
+	hosted.client, hosted.signer = nil, signer{}
 }
 
 // botRegistries answers the IAM user and playground node registrations a bot
@@ -393,10 +391,7 @@ func TestStopStartAndTerminate(t *testing.T) {
 	}))
 
 	// The fake launches pending; it is running once the cloud says so.
-	f.Reset()
-	f.Add(ec2test.Instance{ID: instanceID, Type: "m7i.large", State: "running", Tags: map[string]string{
-		orgTagKey: "acme", machineTagKey: m.Id, managedByKey: managedBy,
-	}})
+	f.SetState(instanceID, "running")
 
 	if changed, err := SetOrgMachineState(ctx, "acme", m.Id, "Running"); err != nil || changed {
 		t.Fatalf("setting a running machine Running = %v, %v, want no change", changed, err)
@@ -558,10 +553,12 @@ func TestARetriedLaunchStartsOneInstance(t *testing.T) {
 
 // ---- credentials ----
 
-// The pod carries a static AWS key for its object store. The hosted account is
-// never reached with it: every EC2 call is signed with the instance role's key,
-// which the fake account is the only one to accept.
-func TestTheStaticKeyNeverSignsAnEC2Call(t *testing.T) {
+// The whole chain, as it runs: the IAM app's client credential, form-encoded
+// under Basic, buys a Hanzo IAM token; the token is the web identity STS takes,
+// unsigned, for the configured role; and every EC2 call is signed with the key
+// that exchange issued. The static key in the environment signs nothing, and
+// nothing asks the instance metadata service.
+func TestEC2IsSignedWithTheAssumedRole(t *testing.T) {
 	f := hostedFake(t)
 	if os.Getenv("AWS_ACCESS_KEY_ID") != ec2test.StaticKeyID {
 		t.Fatal("the test must run with a static key in the environment")
@@ -572,63 +569,161 @@ func TestTheStaticKeyNeverSignsAnEC2Call(t *testing.T) {
 	if _, err := ListOrgMachines("acme", ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	calls := f.Calls("")
-	if len(calls) == 0 {
-		t.Fatal("nothing reached the account")
-	}
-	for _, c := range calls {
-		if c.KeyID != ec2test.RoleKeyID {
-			t.Fatalf("%s was signed with %q, want the instance role's key", c.Action, c.KeyID)
-		}
-	}
-}
 
-// With a web identity configured (IRSA), the role is assumed with it and the
-// instance role is not used.
-func TestAWebIdentityIsPreferredToTheInstanceRole(t *testing.T) {
-	f := hostedFake(t)
-	token := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(token, []byte(ec2test.WebIdentityToken), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AWS_ROLE_ARN", "arn:aws:iam::000000000000:role/hanzo-compute")
-	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", token)
-
-	if _, err := ListOrgMachines("acme", ""); err != nil {
-		t.Fatalf("list: %v", err)
+	mints := f.Calls("IAMToken")
+	if len(mints) != 1 || mints[0].Client != ec2test.ClientID || mints[0].Form.Get("grant_type") != "client_credentials" {
+		t.Fatalf("IAM token requests = %+v, want one client_credentials grant for %s", mints, ec2test.ClientID)
 	}
 	assumed := f.Calls("AssumeRoleWithWebIdentity")
 	if len(assumed) != 1 || assumed[0].KeyID != "" {
-		t.Fatalf("web identity exchanges = %+v, want one unsigned exchange", assumed)
+		t.Fatalf("role exchanges = %+v, want one, unsigned", assumed)
 	}
-	if got := assumed[0].Form.Get("RoleArn"); got != "arn:aws:iam::000000000000:role/hanzo-compute" {
-		t.Fatalf("assumed %q", got)
+	if got := assumed[0].Form.Get("RoleArn"); got != ec2test.RoleARN {
+		t.Fatalf("assumed %q, want %q", got, ec2test.RoleARN)
 	}
-	if list := f.Calls("DescribeInstances"); len(list) != 1 || list[0].KeyID != ec2test.WebIdentityKeyID {
-		t.Fatalf("EC2 calls = %+v, want one signed with the web identity's key", list)
+	if got := assumed[0].Form.Get("WebIdentityToken"); !strings.HasPrefix(got, "iam-token-") {
+		t.Fatalf("the web identity was %q, not the IAM token", got)
+	}
+	if got := assumed[0].Form.Get("RoleSessionName"); got != managedBy {
+		t.Fatalf("session name %q, want %q", got, managedBy)
+	}
+
+	var ec2Calls int
+	for _, c := range f.Calls("") {
+		switch c.Action {
+		case "IAMToken", "AssumeRoleWithWebIdentity":
+		case "IMDS":
+			t.Fatal("the instance metadata service was asked for credentials")
+		default:
+			ec2Calls++
+			if !strings.HasPrefix(c.KeyID, ec2test.RoleKeyPrefix) || !f.IsRoleKey(c.KeyID) {
+				t.Fatalf("%s was signed with %q, not the assumed role's key", c.Action, c.KeyID)
+			}
+		}
+	}
+	if ec2Calls < 3 {
+		t.Fatalf("only %d EC2 calls: the launch and the list did not both reach the account", ec2Calls)
 	}
 }
 
-// The chain itself holds no key: a web-identity provider or an instance-role
-// provider, whatever static key the environment carries.
-func TestTheRoleChainHasNoStaticStep(t *testing.T) {
+// The role's credentials are replaced before they expire, and so is the IAM
+// token they are bought with: a key that expires inside the refresh window is
+// never used again, and a token IAM says is about to lapse is minted anew. With
+// long lifetimes, nothing is fetched twice.
+func TestTheRoleIsRefreshedBeforeItExpires(t *testing.T) {
+	f := hostedFake(t)
+	for range 3 {
+		if _, err := ListOrgMachines("acme", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if m, a := len(f.Calls("IAMToken")), len(f.Calls("AssumeRoleWithWebIdentity")); m != 1 || a != 1 {
+		t.Fatalf("long-lived credentials fetched %d tokens and %d roles for three calls, want 1 and 1", m, a)
+	}
+
+	f.Reset()
+	forgetHostedClient()
+	// The role key lives two minutes, inside the five-minute refresh window; the
+	// token lives thirty seconds, inside Identity's one-minute margin.
+	f.Lifetimes(30*time.Second, 2*time.Minute)
+	for range 3 {
+		if _, err := ListOrgMachines("acme", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assumed := f.Calls("AssumeRoleWithWebIdentity")
+	if len(assumed) != 3 || len(f.Calls("IAMToken")) != 3 {
+		t.Fatalf("short-lived credentials: %d role exchanges and %d token mints for three calls, want 3 and 3",
+			len(assumed), len(f.Calls("IAMToken")))
+	}
+	seen := map[string]bool{}
+	for _, a := range assumed {
+		tok := a.Form.Get("WebIdentityToken")
+		if seen[tok] {
+			t.Fatalf("a token about to lapse was presented twice: %s", tok)
+		}
+		seen[tok] = true
+	}
+	keys := map[string]bool{}
+	for _, c := range f.Calls("DescribeInstances") {
+		keys[c.KeyID] = true
+	}
+	if len(keys) != 3 {
+		t.Fatalf("three calls were signed with %d keys, want a fresh key each", len(keys))
+	}
+}
+
+// A missing role, client id or client secret refuses every call by name,
+// before anything is asked of IAM, STS or EC2 — and the hourly sweep reads it as
+// an account it cannot reach, so it claims no hour.
+func TestAMissingRoleOrClientRefuses(t *testing.T) {
+	for _, key := range []string{keyRoleARN, keyIAMClientID, keyIAMClientSecret} {
+		t.Run(key, func(t *testing.T) {
+			f := hostedFake(t)
+			t.Setenv(key, "")
+			name := key + " (" + envOf[key] + ")"
+
+			_, err := LaunchOrgMachine(context.Background(), "acme", "", &CreateMachineSpec{Name: "box", InstanceType: "t3.medium"})
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("launch = %v, want a refusal naming %s", err, name)
+			}
+			if _, err := ListOrgMachines("acme", ""); err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("list = %v, want a refusal naming %s", err, name)
+			}
+			if err := ComputeReachable(context.Background()); err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("reachable = %v, want a refusal naming %s", err, name)
+			}
+			if n := len(f.Calls("")); n != 0 {
+				t.Fatalf("a refused call reached the fake %d times", n)
+			}
+		})
+	}
+}
+
+// A client credential IAM refuses buys no role, and nothing reaches EC2. The
+// caller is told the role could not be assumed, not that the cloud is down.
+func TestARefusedClientAssumesNothing(t *testing.T) {
+	f := hostedFake(t)
+	t.Setenv(keyIAMClientSecret, "stale")
+
+	_, err := ListOrgMachines("acme", "")
+	if err == nil || !errors.Is(err, errRole) {
+		t.Fatalf("list with a refused client = %v, want the role refusal", err)
+	}
+	if len(f.Calls("AssumeRoleWithWebIdentity")) != 0 || len(f.Calls("DescribeInstances")) != 0 {
+		t.Fatal("a refused client reached STS or EC2")
+	}
+	if err := ComputeReachable(context.Background()); err == nil {
+		t.Fatal("an account whose role cannot be assumed read as reachable")
+	}
+}
+
+// The chain holds no key and takes none from the environment: whatever
+// AWS_ACCESS_KEY_ID, AWS_ROLE_ARN or AWS_WEB_IDENTITY_TOKEN_FILE say, the only
+// provider is the web-identity exchange for the configured role.
+func TestTheRoleChainHasNoOtherStep(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", ec2test.StaticKeyID)
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "storage-secret")
-	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(ec2test.Region))
+	t.Setenv("AWS_ROLE_ARN", "arn:aws:iam::000000000000:role/somebody-else")
+	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/token")
+	cfg, err := awsConfig(context.Background(), signer{Region: ec2test.Region, RoleARN: ec2test.RoleARN,
+		ClientID: ec2test.ClientID, ClientSecret: ec2test.ClientSecret, IAM: hanzoIAM})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if _, ok := roleCredentials(cfg, config.EnvConfig{}).(*ec2rolecreds.Provider); !ok {
-		t.Fatal("with no web identity the chain must be the instance role")
+	cache, ok := cfg.Credentials.(*aws.CredentialsCache)
+	if !ok {
+		t.Fatalf("credentials are %T, want the SDK cache", cfg.Credentials)
 	}
-	web := config.EnvConfig{RoleARN: "arn:aws:iam::000000000000:role/r", WebIdentityTokenFilePath: "/var/run/token"}
-	if _, ok := roleCredentials(cfg, web).(*stscreds.WebIdentityRoleProvider); !ok {
-		t.Fatal("with a web identity the chain must assume the role")
+	if !cache.IsCredentialsProvider(assumed{}) {
+		t.Fatal("the cache does not hold the role provider")
 	}
-	half := config.EnvConfig{RoleARN: "arn:aws:iam::000000000000:role/r"}
-	if _, ok := roleCredentials(cfg, half).(*ec2rolecreds.Provider); !ok {
-		t.Fatal("a role with no token file is not a web identity")
+	role, ok := roleCredentials(cfg, hostedConfig().signer).(assumed)
+	if !ok {
+		t.Fatal("the role chain is not the assumed role")
+	}
+	if _, ok := role.CredentialsProvider.(*stscreds.WebIdentityRoleProvider); !ok {
+		t.Fatalf("the role provider is %T, want the web-identity exchange", role.CredentialsProvider)
 	}
 }
 

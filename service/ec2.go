@@ -16,10 +16,12 @@ package service
 
 // ec2.go is Hanzo's own AWS EC2 account: where every org's hosted machines run.
 //
-// It holds no key. The account is reached as the role this process runs as — a
-// web-identity (IRSA) role, or the node's instance role — and everything else
-// about the account is configuration, read by the key names below. A launch
-// refuses, naming the missing keys, rather than guess any of them.
+// It holds no AWS key. The account is reached as the role `hanzo-compute`,
+// assumed with a Hanzo IAM token: hanzo.id is an OIDC provider in the AWS
+// account, the role trusts only sts:AssumeRoleWithWebIdentity for tokens of the
+// IAM app `hanzo-compute`, and this process holds that app's client credential.
+// Everything about the account is configuration, read by the key names below,
+// and a call refuses, naming what is missing, rather than guess any of it.
 //
 // Every instance and root volume carries the org and the machine id that own it
 // as tags, and every read filters on those tags, so one org never sees, stops or
@@ -42,9 +44,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
-	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -54,15 +54,36 @@ import (
 	"github.com/hanzoai/compute/logs"
 )
 
-// The hosted account's configuration keys, read from conf/app.conf or from an
-// environment variable of the same name.
+// The hosted account's configuration keys. Each is read from an environment
+// variable of the same name, or from conf/app.conf, which reads it from the
+// variable envOf names.
 const (
-	keyRegion        = "computeRegion"
-	keySubnet        = "computeSubnet"
-	keySecurityGroup = "computeSecurityGroup"
-	keyImage         = "computeImage"
-	keyGPUImage      = "computeGpuImage"
+	keyRegion          = "computeRegion"
+	keySubnet          = "computeSubnet"
+	keySecurityGroup   = "computeSecurityGroup"
+	keyImage           = "computeImage"
+	keyGPUImage        = "computeGpuImage"
+	keyRoleARN         = "computeRoleArn"
+	keyIAMClientID     = "computeIamClientId"
+	keyIAMClientSecret = "computeIamClientSecret"
+	keyIAMEndpoint     = "computeIamEndpoint"
 )
+
+var envOf = map[string]string{
+	keyRegion:          "COMPUTE_REGION",
+	keySubnet:          "COMPUTE_SUBNET",
+	keySecurityGroup:   "COMPUTE_SECURITY_GROUP",
+	keyImage:           "COMPUTE_IMAGE",
+	keyGPUImage:        "COMPUTE_GPU_IMAGE",
+	keyRoleARN:         "COMPUTE_ROLE_ARN",
+	keyIAMClientID:     "COMPUTE_IAM_CLIENT_ID",
+	keyIAMClientSecret: "COMPUTE_IAM_CLIENT_SECRET",
+	keyIAMEndpoint:     "COMPUTE_IAM_ENDPOINT",
+}
+
+// hanzoIAM is the IAM the role's OIDC provider trusts, and where the web
+// identity is minted unless computeIamEndpoint names another front of it.
+const hanzoIAM = "https://hanzo.id"
 
 // Tags every hosted instance and volume carries besides the tenant scope
 // (orgTagKey, projectTagKey, appTagKey, kindTagKey).
@@ -80,23 +101,63 @@ type hostedAccount struct {
 	SecurityGroup string
 	Image         string
 	GPUImage      string
+	signer
+}
+
+// signer is what a call to the account is signed with: the region, the role,
+// and the IAM client credential the role is assumed with.
+type signer struct {
+	Region       string
+	RoleARN      string
+	ClientID     string
+	ClientSecret string
+	IAM          string
 }
 
 // hostedConfig reads the hosted account's configuration. It is read on every
 // use, so a key set on a running process takes effect on the next call.
 func hostedConfig() hostedAccount {
 	get := func(key string) string { return strings.TrimSpace(conf.GetConfigString(key)) }
+	region := get(keyRegion)
 	return hostedAccount{
-		Region:        get(keyRegion),
+		Region:        region,
 		Subnet:        get(keySubnet),
 		SecurityGroup: get(keySecurityGroup),
 		Image:         get(keyImage),
 		GPUImage:      get(keyGPUImage),
+		signer: signer{
+			Region:       region,
+			RoleARN:      get(keyRoleARN),
+			ClientID:     get(keyIAMClientID),
+			ClientSecret: get(keyIAMClientSecret),
+			IAM:          strings.TrimRight(cmp.Or(get(keyIAMEndpoint), hanzoIAM), "/"),
+		},
 	}
 }
 
-// image is the machine image a launch of o boots: the GPU image for a GPU size,
-// the default image for every other.
+// unset names each key whose value is empty, with the variable it is read from.
+func unset(pairs ...[2]string) []string {
+	var out []string
+	for _, kv := range pairs {
+		if kv[0] == "" {
+			out = append(out, kv[1]+" ("+envOf[kv[1]]+")")
+		}
+	}
+	return out
+}
+
+// missing is every key a call to the account needs and does not have.
+func (s signer) missing() []string {
+	return unset(
+		[2]string{s.Region, keyRegion},
+		[2]string{s.RoleARN, keyRoleARN},
+		[2]string{s.ClientID, keyIAMClientID},
+		[2]string{s.ClientSecret, keyIAMClientSecret},
+	)
+}
+
+// image is the machine image a launch of o boots, and its key: the GPU image for
+// a GPU size, the default image for every other.
 func (a hostedAccount) image(o offer) (string, string) {
 	if o.gpu != nil {
 		return a.GPUImage, keyGPUImage
@@ -106,19 +167,12 @@ func (a hostedAccount) image(o offer) (string, string) {
 
 // launchable reports what the account is missing to launch o, naming each key.
 func (a hostedAccount) launchable(o offer) error {
-	var missing []string
-	for _, kv := range [][2]string{
-		{a.Region, keyRegion},
-		{a.Subnet, keySubnet},
-		{a.SecurityGroup, keySecurityGroup},
-	} {
-		if kv[0] == "" {
-			missing = append(missing, kv[1])
-		}
-	}
-	if image, key := a.image(o); image == "" {
-		missing = append(missing, key)
-	}
+	image, imageKey := a.image(o)
+	missing := append(a.signer.missing(), unset(
+		[2]string{a.Subnet, keySubnet},
+		[2]string{a.SecurityGroup, keySecurityGroup},
+		[2]string{image, imageKey},
+	)...)
 	if len(missing) > 0 {
 		return fmt.Errorf("hosted compute cannot launch %s: %s not set", o.slug, strings.Join(missing, ", "))
 	}
@@ -126,70 +180,103 @@ func (a hostedAccount) launchable(o offer) error {
 }
 
 // errNoRegion is the account with no region: there is nothing to reach.
-var errNoRegion = fmt.Errorf("hosted compute is not configured: %s is not set", keyRegion)
+var errNoRegion = fmt.Errorf("hosted compute is not configured: %s (%s) is not set", keyRegion, envOf[keyRegion])
 
-// hosted is the EC2 client for the configured region, built once per region so
-// its credentials are cached across calls rather than fetched per request.
+// hosted is the EC2 client for the configured signer, built once per signer so
+// the assumed role's credentials are cached across calls rather than fetched
+// per request, and rebuilt when the role or the client credential changes.
 var hosted struct {
 	sync.Mutex
-	region string
+	signer signer
 	client *ec2.Client
 }
 
 // hostedEC2 returns the client for the hosted account and the region it serves.
 func hostedEC2(ctx context.Context) (*ec2.Client, string, error) {
-	region := hostedConfig().Region
-	if region == "" {
+	s := hostedConfig().signer
+	if s.Region == "" {
 		return nil, "", errNoRegion
+	}
+	if missing := s.missing(); len(missing) > 0 {
+		return nil, "", fmt.Errorf("hosted compute cannot reach AWS: %s not set", strings.Join(missing, ", "))
 	}
 	hosted.Lock()
 	defer hosted.Unlock()
-	if hosted.client != nil && hosted.region == region {
-		return hosted.client, region, nil
+	if hosted.client != nil && hosted.signer == s {
+		return hosted.client, s.Region, nil
 	}
-	cfg, err := awsConfig(ctx, region)
+	cfg, err := awsConfig(ctx, s)
 	if err != nil {
 		return nil, "", err
 	}
-	hosted.client, hosted.region = ec2.NewFromConfig(cfg), region
-	return hosted.client, region, nil
+	hosted.client, hosted.signer = ec2.NewFromConfig(cfg), s
+	return hosted.client, s.Region, nil
 }
 
-// awsConfig is the SDK configuration for region: the SDK's own loader for
-// region, endpoints, retries and IMDS, with the role chain as the only source of
-// credentials and a bounded HTTP client under every call.
-func awsConfig(ctx context.Context, region string) (aws.Config, error) {
+// roleWindow is how long before the assumed role's credentials expire they are
+// replaced, so a call never goes out on credentials that lapse in flight.
+const roleWindow = 5 * time.Minute
+
+// awsConfig is the SDK configuration for s: the SDK's own loader for region,
+// endpoints and retries, a bounded HTTP client under every call, and the role
+// as the only credential.
+//
+// The loader is handed anonymous credentials, so it never resolves the SDK's
+// default chain at all: that chain reads AWS_ACCESS_KEY_ID first, and this pod
+// carries that variable for its own object store, so EC2 would otherwise be
+// signed with a storage key. Nothing in it reaches the instance metadata
+// service either.
+func awsConfig(ctx context.Context, s signer) (aws.Config, error) {
 	cfg, err := config.LoadDefaultConfig(ctx,
-		config.WithRegion(region),
+		config.WithRegion(s.Region),
 		config.WithHTTPClient(directHTTP()),
+		config.WithCredentialsProvider(aws.AnonymousCredentials{}),
 	)
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("hosted compute: load AWS configuration: %w", err)
 	}
-	env, err := config.NewEnvConfig()
-	if err != nil {
-		return aws.Config{}, fmt.Errorf("hosted compute: read AWS environment: %w", err)
-	}
-	cfg.Credentials = aws.NewCredentialsCache(roleCredentials(cfg, env))
+	cfg.Credentials = aws.NewCredentialsCache(roleCredentials(cfg, s),
+		func(o *aws.CredentialsCacheOptions) { o.ExpiryWindow = roleWindow })
 	return cfg, nil
 }
 
-// roleCredentials is the credential chain for the hosted account: the SDK
-// default chain's role providers, in its order, and never a static key.
-//
-// A web identity (AWS_ROLE_ARN with AWS_WEB_IDENTITY_TOKEN_FILE, which is IRSA)
-// comes first; otherwise the instance role from IMDS. The static-key steps are
-// left out on purpose: the SDK reads AWS_ACCESS_KEY_ID before any role, and this
-// pod carries that variable for its own object store, so the unmodified default
-// chain would sign EC2 calls with a storage key.
-func roleCredentials(cfg aws.Config, env config.EnvConfig) aws.CredentialsProvider {
-	if env.RoleARN != "" && env.WebIdentityTokenFilePath != "" {
-		session := cmp.Or(env.RoleSessionName, managedBy)
-		return stscreds.NewWebIdentityRoleProvider(sts.NewFromConfig(cfg), env.RoleARN,
-			stscreds.IdentityTokenFile(env.WebIdentityTokenFilePath),
-			func(o *stscreds.WebIdentityRoleOptions) { o.RoleSessionName = session })
+// roleCredentials assumes the role with a Hanzo IAM client_credentials token as
+// the web identity. The exchange is unsigned — AssumeRoleWithWebIdentity takes
+// no AWS credential — so the STS client carries none.
+func roleCredentials(cfg aws.Config, s signer) aws.CredentialsProvider {
+	stsClient := sts.NewFromConfig(cfg, func(o *sts.Options) { o.Credentials = aws.AnonymousCredentials{} })
+	token := iamToken{NewIdentity(s.IAM, s.ClientID, s.ClientSecret, "", directHTTP())}
+	return assumed{stscreds.NewWebIdentityRoleProvider(stsClient, s.RoleARN, token,
+		func(o *stscreds.WebIdentityRoleOptions) { o.RoleSessionName = managedBy })}
+}
+
+// errRole marks a call that failed because the role could not be assumed — IAM
+// refused the client, or STS refused the token — rather than because EC2
+// refused the call.
+var errRole = errors.New("hosted compute could not assume its role")
+
+// assumed is the role provider with its failures marked errRole.
+type assumed struct{ aws.CredentialsProvider }
+
+func (a assumed) Retrieve(ctx context.Context) (aws.Credentials, error) {
+	creds, err := a.CredentialsProvider.Retrieve(ctx)
+	if err != nil {
+		return creds, fmt.Errorf("%w: %w", errRole, err)
 	}
-	return ec2rolecreds.New(func(o *ec2rolecreds.Options) { o.Client = imds.NewFromConfig(cfg) })
+	return creds, nil
+}
+
+// iamToken is the web identity: the IAM app's client_credentials token, which
+// Identity mints and replaces before it expires.
+type iamToken struct{ identity *Identity }
+
+// GetIdentityToken satisfies stscreds.IdentityTokenRetriever.
+func (t iamToken) GetIdentityToken() ([]byte, error) {
+	tok, err := t.identity.Token()
+	if err != nil {
+		return nil, fmt.Errorf("hosted compute: web identity: %w", err)
+	}
+	return []byte(tok), nil
 }
 
 // ---- machine ids ----
@@ -501,7 +588,14 @@ var capacityCodes = map[string]bool{
 func refusal(op string, err error, size, region string) error {
 	logs.Warning("hosted compute: %s: %v", op, err)
 	var api smithy.APIError
-	if !errors.As(err, &api) {
+	hasCode := errors.As(err, &api)
+	if errors.Is(err, errRole) {
+		if hasCode {
+			return fmt.Errorf("%s: %w (%s)", op, errRole, api.ErrorCode())
+		}
+		return fmt.Errorf("%s: %w", op, errRole)
+	}
+	if !hasCode {
 		return fmt.Errorf("%s failed: the cloud did not answer", op)
 	}
 	where := size
