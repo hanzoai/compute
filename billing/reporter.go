@@ -16,10 +16,9 @@
 // debited one hour of its resale price, every hour it runs, to the org that owns
 // it.
 //
-// It debits on the ONE compute meter — service.NewMeteringClient + RecordCompute,
-// the same client, the same KMS-synced COMMERCE_SERVICE_TOKEN, the same
-// POST /v1/billing/usage, the same X-Org-Id tenant header as every other debit in
-// this binary. It used to have its own: its own credential (COMMERCE_TOKEN, a name
+// It debits on the ONE compute meter — service.RecordCompute, the same client,
+// the same IAM identity, the same POST /v1/billing/usage, the same X-Org-Id
+// tenant header as every other debit in this binary. It used to have its own: its own credential (COMMERCE_TOKEN, a name
 // nothing in production sets), its own HTTP client, its own path
 // ({base}/api/v1/billing/meter-events — commerce serves no /api/ prefix), and no
 // tenant header at all. Three independent reasons the same request could not have
@@ -147,7 +146,7 @@ func meterPools(ctx context.Context, live []service.LivePool, rows []*object.Nod
 			continue
 		}
 		cents := rate * int64(u.nodes)
-		if err := service.RecordCompute(ctx, u.org, u.project, cents, u.size, "running",
+		if err := service.RecordCompute(ctx, u.org, u.project, cents, u.size,
 			fmt.Sprintf("pool-%s-%s", u.id, stamp)); err != nil {
 			skipped++
 			logs.Warning("pool metering: debit pool %s (org %s, %d cents): %v", u.id, u.org, cents, err)

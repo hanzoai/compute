@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +26,8 @@ import (
 
 	"github.com/hanzoai/compute/object"
 	"github.com/hanzoai/compute/service"
+
+	"github.com/hanzoai/compute/service/commercetest"
 )
 
 // A batch launched with count=N is just N machines named "<name>-000",
@@ -244,7 +245,7 @@ type launchCommerce struct {
 func launchCommerceOf(t *testing.T, availableCents int64) *launchCommerce {
 	t.Helper()
 	c := &launchCommerce{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		switch {
@@ -259,9 +260,6 @@ func launchCommerceOf(t *testing.T, availableCents int64) *launchCommerce {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(srv.Close)
-	t.Setenv("COMMERCE_URL", srv.URL)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 	// No provider token: LaunchOrgMachine cannot reach DigitalOcean, so if the
 	// launch ever gets that far it fails for a DIFFERENT reason — which is
 	// exactly what the read count is here to detect.

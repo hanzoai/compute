@@ -68,9 +68,8 @@ func claimLease(row any) bool {
 // BillingLease is the generic single-flight lease for a billable UNIT — a
 // daily BYOC-cost line ("byoc:<owner>:<provider>:<YYYYMMDD>") or a monthly
 // per-device line ("device:<owner>:<worker>:<YYYYMM>"). It is the money-safety
-// twin of MeterLease: visor runs replicas: 2 with no leader election and commerce
-// does NOT dedup the withdraw on requestId, so without a cluster-wide claim BOTH
-// replicas would meter the same unit and double-bill it.
+// twin of MeterLease: the claim keeps a second replica from metering the unit at
+// all, and the unit's name is the debit's id, which the ledger debits once.
 //
 // It is a SEPARATE table from MeterLease on purpose: the hourly compute sweep keeps
 // using MeterLease unchanged, so a rolling deploy of this change can never make one

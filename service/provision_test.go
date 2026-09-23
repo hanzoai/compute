@@ -19,12 +19,13 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/digitalocean/godo"
+
+	"github.com/hanzoai/compute/service/commercetest"
 )
 
 // ledger is a commerce whose balance actually MOVES: the gate reads it, the debit
@@ -44,7 +45,7 @@ func ledgerOf(t *testing.T, funded map[string]int64) *ledger {
 	t.Helper()
 	l := &ledger{available: map[string]int64{}, debits: map[string]int{}}
 	maps.Copy(l.available, funded)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		org := r.Header.Get("X-Org-Id")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/balance"):
@@ -53,12 +54,9 @@ func ledgerOf(t *testing.T, funded map[string]int64) *ledger {
 			l.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{"available": a, "currency": "usd"})
 		case strings.HasSuffix(r.URL.Path, "/usage"):
-			var u struct {
-				Amount int64 `json:"amount"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&u)
+			cents := commercetest.Read(r).Cents()
 			l.mu.Lock()
-			l.available[org] -= u.Amount
+			l.available[org] -= cents
 			l.debits[org]++
 			l.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
@@ -67,9 +65,6 @@ func ledgerOf(t *testing.T, funded map[string]int64) *ledger {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(srv.Close)
-	t.Setenv("COMMERCE_URL", srv.URL)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 	return l
 }
 

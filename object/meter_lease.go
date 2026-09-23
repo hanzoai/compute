@@ -21,11 +21,10 @@ import (
 // MeterLease is a single-flight lease for the hourly compute-metering sweep.
 // Its whole purpose is a MONEY-SAFETY invariant: the visor Deployment runs
 // replicas: 2 with no leader election, so without a lease BOTH replicas would run
-// service.MeterRunningMachines every hour and debit every running machine twice
-// (the per-machine hour-bucketed RequestID is only a dedup HINT — commerce's
-// RecordUsage does NOT dedup the withdraw transaction on requestId, so the client
-// key alone does not stop a duplicate debit). The lease makes exactly one replica
-// perform the sweep per wall-clock hour, cluster-wide.
+// service.MeterRunningMachines every hour. The per-machine hour-bucketed usage id
+// is debited once by the ledger, so a duplicate sweep moves no money; the lease
+// keeps it from running at all, making exactly one replica perform the sweep per
+// wall-clock hour, cluster-wide.
 //
 // The mechanism is the same insert-once-wins primitive the rest of object uses:
 // Hour is the PK, so only the FIRST Insert for a given hour succeeds; a concurrent

@@ -14,21 +14,18 @@
 
 // metering.go is the ONE commerce metering path for resell compute. Both the
 // launch debit (controllers/compute.go) and the recurring hourly debit
-// (MeterRunningMachines, driven by task/ticker) build their client with
-// NewMeteringClient and price with PriceToCents — there is no second metering
-// path for /v1 machines. (The legacy billing/reporter.go meters DOKS NODE POOLS
-// on a different, node-pool-specific event API; it is orthogonal and untouched.)
+// (MeterRunningMachines, driven by task/ticker) price with PriceToCents and debit
+// through RecordCompute on cloud's commerce API (commerce.go) — there is no
+// second metering path for /v1 machines. Fleet billing (billing/) debits through
+// the same client.
 package service
 
 import (
 	"context"
 	"fmt"
 	"math"
-	"os"
-	"strings"
 	"time"
 
-	"github.com/hanzoai/commerce/metering"
 	"github.com/hanzoai/compute/logs"
 	"github.com/hanzoai/compute/telemetry"
 )
@@ -51,53 +48,11 @@ func PriceToCents(price float64) int64 {
 	return int64(math.Ceil(price*100 - 1e-9))
 }
 
-// NewMeteringClient builds the commerce metering client for an org. The commerce
-// base URL and the admin-scoped service token both come from the environment (the
-// operator wires the token from KMS as COMMERCE_SERVICE_TOKEN). When the token is
-// absent the client fails closed on Authorize, so real launches are denied while
-// quotes still work, and the recurring meter is a no-op (Record short-circuits on
-// !Enabled()). This is the SAME client construction every visor debit uses, so
-// they all key the same per-org ledger.
-//
-// TierAware is OFF: the compute gate reads the org's PREPAID balance, not the
-// tier-aware effective balance that folds in the included plan allotment. Compute
-// is the one surface where a request provisions a resource that keeps drawing
-// upstream cost for as long as it runs, so a promotional grant must not be
-// convertible into GPU-hours — a free-tier credit is meant to buy inference, not
-// an H100. TierAware only affects Authorize's balance read (metering.fetchAvailable
-// picks /v1/billing/tier over /v1/billing/balance); Record is unaffected, so the
-// fleet-billing lines this client also carries are unchanged.
-func NewMeteringClient(org string) *metering.Client {
-	base := strings.TrimSpace(os.Getenv("COMMERCE_URL"))
-	if base == "" {
-		base = "http://commerce.hanzo.svc.cluster.local:8001"
-	}
-	client, _ := metering.New(metering.Config{
-		BaseURL:   base,
-		Token:     strings.TrimSpace(os.Getenv("COMMERCE_SERVICE_TOKEN")),
-		Org:       org,
-		TierAware: false,
-		Timeout:   5 * time.Second,
-	})
-	return client
-}
-
-// MeteringConfigured reports whether the recurring meter will actually debit.
-// The client's own Enabled() only checks the base URL (which always defaults to
-// the in-cluster commerce), so the real "is billing wired" signal is the
-// operator-provisioned service token (KMS-synced COMMERCE_SERVICE_TOKEN) — the
-// same credential the launch path needs to authorize. Absent ⇒ the sweep is a
-// safe no-op: an unconfigured deployment is never blocked or spammed with failed
-// (401) debits.
-func MeteringConfigured() bool {
-	return strings.TrimSpace(os.Getenv("COMMERCE_SERVICE_TOKEN")) != "" && NewMeteringClient("hanzo").Enabled()
-}
-
-// HourStamp is the per-hour bucket for the RequestID: the same running resource
-// metered twice within one wall-clock hour carries the SAME RequestID (the client
-// dedup hint). The authoritative once-per-hour guarantee is the single-flight
-// lease in the ticker (object.ClaimMeterHour), because commerce does not dedup the
-// withdraw on requestId.
+// HourStamp is the per-hour bucket in the usage id: the same running resource
+// metered twice within one wall-clock hour carries the SAME id, and cloud debits
+// one id once. The single-flight lease in the ticker (object.ClaimMeterHour) keeps
+// a second replica from sweeping at all; the id is what makes a retried debit
+// harmless.
 func HourStamp(now time.Time) string { return now.UTC().Format("2006010215") }
 
 // CreatedInHour reports whether an RFC3339 create time falls in the same UTC
@@ -127,16 +82,16 @@ func CreatedInHour(createdTime, stamp string) bool {
 // Per machine: org is recovered from the machine's own hanzo-org tag (never
 // trusted from a client — it is the tag LaunchOrgMachine injected), the hourly
 // price comes from the resale catalog (SizeBySlug → PriceToCents), and the debit
-// carries RequestID "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled
+// carries the usage id "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled
 // from gating (the machine already ran that hour, so the cost must be recorded);
 // enforcement/suspend on a depleted balance is a separate control. A per-machine
 // error is logged and does not abort the sweep.
 //
-// EXACTLY-ONCE PER HOUR is enforced OUTSIDE the RequestID: commerce's RecordUsage
-// does NOT dedup the withdraw on requestId, so the key is only a reconciliation
-// hint. The real once-per-hour guarantees are (1) the ticker's per-hour
-// single-flight lease (object.ClaimMeterHour) so only one replica sweeps, and
-// (2) skipping a machine's LAUNCH hour here (the launch path already billed it).
+// EXACTLY-ONCE PER HOUR: cloud debits one usage id once, so a retried or
+// overlapping sweep of the same hour moves no more money; the ticker's per-hour
+// single-flight lease (object.ClaimMeterHour) keeps other replicas from sweeping,
+// and the LAUNCH hour is skipped here because the launch path already billed it
+// under a different id.
 //
 // No-op when metering is unconfigured or when compute is unconfigured (no platform
 // token) — nothing to enumerate, nothing to debit.
@@ -162,7 +117,7 @@ func MeterRunningMachines(ctx context.Context) {
 // one hour's debit with an hour-bucketed RequestID. Returns (metered, skipped).
 // A per-machine failure is logged and skipped — one bad machine never aborts the
 // sweep. Isolated from the DO enumeration so the billing contract is testable
-// against a fake commerce.
+// against a fake commerce API.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
 	stamp := HourStamp(now)
 	for _, m := range machines {
@@ -178,9 +133,9 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		// attributable per project.
 		project := projectFromTag(m.Tag)
 		// Skip the LAUNCH hour: the launch path already debited this machine one
-		// hour at create time (RequestID = machine id). Metering it again for the
+		// hour at create time (usage id = machine id). Metering it again for the
 		// same wall-clock hour would double-charge the launch hour (the launch and
-		// sweep RequestIDs differ, and commerce does not dedup across them). A
+		// sweep ids differ, so the ledger sees two acts). A
 		// machine with no parseable create time (older rows / test doubles) is
 		// metered normally — a launch is never billed unless the launch path ran,
 		// so failing to skip only risks the historical status quo, never a miss.
@@ -196,7 +151,7 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			logs.Warning("compute metering: machine %s not billed: %v", m.Id, err)
 			continue
 		}
-		if err := RecordCompute(ctx, org, project, cents, m.Size, "running",
+		if err := RecordCompute(ctx, org, project, cents, m.Size,
 			fmt.Sprintf("compute-%s-%s", m.Id, stamp)); err != nil {
 			skipped++
 			logs.Warning("compute metering: debit machine %s (org %s): %v", m.Id, org, err)

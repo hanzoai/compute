@@ -19,12 +19,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/digitalocean/godo"
+
+	"github.com/hanzoai/compute/service/commercetest"
 )
 
 // ---- fake commerce, by verdict ----
@@ -37,7 +38,7 @@ type commerceMood int
 const (
 	funded commerceMood = iota
 	unfunded
-	unauthorized // 401 — absent or rotated COMMERCE_SERVICE_TOKEN
+	unauthorized // 401 — a refused or revoked IAM identity
 	broken       // 500
 	hanging      // no answer before the client's own timeout
 )
@@ -76,10 +77,7 @@ func commerceOf(t *testing.T, mood commerceMood, availableCents int64) (debits *
 		_, _ = w.Write([]byte(`{"transactionId":"tx","type":"usage"}`))
 	})
 
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	t.Setenv("COMMERCE_URL", srv.URL)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	commercetest.Serve(t, mux)
 	return &n, &m
 }
 
@@ -455,21 +453,16 @@ func TestCreateClusterMetered_BillsEveryNodeAndFloorsTheCount(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var billed int64
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/balance") {
 					_ = json.NewEncoder(w).Encode(map[string]any{"available": 10000000, "currency": "usd"})
 					return
 				}
 				if strings.HasSuffix(r.URL.Path, "/usage") {
-					var u struct {
-						Amount   int64  `json:"amount"`
-						Provider string `json:"provider"`
-						Model    string `json:"model"`
-					}
-					_ = json.NewDecoder(r.Body).Decode(&u)
-					billed = u.Amount
-					if u.Provider != "compute" || u.Model != "gpu-h100x8-640gb" {
-						t.Errorf("debit must name the compute plane and the size, got provider=%q model=%q", u.Provider, u.Model)
+					u := commercetest.Read(r)
+					billed = u.Cents()
+					if u.Service != "compute" || u.Model != "gpu-h100x8-640gb" {
+						t.Errorf("debit must name the compute plane and the size, got service=%q model=%q", u.Service, u.Model)
 					}
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write([]byte(`{"transactionId":"tx","type":"usage"}`))
@@ -477,9 +470,6 @@ func TestCreateClusterMetered_BillsEveryNodeAndFloorsTheCount(t *testing.T) {
 				}
 				w.WriteHeader(http.StatusNotFound)
 			}))
-			t.Cleanup(srv.Close)
-			t.Setenv("COMMERCE_URL", srv.URL)
-			t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 
 			do := &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
 			if _, err := createClusterMetered(context.Background(), newDOKSTestClient(t, do), newPoolLedger().record, "acme", "",
@@ -501,17 +491,19 @@ func TestCreateClusterMetered_BillsEveryNodeAndFloorsTheCount(t *testing.T) {
 
 // ---- the sweep gate ----
 
-// An absent service token means no sweep can debit, and saying so is the whole
+// An absent IAM identity means no sweep can debit, and saying so is the whole
 // fix: the silent early-return this replaces let every running machine go
 // unbilled with no log, no metric, and a healthy-looking service.
-func TestBillable_IsFalseAndLoudWithoutAToken(t *testing.T) {
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "")
+func TestBillable_IsFalseAndLoudWithoutAnIdentity(t *testing.T) {
+	t.Setenv("iamEndpoint", "https://iam.example")
+	t.Setenv("clientSecret", "shh")
+	t.Setenv("clientId", "")
 	if Billable(context.Background(), "compute.hourly") {
-		t.Fatal("no service token means the sweep cannot debit")
+		t.Fatal("no IAM identity means the sweep cannot debit")
 	}
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	t.Setenv("clientId", "hanzo-visor")
 	if !Billable(context.Background(), "compute.hourly") {
-		t.Fatal("a wired token must let the sweep run")
+		t.Fatal("a wired identity must let the sweep run")
 	}
 }
 
@@ -521,15 +513,12 @@ func TestBillable_IsFalseAndLoudWithoutAToken(t *testing.T) {
 func TestAuthorizeCompute_ReadsPrepaidNotPromotionalCredit(t *testing.T) {
 	var paths []string
 	var mu sync.Mutex
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		paths = append(paths, r.URL.Path)
 		mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"available": 100000, "currency": "usd"})
 	}))
-	t.Cleanup(srv.Close)
-	t.Setenv("COMMERCE_URL", srv.URL)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 
 	if err := AuthorizeCompute(context.Background(), "acme", "", 3178); err != nil {
 		t.Fatalf("funded: %v", err)

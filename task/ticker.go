@@ -40,8 +40,8 @@ func (t *Ticker) SetupTicker() {
 	}()
 
 	// compute metering: debit every RUNNING resell resource one hour of its resale
-	// price to its owning org, every hour, on the canonical commerce/metering path
-	// (same client the launch debit uses). A running machine and a running node
+	// price to its owning org, every hour, through the one commerce client (the same
+	// one the launch debit uses). A running machine and a running node
 	// pool both keep drawing down the org's credit balance.
 	//
 	// ONE sweep, TWO resource kinds, ONE lease. Machines are enumerated from the
@@ -58,9 +58,9 @@ func (t *Ticker) SetupTicker() {
 	// drift.
 	//
 	// SINGLE-FLIGHT ACROSS REPLICAS (money safety): visor runs replicas: 2+ with no
-	// external coordinator, and commerce does NOT dedup the withdraw on requestId, so an
-	// unguarded sweep would double-debit every machine every hour. Exactly-once is TWO
-	// composed guarantees, both inside object:
+	// external coordinator; the ledger debits each hour-bucketed usage id once, and an
+	// unguarded sweep would still enumerate and post every machine from every replica.
+	// Exactly-once sweeping is TWO composed guarantees, both inside object:
 	//   (1) IsBillingOwner() — only the HRW-elected owner of the `_global` coord DB runs
 	//       the sweep, so non-owner replicas never enumerate machines or call commerce
 	//       (they still serve all read/stateless traffic — only the money-WRITER is gated).
@@ -75,9 +75,9 @@ func (t *Ticker) SetupTicker() {
 	// Wired UNCONDITIONALLY — enablement is decided INSIDE MeterRunningMachines
 	// every hour, which is what the paragraph above already promised. The
 	// startup-time MeteringConfigured() check that used to stand here broke that
-	// promise in the worst direction: a pod that booted before its KMS-synced
-	// COMMERCE_SERVICE_TOKEN landed never created the ticker at all, so it never
-	// billed a single machine-hour for the life of the pod, silently.
+	// promise in the worst direction: a pod that booted before its credential
+	// landed never created the ticker at all, so it never billed a single
+	// machine-hour for the life of the pod, silently.
 	//
 	// The tick body is hour.run, which adds the PRECONDITION on claiming — the
 	// provider must answer before the hour is spent. Those two exactly-once

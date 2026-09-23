@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
@@ -26,6 +25,8 @@ import (
 
 	"github.com/hanzoai/compute/object"
 	"github.com/hanzoai/compute/service"
+
+	"github.com/hanzoai/compute/service/commercetest"
 )
 
 // TestMain gives this package a REAL per-org store. The property that matters
@@ -56,14 +57,13 @@ func TestMain(m *testing.M) {
 // node-pool meter used to get wrong — the path it posted to, the credential it
 // presented, and the tenant it named.
 type debit struct {
-	path     string
-	auth     string
-	org      string
-	amount   int64
-	provider string
-	model    string
-	status   string
-	request  string
+	path    string
+	auth    string
+	org     string
+	amount  int64
+	service string
+	model   string
+	request string
 }
 
 type commerceFake struct {
@@ -78,31 +78,21 @@ type commerceFake struct {
 func commerceOf(t *testing.T) *commerceFake {
 	t.Helper()
 	f := &commerceFake{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			_ = json.NewEncoder(w).Encode(map[string]any{"available": 100000000, "currency": "usd"})
 			return
 		}
-		var u struct {
-			Amount    int64  `json:"amount"`
-			Provider  string `json:"provider"`
-			Model     string `json:"model"`
-			Status    string `json:"status"`
-			RequestID string `json:"requestId"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&u)
+		u := commercetest.Read(r)
 		f.mu.Lock()
 		f.debits = append(f.debits, debit{
 			path: r.URL.Path, auth: r.Header.Get("Authorization"), org: r.Header.Get("X-Org-Id"),
-			amount: u.Amount, provider: u.Provider, model: u.Model, status: u.Status, request: u.RequestID,
+			amount: u.Cents(), service: u.Service, model: u.Model, request: u.ID,
 		})
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"transactionId":"tx","type":"usage"}`))
 	}))
-	t.Cleanup(srv.Close)
-	t.Setenv("COMMERCE_URL", srv.URL)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 	// No platform DigitalOcean token: the resale catalog cannot refresh, so a pool
 	// with no stored rate has no price at all — which is exactly the condition the
 	// refuse-rather-than-bill-zero case needs.
@@ -166,8 +156,8 @@ func TestMeterPools_BillsEveryHourAfterTheFirst(t *testing.T) {
 		if d.amount != 3178*4 {
 			t.Fatalf("a pool-hour is rate x nodes: got %d cents, want %d", d.amount, 3178*4)
 		}
-		if d.provider != "compute" || d.model != "gpu-h100x8-640gb" || d.status != "running" {
-			t.Fatalf("debit must name the compute plane, the size and the lifecycle point: %+v", d)
+		if d.service != "compute" || d.model != "gpu-h100x8-640gb" {
+			t.Fatalf("debit must name the compute plane and the size: %+v", d)
 		}
 		if seen[d.request] {
 			t.Fatalf("each hour needs its own idempotency key, saw %q twice", d.request)
@@ -195,8 +185,8 @@ func TestMeterPools_DebitRidesTheOneCommercePath(t *testing.T) {
 	if d.path != "/v1/billing/usage" {
 		t.Fatalf("commerce serves /v1/billing/usage (no /api/ prefix), the sweep posted to %q", d.path)
 	}
-	if d.auth != "Bearer svc-token" {
-		t.Fatalf("the sweep must present COMMERCE_SERVICE_TOKEN, got %q", d.auth)
+	if d.auth != "Bearer "+commercetest.Token {
+		t.Fatalf("the sweep must present visor's IAM token, got %q", d.auth)
 	}
 	if d.org != "acme" {
 		t.Fatalf("the debit must carry its tenant as X-Org-Id, got %q", d.org)
@@ -371,7 +361,7 @@ func TestRecordSeedPoolIsIdempotent(t *testing.T) {
 // than quietly doing nothing.
 func TestMeterRunningNodePools_CannotDebitWithoutAToken(t *testing.T) {
 	f := commerceOf(t)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "")
+	t.Setenv("clientId", "")
 
 	MeterRunningNodePools(context.Background(), time.Now())
 

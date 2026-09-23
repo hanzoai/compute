@@ -16,13 +16,13 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hanzoai/compute/service/commercetest"
 )
 
 func TestPriceToCents(t *testing.T) {
@@ -113,13 +113,11 @@ func TestNormalizeProject(t *testing.T) {
 	}
 }
 
-// A running machine carrying a project tag attributes its debit to org/project via
-// the Actor, while the debit destination (User + X-Org-Id) stays the org — one org
-// balance covers all its projects.
+// A running machine carrying a project tag attributes its debit to the project,
+// while the debit destination (the org named in the body and X-Org-Id) stays the
+// org — one org balance covers all its projects.
 func TestMeterMachines_AttributesProjectViaActor(t *testing.T) {
-	url, recs, mu := fakeCommerce(t)
-	t.Setenv("COMMERCE_URL", url)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	recs, mu := fakeCommerce(t)
 	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
 
 	now := time.Date(2026, 7, 2, 15, 30, 0, 0, time.UTC)
@@ -135,18 +133,11 @@ func TestMeterMachines_AttributesProjectViaActor(t *testing.T) {
 	if r.org != "acme" { // debit destination stays the org
 		t.Fatalf("X-Org-Id = %q, want acme", r.org)
 	}
-	var u struct {
-		User  string `json:"user"`
-		Actor string `json:"actor"`
+	if r.usage.Org != "acme" {
+		t.Fatalf("debit org = %q, want acme (org is the billing key)", r.usage.Org)
 	}
-	if err := json.Unmarshal(r.body, &u); err != nil {
-		t.Fatalf("parse usage: %v", err)
-	}
-	if u.User != "acme" {
-		t.Fatalf("debit user = %q, want acme (org is the billing key)", u.User)
-	}
-	if u.Actor != "acme/web" {
-		t.Fatalf("actor = %q, want acme/web (per-project attribution)", u.Actor)
+	if r.usage.Project != "web" {
+		t.Fatalf("project = %q, want web (per-project attribution)", r.usage.Project)
 	}
 }
 
@@ -167,28 +158,28 @@ func TestHourStamp_IdempotencyBucket(t *testing.T) {
 
 // recorded is one usage debit captured by the fake commerce.
 type recorded struct {
-	org  string
-	body []byte
+	org   string
+	auth  string
+	usage commercetest.Usage
 }
 
-// fakeCommerce records every usage POST; it never gates (Record does not check
-// balance). Returns the base URL.
-func fakeCommerce(t *testing.T) (url string, got *[]recorded, mu *sync.Mutex) {
+// fakeCommerce records every usage POST; it never gates (a debit does not check
+// balance).
+func fakeCommerce(t *testing.T) (got *[]recorded, mu *sync.Mutex) {
 	t.Helper()
 	var recs []recorded
 	var m sync.Mutex
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/billing/usage", func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
+		u := commercetest.Read(r)
 		m.Lock()
-		recs = append(recs, recorded{org: r.Header.Get("X-Org-Id"), body: b})
+		recs = append(recs, recorded{org: r.Header.Get("X-Org-Id"), auth: r.Header.Get("Authorization"), usage: u})
 		m.Unlock()
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `{"transactionId":"tx","type":"usage"}`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"`+u.ID+`","org":"`+u.Org+`","account":"`+u.Org+`","amount":{"decimal":"`+u.Amount.Decimal+`","currency":"usd"}}`)
 	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv.URL, &recs, &m
+	commercetest.Serve(t, mux)
+	return &recs, &m
 }
 
 // seedCatalog pre-populates the package catalog cache so SizeBySlug resolves
@@ -207,27 +198,10 @@ func seedCatalog(t *testing.T, sizes ...SizeInfo) {
 	})
 }
 
-func parseUsage(t *testing.T, b []byte) (user, provider, model string, amount int64, reqID string) {
-	t.Helper()
-	var u struct {
-		User      string `json:"user"`
-		Provider  string `json:"provider"`
-		Model     string `json:"model"`
-		Amount    int64  `json:"amount"`
-		RequestID string `json:"requestId"`
-	}
-	if err := json.Unmarshal(b, &u); err != nil {
-		t.Fatalf("parse usage %q: %v", b, err)
-	}
-	return u.User, u.Provider, u.Model, u.Amount, u.RequestID
-}
-
 // A running machine debits its OWNING org one hour of resale price, attributed
 // product "compute" / model <size>, with an hour-bucketed idempotency RequestID.
 func TestMeterMachines_DebitsRunningMachinePerOrg(t *testing.T) {
-	url, recs, mu := fakeCommerce(t)
-	t.Setenv("COMMERCE_URL", url)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	recs, mu := fakeCommerce(t)
 	seedCatalog(t, SizeInfo{Slug: "s-2vcpu-4gb", PriceHourly: 0.05, Currency: "USD"})
 
 	now := time.Date(2026, 7, 2, 15, 30, 0, 0, time.UTC)
@@ -246,30 +220,31 @@ func TestMeterMachines_DebitsRunningMachinePerOrg(t *testing.T) {
 	if r.org != "acme" {
 		t.Fatalf("X-Org-Id = %q, want acme", r.org)
 	}
-	user, provider, model, amount, reqID := parseUsage(t, r.body)
-	if user != "acme" {
-		t.Fatalf("debit user = %q, want acme", user)
+	u := r.usage
+	if u.Org != "acme" {
+		t.Fatalf("debit org = %q, want acme", u.Org)
 	}
-	if provider != "compute" {
-		t.Fatalf("provider = %q, want compute", provider)
+	if r.auth != "Bearer "+commercetest.Token {
+		t.Fatalf("debit presented %q, want visor's IAM token", r.auth)
 	}
-	if model != "s-2vcpu-4gb" {
-		t.Fatalf("model = %q, want s-2vcpu-4gb", model)
+	if u.Service != "compute" {
+		t.Fatalf("service = %q, want compute", u.Service)
 	}
-	if amount != 5 { // $0.05 -> 5 cents
-		t.Fatalf("amount = %d, want 5", amount)
+	if u.Model != "s-2vcpu-4gb" {
+		t.Fatalf("model = %q, want s-2vcpu-4gb", u.Model)
 	}
-	if reqID != "compute-111-2026070215" {
-		t.Fatalf("requestId = %q, want compute-111-2026070215 (hour-bucketed idempotency)", reqID)
+	if u.Amount.Decimal != "0.05" || u.Amount.Currency != "usd" || u.Cents() != 5 { // $0.05 -> 5 cents
+		t.Fatalf("amount = %+v, want 0.05 usd", u.Amount)
+	}
+	if u.ID != "compute-111-2026070215" {
+		t.Fatalf("id = %q, want compute-111-2026070215 (hour-bucketed idempotency)", u.ID)
 	}
 }
 
-// The idempotency key is stable across two sweeps in the SAME hour (commerce
-// dedups), and changes in the NEXT hour (a new billable unit).
+// The usage id is stable across two sweeps in the SAME hour (the ledger debits
+// one id once), and changes in the NEXT hour (a new billable unit).
 func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
-	url, recs, mu := fakeCommerce(t)
-	t.Setenv("COMMERCE_URL", url)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	recs, mu := fakeCommerce(t)
 	seedCatalog(t, SizeInfo{Slug: "s-1vcpu-1gb", PriceHourly: 0.01, Currency: "USD"})
 
 	m := []*Machine{{Id: "222", Size: "s-1vcpu-1gb", Tag: "hanzo-org:acme"}}
@@ -281,11 +256,9 @@ func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if len(*recs) != 3 {
-		t.Fatalf("recorded %d, want 3 (commerce dedups by requestId, not us)", len(*recs))
+		t.Fatalf("recorded %d, want 3 (the ledger dedups by id, not us)", len(*recs))
 	}
-	_, _, _, _, id1 := parseUsage(t, (*recs)[0].body)
-	_, _, _, _, id2 := parseUsage(t, (*recs)[1].body)
-	_, _, _, _, id3 := parseUsage(t, (*recs)[2].body)
+	id1, id2, id3 := (*recs)[0].usage.ID, (*recs)[1].usage.ID, (*recs)[2].usage.ID
 	if id1 != id2 {
 		t.Fatalf("same-hour requestIds differ: %q vs %q (would let a sweep overlap double-bill)", id1, id2)
 	}
@@ -298,9 +271,7 @@ func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
 // machine one hour at create time. A machine created within the current sweep hour
 // is skipped for that hour; the NEXT hour it is metered normally.
 func TestMeterMachines_SkipsLaunchHour(t *testing.T) {
-	url, recs, mu := fakeCommerce(t)
-	t.Setenv("COMMERCE_URL", url)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	recs, mu := fakeCommerce(t)
 	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
 
 	// Launched at 15:05; the sweep fires later in the SAME clock hour (15:40).
@@ -322,9 +293,8 @@ func TestMeterMachines_SkipsLaunchHour(t *testing.T) {
 	if len(*recs) != 1 {
 		t.Fatalf("recorded %d debits, want 1 (launch hour skipped, next hour billed)", len(*recs))
 	}
-	_, _, _, _, reqID := parseUsage(t, (*recs)[0].body)
-	if reqID != "compute-777-2026070216" {
-		t.Fatalf("requestId = %q, want compute-777-2026070216 (next hour)", reqID)
+	if id := (*recs)[0].usage.ID; id != "compute-777-2026070216" {
+		t.Fatalf("id = %q, want compute-777-2026070216 (next hour)", id)
 	}
 }
 
@@ -359,9 +329,7 @@ func TestCreatedInHour(t *testing.T) {
 // running on an unpriced slug was invisible in both the ledger AND the sweep
 // counters. Now it is a loud skip, and the count says so.
 func TestMeterMachines_SkipsUnattributableAndUnpriceable(t *testing.T) {
-	url, recs, mu := fakeCommerce(t)
-	t.Setenv("COMMERCE_URL", url)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	recs, mu := fakeCommerce(t)
 	seedCatalog(t,
 		SizeInfo{Slug: "paid", PriceHourly: 0.05, Currency: "USD"},
 		SizeInfo{Slug: "zero", PriceHourly: 0.0, Currency: "USD"},
@@ -394,9 +362,7 @@ func TestMeterMachines_SkipsUnattributableAndUnpriceable(t *testing.T) {
 // Two orgs' running machines are billed to their OWN ledgers — no cross-tenant
 // fold in a mixed sweep.
 func TestMeterMachines_TenantIsolation(t *testing.T) {
-	url, recs, mu := fakeCommerce(t)
-	t.Setenv("COMMERCE_URL", url)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	recs, mu := fakeCommerce(t)
 	seedCatalog(t, SizeInfo{Slug: "s", PriceHourly: 0.05, Currency: "USD"})
 
 	now := time.Date(2026, 7, 2, 15, 0, 0, 0, time.UTC)
@@ -419,20 +385,18 @@ func TestMeterMachines_TenantIsolation(t *testing.T) {
 	}
 }
 
-// Unconfigured commerce (no service token) makes the whole sweep a no-op:
-// MeteringConfigured() is false, so MeterRunningMachines returns before
-// enumerating or debiting anything — an unconfigured deployment is never billed
-// or spammed with failed (401) debits. This is the operator-facing gate; the
-// token is the KMS-provisioned secret the launch path also requires.
+// No IAM identity makes the whole sweep a no-op: MeteringConfigured() is false,
+// so MeterRunningMachines returns before enumerating or debiting anything — an
+// unconfigured deployment is never billed or spammed with failed (401) debits.
 func TestMetering_UnconfiguredIsNoop(t *testing.T) {
-	t.Setenv("COMMERCE_URL", "http://commerce.invalid")
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "") // no token -> not configured
+	t.Setenv("iamEndpoint", "https://iam.example")
+	t.Setenv("clientId", "hanzo-visor")
+	t.Setenv("clientSecret", "")
 	if MeteringConfigured() {
-		t.Fatal("MeteringConfigured() = true with no COMMERCE_SERVICE_TOKEN, want false")
+		t.Fatal("MeteringConfigured() = true with no client secret, want false")
 	}
-	// With a token present it reports configured (base URL always defaults).
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
+	t.Setenv("clientSecret", "shh")
 	if !MeteringConfigured() {
-		t.Fatal("MeteringConfigured() = false with a token, want true")
+		t.Fatal("MeteringConfigured() = false with a full identity, want true")
 	}
 }

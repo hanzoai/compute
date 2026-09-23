@@ -17,13 +17,14 @@ package object
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/hanzoai/compute/service"
+
+	"github.com/hanzoai/compute/service/commercetest"
 )
 
 // An autoscaling pool grows without asking. MinNodes/MaxNodes/AutoScale are
@@ -102,7 +103,7 @@ type commerce struct {
 func commerceOf(t *testing.T, availableCents int64) *commerce {
 	t.Helper()
 	c := &commerce{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		switch {
@@ -110,12 +111,8 @@ func commerceOf(t *testing.T, availableCents int64) *commerce {
 			c.reads++
 			_ = json.NewEncoder(w).Encode(map[string]any{"available": availableCents, "currency": "usd"})
 		case strings.HasSuffix(r.URL.Path, "/usage"):
-			var u struct {
-				Amount int64 `json:"amount"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&u)
 			c.debits++
-			c.amount += u.Amount
+			c.amount += commercetest.Read(r).Cents()
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"transactionId":"tx","type":"usage"}`))
 		default:
@@ -124,9 +121,6 @@ func commerceOf(t *testing.T, availableCents int64) *commerce {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(srv.Close)
-	t.Setenv("COMMERCE_URL", srv.URL)
-	t.Setenv("COMMERCE_SERVICE_TOKEN", "svc-token")
 	return c
 }
 

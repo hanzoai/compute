@@ -212,7 +212,7 @@ func MachineProject(m *Machine) string { return tagValue(m.Tag, projectTagKey) }
 // http://datastore.hanzo.svc.cluster.local:8123). It is the single "is the
 // analytical plane wired" signal: unset ⇒ every emit is a safe no-op, so a
 // deployment without a datastore is never blocked nor spammed with failed writes
-// (mirrors how COMMERCE_SERVICE_TOKEN gates metering).
+// (mirrors how visor's IAM identity gates metering).
 func datastoreURL() string { return strings.TrimSpace(os.Getenv("DATASTORE_URL")) }
 
 // datastoreDB is the target database; defaults to the datastore's canonical

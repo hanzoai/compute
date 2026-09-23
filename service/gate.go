@@ -33,7 +33,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/hanzoai/commerce/metering"
 	"github.com/hanzoai/compute/logs"
 	"github.com/hanzoai/compute/telemetry"
 )
@@ -81,36 +80,32 @@ func RateOf(si *SizeInfo) (int64, error) {
 }
 
 // AuthorizeCompute is the pre-provision balance gate, and it is FAIL-CLOSED:
-// every non-nil answer from commerce refuses the provision — insufficient funds,
-// 401 on a rotated service token, 5xx, timeout, unreachable. Availability does
-// not outrank billing here, because the resource on the other side of this call
-// costs real money every hour it stays up, and nobody notices an unbilled GPU
-// until the upstream invoice arrives.
+// every answer that is not a clear yes refuses the provision — insufficient
+// funds, a refused or missing IAM identity, a 5xx, a timeout, an unreachable
+// commerce, a balance answered for another org. Availability does not outrank
+// billing here, because the resource on the other side of this call costs real
+// money every hour it stays up, and nobody notices an unbilled GPU until the
+// upstream invoice arrives.
 //
 // cents is the FIRST INTERVAL's FULL cost (hourly × node count), never a token
 // amount, so a one-cent balance cannot green-light an eight-GPU pool.
 //
-// The balance consulted is PREPAID ONLY — see NewMeteringClient. Project scopes
-// the tenant's own spend cap; the balance debited is always the org's.
+// The balance consulted is PREPAID ONLY (/v1/billing/balance, never the tier
+// read that folds in included plan allotment): compute is the one surface where a
+// request provisions a resource that keeps drawing upstream cost for as long as it
+// runs, so a promotional grant must not be convertible into GPU-hours. Project
+// scopes the tenant's own spend cap; the balance debited is always the org's.
 func AuthorizeCompute(ctx context.Context, org, project string, cents int64) error {
 	if cents <= 0 {
 		return fmt.Errorf("%w: refusing to authorize a zero charge", ErrPriceUnavailable)
 	}
-	err := NewMeteringClient(org).Authorize(ctx, metering.AuthInput{
-		User:        org,
-		Actor:       MeterActor(org, project),
-		Org:         org,
-		Currency:    "usd",
-		AmountCents: cents,
-		Project:     project,
-		Service:     meteringProvider,
-	})
+	err := Authorize(ctx, org, project, meteringProvider, cents)
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, metering.ErrInsufficientBalance):
+	case errors.Is(err, ErrInsufficientBalance):
 		return fmt.Errorf("insufficient balance: %d cents required for the first hour", cents)
-	case errors.Is(err, metering.ErrSpendCapExceeded):
+	case errors.Is(err, ErrSpendCapExceeded):
 		return fmt.Errorf("spend cap exceeded: %d cents required for the first hour", cents)
 	default:
 		return fmt.Errorf("billing authorization failed: %v", err)
@@ -118,28 +113,17 @@ func AuthorizeCompute(ctx context.Context, org, project string, cents int64) err
 }
 
 // RecordCompute debits cents to the org's commerce ledger on the ONE compute
-// meter line — Provider "compute", attributed to org+project through the shared
-// MeterActor — and mirrors it as an OTel metric.
+// meter line — service "compute", attributed to the org's project — and mirrors
+// it as an OTel metric.
 //
-// model is the size slug, status the lifecycle point ("launched"/"running"), and
-// requestID the idempotency hint. Commerce does NOT dedup on requestID, so the
-// once-per-unit guarantee belongs to the caller (the hour lease for sweeps, the
-// launch-hour skip for anything the provision path already billed).
-func RecordCompute(ctx context.Context, org, project string, cents int64, model, status, requestID string) error {
+// model is the size slug and id names the act: cloud debits one id once, so a
+// retried debit of the same unit (the machine id at launch, the machine and hour
+// in a sweep) moves the money once.
+func RecordCompute(ctx context.Context, org, project string, cents int64, model, id string) error {
 	if cents <= 0 {
 		return nil
 	}
-	if _, err := NewMeteringClient(org).Record(ctx, metering.Usage{
-		User:        org,
-		Actor:       MeterActor(org, project),
-		Org:         org,
-		Currency:    "usd",
-		AmountCents: cents,
-		Provider:    meteringProvider,
-		Model:       model,
-		Status:      status,
-		RequestID:   requestID,
-	}); err != nil {
+	if err := Record(ctx, Charge{ID: id, Org: org, Project: project, Cents: cents, Service: meteringProvider, Model: model}); err != nil {
 		return err
 	}
 	telemetry.CountMetered(ctx, org, project, meteringProvider, cents)
@@ -242,17 +226,17 @@ func Provision(ctx context.Context, org, project string, authorize, debit int64,
 	if requestID == "" {
 		return nil
 	}
-	if err := RecordCompute(ctx, org, project, debit, model, "launched", requestID); err != nil {
+	if err := RecordCompute(ctx, org, project, debit, model, requestID); err != nil {
 		logs.Warning("compute metering: debit %s (org %s, %d cents): %v", requestID, org, debit, err)
 	}
 	return nil
 }
 
 // Billable reports whether a billing sweep can actually debit — and makes a NO
-// loud. An absent or rotated COMMERCE_SERVICE_TOKEN stops ALL revenue collection
-// while the machines keep running and keep costing us money upstream, so the
-// silent early-return this replaces was a revenue outage wearing the uniform of a
-// healthy service: no error, no log, no metric, green dashboards, zero invoices.
+// loud. A missing IAM identity stops ALL revenue collection while the machines
+// keep running and keep costing us money upstream, so the silent early-return
+// this replaces was a revenue outage wearing the uniform of a healthy service: no
+// error, no log, no metric, green dashboards, zero invoices.
 //
 // sweep names the caller ("compute.hourly", "pool.hourly", …) so
 // "the sweep did not run this hour" is alertable on one metric series.
@@ -260,7 +244,7 @@ func Billable(ctx context.Context, sweep string) bool {
 	if MeteringConfigured() {
 		return true
 	}
-	logs.Warning("billing: %s sweep SKIPPED — COMMERCE_SERVICE_TOKEN is unset or empty, so running resources are NOT being billed", sweep)
+	logs.Warning("billing: %s sweep SKIPPED — visor has no IAM identity (clientId, clientSecret, iamEndpoint), so running resources are NOT being billed", sweep)
 	telemetry.CountBillingSkip(ctx, sweep)
 	return false
 }

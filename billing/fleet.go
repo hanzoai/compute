@@ -13,8 +13,8 @@
 // limitations under the License.
 
 // fleet.go is the fleet-billing orchestrator — the ONE place the three connected-
-// compute tiers are metered, all through the canonical commerce/metering path
-// (service.NewMeteringClient), per org+project, so a customer sees ONE invoice
+// compute tiers are metered, all through the one commerce client (service.Record),
+// per org+project, so a customer sees ONE invoice
 // however their compute is connected:
 //
 //	(a) BYOC cloud account  → 1% of the account's cloud spend (daily, incremental).
@@ -23,8 +23,8 @@
 //
 // The tier is a property of the compute source (a Provider vs a FleetWorker.Kind),
 // resolved here; there is one debit path, three rates. Money safety: every unit is
-// claimed cluster-wide via object BillingLease before it is billed, because visor
-// runs replicas: 2 with no leader election and commerce does not dedup on requestId.
+// claimed cluster-wide via object BillingLease before it is billed, and debited
+// under the unit's own id, which the ledger debits once.
 // Honesty: no spend or exemption is ever fabricated — an unreadable cost is skipped
 // (no fee) and an unverified validator is billed (flagged), never the reverse.
 //
@@ -38,7 +38,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hanzoai/commerce/metering"
 	"github.com/hanzoai/compute/chain"
 	"github.com/hanzoai/compute/logs"
 	"github.com/hanzoai/compute/object"
@@ -65,32 +64,23 @@ func onePercentFeeCents(spendCents int64) int64 {
 }
 
 // meterFleetLine is the ONE fleet debit: it records cents to the org's commerce
-// ledger, attributed to org+project via the shared MeterActor, and mirrors it as an
-// OTel metric. Provider is the brand-neutral "fleet"; Model is "<tier>:<label>" where
-// label is the customer's OWN provider/worker name (never an upstream cloud name).
-// requestID is the billing unit (idempotency hint; the real once-per-unit guarantee
-// is the BillingLease the caller already claimed).
-func meterFleetLine(ctx context.Context, org, project, tier, label string, cents int64, requestID string) {
+// ledger, attributed to org+project, and mirrors it as an OTel metric. Service is
+// the brand-neutral "fleet"; Model is "<tier>:<label>" where label is the
+// customer's OWN provider/worker name (never an upstream cloud name). unit names
+// the billing unit the caller already claimed, and is the debit's id.
+func meterFleetLine(ctx context.Context, org, project, tier, label string, cents int64, unit string) {
 	if cents <= 0 {
 		return
 	}
-	client := service.NewMeteringClient(org)
-	if _, err := client.Record(ctx, metering.Usage{
-		User:        org,
-		Actor:       service.MeterActor(org, project),
-		Org:         org,
-		Currency:    "usd",
-		AmountCents: cents,
-		Provider:    "fleet",
-		Model:       tier + ":" + label,
-		Status:      tier,
-		RequestID:   requestID,
+	if err := service.Record(ctx, service.Charge{
+		ID: unit, Org: org, Project: project, Cents: cents,
+		Service: "fleet", Model: tier + ":" + label,
 	}); err != nil {
 		logs.Warning("fleet billing: meter %s line for org %s (%d cents): %v", tier, org, cents, err)
 		return
 	}
 	telemetry.CountMetered(ctx, org, project, tier, cents)
-	logs.Info("fleet billing: metered %s %d cents to %s (project=%q, unit=%s)", tier, cents, org, project, requestID)
+	logs.Info("fleet billing: metered %s %d cents to %s (project=%q, unit=%s)", tier, cents, org, project, unit)
 }
 
 // CollectBYOCCosts is the daily tier-(a) collector. For every org's active BYOC cloud
