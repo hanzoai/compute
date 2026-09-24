@@ -83,9 +83,9 @@ const mostCatchUp = 7 * 24
 // trusted from a client — it is the tag LaunchOrgMachine set), the hourly price
 // comes from the catalog (HourlyCents), and each hour's debit carries the usage
 // id MeterID: "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled from
-// gating (the machine already ran that hour, so the cost must be recorded);
-// enforcement/suspend on a depleted balance is a separate control. A per-machine
-// error is logged and does not abort the sweep.
+// gating for an hour that already ran; the hour now starting is paid for as it
+// starts, and a machine whose org cannot pay for it is stopped (meterMachines).
+// A per-machine error is logged and does not abort the sweep.
 //
 // EXACTLY-ONCE PER HOUR is the Ledger and the meter id together. The sweep
 // debits each owed hour under its own MeterID and moves the machine's mark only
@@ -126,6 +126,9 @@ type owed struct {
 	hours   []time.Time
 }
 
+// running reports whether these are the machine's running hours.
+func (d owed) running() bool { return d.key == d.m.Id }
+
 // diskKey is the ledger key a machine's stopped hours are marked under, apart
 // from its running hours, so a stopped hour and a running hour are each billed
 // at their own price and neither mark hides the other.
@@ -143,9 +146,18 @@ func DiskMeterID(machineID string, now time.Time) string {
 // mark moves over the hours whose debit landed, and the marks are written once,
 // after every debit. Returns (metered hours, skipped). A per-machine failure is
 // logged and skipped — one bad machine never aborts the sweep.
+//
+// TWO KINDS OF HOUR, and the difference is who has had the machine. An hour
+// before the current one already ran, and a stopped machine's disk exists
+// whatever anyone pays, so those are debited whatever the balance: recording
+// what happened is not a decision. The CURRENT running hour has not run yet —
+// it is paid for as it starts — so it is debited only if the org's balance
+// covers it, and a machine whose org cannot pay for it is stopped instead. A
+// balance that cannot be read stops nothing: an outage of ours is not a reason
+// to take a customer's machine away, and the next sweep asks again.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
 	current, _ := parseHour(hourOf(now))
-	marks := map[string]string{}
+	var dues []owed
 	for _, m := range machines {
 		d, err := owe(m, current)
 		if err != nil {
@@ -153,28 +165,99 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			logs.Warning("compute metering: machine %s not billed: %v", m.Id, err)
 			continue
 		}
+		if len(d.hours) > 0 {
+			dues = append(dues, d)
+		}
+	}
+
+	marks := map[string]string{}
+	bill := func(d owed, h time.Time) bool {
+		if err := RecordCompute(ctx, d.org, d.project, d.cents, d.model, d.id(h)); err != nil {
+			skipped++
+			logs.Warning("compute metering: debit %s hour %s (org %s): %v", d.key, hourOf(h), d.org, err)
+			return false
+		}
+		metered++
+		marks[d.key] = hourOf(h)
+		// Roll a running event into the analytics datastore alongside a running
+		// hour's debit (best-effort; never blocks or affects the sweep).
+		if d.running() {
+			EmitCompute(d.org, ComputeRunning, d.m, d.cents)
+		}
+		return true
+	}
+
+	// Hours that already happened, in order; a failed debit leaves it and every
+	// hour after it owed.
+	halted := map[string]bool{}
+	for _, d := range dues {
 		for _, h := range d.hours {
-			if err := RecordCompute(ctx, d.org, d.project, d.cents, d.model, d.id(h)); err != nil {
-				// The hours from here on stay owed, in order, for the next sweep.
-				skipped++
-				logs.Warning("compute metering: debit %s hour %s (org %s): %v", d.key, hourOf(h), d.org, err)
+			if d.running() && h.Equal(current) {
 				break
 			}
-			metered++
-			marks[d.key] = hourOf(h)
-			// Roll a running event into the analytics datastore alongside a
-			// running hour's debit (best-effort; never blocks or affects the sweep).
-			if d.key == d.m.Id {
-				EmitCompute(d.org, ComputeRunning, d.m, d.cents)
+			if !bill(d, h) {
+				halted[d.key] = true
+				break
 			}
 		}
 	}
+
+	// The current running hour, against what each org has left. An org already
+	// in debt has a negative balance, and pays for nothing more.
+	left := map[string]int64{}
+	unread := map[string]bool{}
+	for _, d := range dues {
+		if !d.running() || halted[d.key] || !d.hours[len(d.hours)-1].Equal(current) {
+			continue
+		}
+		have, asked := left[d.org]
+		if !asked && !unread[d.org] {
+			var err error
+			if have, err = available(ctx, d.org); err != nil {
+				logs.Warning("compute metering: balance of %s unreadable; its machines keep running this hour: %v", d.org, err)
+				unread[d.org] = true
+			} else {
+				left[d.org] = have
+			}
+		}
+		if !unread[d.org] && have < d.cents {
+			if err := suspend(ctx, d.org, d.m.Id); err != nil {
+				logs.Warning("compute metering: machine %s (org %s) cannot be paid for and could not be stopped: %v", d.m.Id, d.org, err)
+				continue
+			}
+			logs.Warning("compute metering: machine %s (org %s) stopped: %d cents left, its hour costs %d", d.m.Id, d.org, have, d.cents)
+			continue
+		}
+		if bill(d, current) && !unread[d.org] {
+			left[d.org] = have - d.cents
+		}
+	}
+
 	if len(marks) > 0 {
 		if _, err := billed().Advance(marks); err != nil {
 			logs.Warning("compute metering: record billed hours: %v — the next sweep re-sends them under the same ids", err)
 		}
 	}
 	return metered, skipped
+}
+
+// suspend stops org's hosted machine. It is a variable so the sweep can be run
+// against a machine set with no EC2 behind it.
+var suspend = stopHosted
+
+// stopHosted stops org's hosted machine id: the machine and its disk stay, the
+// running price stops, and the org starts it again — a start is a provision,
+// gated on the balance — once it can pay.
+func stopHosted(ctx context.Context, org, id string) error {
+	api, _, err := hostedEC2(ctx)
+	if err != nil {
+		return err
+	}
+	inst, err := findInstance(ctx, api, org, id)
+	if err != nil || inst == nil {
+		return err
+	}
+	return setState(ctx, api, inst, false)
 }
 
 // owe is what machine m owes through current: its unbilled hours, what each

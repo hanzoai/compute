@@ -687,10 +687,14 @@ func TestTheHourlySweepBillsEachOrgItsRunningMachines(t *testing.T) {
 	var mu sync.Mutex
 	var debits []commercetest.Usage
 	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/usage") {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/usage"):
 			mu.Lock()
 			debits = append(debits, commercetest.Read(r))
 			mu.Unlock()
+		case strings.HasSuffix(r.URL.Path, "/balance"):
+			_, _ = w.Write([]byte(`{"available":100000,"currency":"usd"}`))
+			return
 		}
 		_, _ = w.Write([]byte(`{}`))
 	}))

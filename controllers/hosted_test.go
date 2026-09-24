@@ -144,15 +144,18 @@ func call(t *testing.T, app *zip.App, method, path string, body any) cloudEnvelo
 }
 
 // fundedCommerce is a commerce that can pay, counting reads and recording debits.
+// Its balance moves as commerce's does: every debit comes off what is available,
+// once per usage id.
 type fundedCommerce struct {
 	mu     sync.Mutex
 	reads  int
 	debits []commercetest.Usage
+	seen   map[string]bool
 }
 
 func commerceWith(t *testing.T, availableCents int64) *fundedCommerce {
 	t.Helper()
-	c := &fundedCommerce{}
+	c := &fundedCommerce{seen: map[string]bool{}}
 	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -161,7 +164,12 @@ func commerceWith(t *testing.T, availableCents int64) *fundedCommerce {
 			c.reads++
 			_ = json.NewEncoder(w).Encode(map[string]any{"available": availableCents, "currency": "usd"})
 		case strings.HasSuffix(r.URL.Path, "/usage"):
-			c.debits = append(c.debits, commercetest.Read(r))
+			u := commercetest.Read(r)
+			c.debits = append(c.debits, u)
+			if !c.seen[u.ID] {
+				c.seen[u.ID] = true
+				availableCents -= u.Cents()
+			}
 			_, _ = w.Write([]byte(`{}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)

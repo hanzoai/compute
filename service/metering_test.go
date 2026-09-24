@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -487,5 +488,145 @@ func TestMeterMachines_BillsALaunchHourWhoseDebitFailed(t *testing.T) {
 	defer mu.Unlock()
 	if len(*recs) != 1 || (*recs)[0].usage.ID != "compute-lost-2026070215" {
 		t.Fatalf("debits = %+v, want the launch hour", *recs)
+	}
+}
+
+// fundedAt is a commerce whose orgs hold the balances given, which fall as
+// debits land; an org absent from the map is unreadable.
+func fundedAt(t *testing.T, balances map[string]int64) (debits func() []string) {
+	t.Helper()
+	freshLedger(t)
+	var mu sync.Mutex
+	var ids []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/billing/balance", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		org := r.Header.Get("X-Org-Id")
+		have, ok := balances[org]
+		if !ok {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = io.WriteString(w, `{"available":`+strconv.FormatInt(have, 10)+`,"account":"`+org+`"}`)
+	})
+	mux.HandleFunc("/v1/billing/usage", func(w http.ResponseWriter, r *http.Request) {
+		u := commercetest.Read(r)
+		mu.Lock()
+		defer mu.Unlock()
+		ids = append(ids, u.ID)
+		if have, ok := balances[u.Org]; ok {
+			balances[u.Org] = have - u.Cents()
+		}
+		_, _ = io.WriteString(w, `{"id":"`+u.ID+`"}`)
+	})
+	commercetest.Serve(t, mux)
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), ids...)
+	}
+}
+
+// stops records which machines the sweep stopped, instead of EC2.
+func stops(t *testing.T) func() []string {
+	t.Helper()
+	var mu sync.Mutex
+	var got []string
+	saved := suspend
+	suspend = func(_ context.Context, org, id string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, org+"/"+id)
+		return nil
+	}
+	t.Cleanup(func() { suspend = saved })
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), got...)
+	}
+}
+
+// The hour now starting is paid for as it starts. An org that cannot pay for it
+// has the machine stopped and that hour is not charged; the hours the machine
+// already ran are charged whatever the balance, and so is a stopped machine's
+// disk. Within one org, the balance pays machines in turn until it cannot.
+func TestAMachineItsOrgCannotPayForIsStopped(t *testing.T) {
+	debits := fundedAt(t, map[string]int64{"acme": 12, "beta": 0})
+	stopped := stops(t)
+	seedCatalog(t, offer{slug: "s", listMicros: 37_500 - ipv4MicrosPerHour, diskGB: 50})
+
+	at := func(h int) time.Time { return time.Date(2026, 7, 2, h, 10, 0, 0, time.UTC) }
+	started := at(12).Format(time.RFC3339)
+	for _, id := range []string{"a1", "a2", "b1"} {
+		MarkBilled(id, at(12))
+	}
+	MarkBilled("b2", at(12))
+	machines := []*Machine{
+		// Each owes 13, which ran, and 14, which is starting; 6c an hour.
+		{Id: "a1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: started},
+		{Id: "a2", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: started},
+		{Id: "b1", Size: "s", Tag: "hanzo-org:beta", State: "Running", CreatedTime: started},
+		{Id: "b2", Size: "s", Tag: "hanzo-org:beta", State: "Stopped", CreatedTime: started},
+	}
+	meterMachines(context.Background(), machines, at(14))
+
+	// acme had 12: hours 13 of a1 and a2 take it to 0 — the past is charged —
+	// and neither can pay for 14. beta had nothing and pays its past too.
+	want := []string{
+		"compute-a1-2026070213", "compute-a2-2026070213", "compute-b1-2026070213",
+		"compute-b2-disk-2026070213", "compute-b2-disk-2026070214",
+	}
+	if got := debits(); !slices.Equal(got, want) {
+		t.Fatalf("debits = %v, want %v", got, want)
+	}
+	if got := stopped(); !slices.Equal(got, []string{"acme/a1", "acme/a2", "beta/b1"}) {
+		t.Fatalf("stopped = %v", got)
+	}
+	// Hour 14 was not charged, so it is not recorded as billed.
+	if mark, _ := billed().Through("a1"); mark != "2026070213" {
+		t.Fatalf("a1 is billed through %q", mark)
+	}
+}
+
+// Enough for one machine's hour and not two: the first is charged, the second
+// is stopped.
+func TestABalancePaysMachinesInTurn(t *testing.T) {
+	debits := fundedAt(t, map[string]int64{"acme": 8})
+	stopped := stops(t)
+	seedCatalog(t, offer{slug: "s", listMicros: 37_500 - ipv4MicrosPerHour, diskGB: 50})
+	at := time.Date(2026, 7, 2, 14, 10, 0, 0, time.UTC)
+	started := at.Add(-2 * time.Hour).Format(time.RFC3339)
+	MarkBilled("x1", at.Add(-time.Hour))
+	MarkBilled("x2", at.Add(-time.Hour))
+	meterMachines(context.Background(), []*Machine{
+		{Id: "x1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: started},
+		{Id: "x2", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: started},
+	}, at)
+	if got := debits(); !slices.Equal(got, []string{"compute-x1-2026070214"}) {
+		t.Fatalf("debits = %v", got)
+	}
+	if got := stopped(); !slices.Equal(got, []string{"acme/x2"}) {
+		t.Fatalf("stopped = %v", got)
+	}
+}
+
+// A balance that cannot be read stops nothing: the hour is charged, and the next
+// sweep asks again.
+func TestAnUnreadableBalanceStopsNothing(t *testing.T) {
+	debits := fundedAt(t, map[string]int64{})
+	stopped := stops(t)
+	seedCatalog(t, priced("s", 5))
+	at := time.Date(2026, 7, 2, 14, 10, 0, 0, time.UTC)
+	MarkBilled("u1", at.Add(-time.Hour))
+	meterMachines(context.Background(), []*Machine{
+		{Id: "u1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at.Add(-2 * time.Hour).Format(time.RFC3339)},
+	}, at)
+	if got := debits(); !slices.Equal(got, []string{"compute-u1-2026070214"}) {
+		t.Fatalf("debits = %v", got)
+	}
+	if got := stopped(); len(got) != 0 {
+		t.Fatalf("stopped = %v", got)
 	}
 }
