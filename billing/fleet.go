@@ -17,9 +17,12 @@
 // per org+project, so a customer sees ONE invoice
 // however their compute is connected:
 //
-//	(a) BYOC cloud account  → 1% of the account's cloud spend (daily, incremental).
 //	(b) BYO hardware/device → flat $1/mo per connected GPU/device (monthly).
 //	(c) hanzo.network validator → FREE (verified on-chain; never billed).
+//
+// Tier (a), 1% of a BYOC cloud account's spend, read the account's cost API with
+// the key the provider row stored. A row stores no key now, so that tier is not
+// collected.
 //
 // The tier is a property of the compute source (a Provider vs a FleetWorker.Kind),
 // resolved here; there is one debit path, three rates. Money safety: every unit is
@@ -45,23 +48,11 @@ import (
 	"github.com/hanzoai/compute/telemetry"
 )
 
-// Fleet-billing tiers (the metering line's Status + telemetry tier).
-const (
-	tierBYOC   = "byoc"
-	tierDevice = "device"
-)
+// tierDevice is the metering line's tier for a connected device.
+const tierDevice = "device"
 
 // deviceMonthlyCents is the flat tier-(b) rate: $1.00 per connected device per month.
 const deviceMonthlyCents = 100
-
-// onePercentFeeCents is the tier-(a) rate: 1% of a cloud-spend increment, rounded to
-// the nearest cent (half up). Zero/negative spend yields no fee.
-func onePercentFeeCents(spendCents int64) int64 {
-	if spendCents <= 0 {
-		return 0
-	}
-	return (spendCents + 50) / 100
-}
 
 // meterFleetLine is the ONE fleet debit: it records cents to the org's commerce
 // ledger, attributed to org+project, and mirrors it as an OTel metric. Service is
@@ -81,63 +72,6 @@ func meterFleetLine(ctx context.Context, org, project, tier, label string, cents
 	}
 	telemetry.CountMetered(ctx, org, project, tier, cents)
 	logs.Info("fleet billing: metered %s %d cents to %s (project=%q, unit=%s)", tier, cents, org, project, unit)
-}
-
-// CollectBYOCCosts is the daily tier-(a) collector. For every org's active BYOC cloud
-// provider it reads month-to-date spend via that cloud's cost API and meters 1% of the
-// increment since the last run to org+project. No spend → no fee; an unreadable cost
-// (unconfigured scope, transient error) is skipped for this run and recovered on the
-// next (the cursor is only advanced on a successful read). Single-flight per
-// (provider, day) via BillingLease, so replicas never double-bill.
-func CollectBYOCCosts(ctx context.Context, now time.Time) {
-	if !service.Billable(ctx, "byoc.daily") {
-		return
-	}
-	ctx, span := telemetry.Span(ctx, "billing.collect.byoc", "", "")
-	defer span.End()
-
-	providers, err := object.GetAllActiveCloudProviders()
-	if err != nil {
-		span.RecordError(err)
-		logs.Warning("fleet billing: list BYOC providers: %v", err)
-		return
-	}
-	day := now.UTC().Format("20060102")
-	month := now.UTC().Format("200601")
-
-	billed := 0
-	for _, p := range providers {
-		reader, err := service.NewCostReader(p.Type, p.ClientId, p.ClientSecret, p.Region, p.CostReadScope)
-		if err != nil {
-			continue // ErrCostUnavailable etc. — cost-read not wired for this account; no fee
-		}
-		mtd, err := reader.MonthToDateCents(ctx, now)
-		if err != nil {
-			logs.Warning("fleet billing: read spend for %s/%s: %v", p.Owner, p.Name, err)
-			continue // transient/unavailable → skip this run, recover next (cursor untouched)
-		}
-		if mtd <= 0 {
-			continue // no spend → no fee
-		}
-		// Claim the day for this provider AFTER a successful read, so only the lease
-		// winner advances the cursor and bills; losers skip.
-		unit := fmt.Sprintf("byoc:%s:%s:%s", p.Owner, p.Name, day)
-		if !object.ClaimBillingUnit(unit, now) {
-			continue
-		}
-		delta, err := object.AdvanceCostCursor(p.Owner, p.Name, month, mtd)
-		if err != nil {
-			logs.Warning("fleet billing: advance cost cursor %s/%s: %v", p.Owner, p.Name, err)
-			continue
-		}
-		fee := onePercentFeeCents(delta)
-		if fee <= 0 {
-			continue
-		}
-		meterFleetLine(ctx, p.Owner, p.Project, tierBYOC, p.Name, fee, unit)
-		billed++
-	}
-	logs.Info("fleet billing: BYOC cost sweep done (providers=%d billed=%d)", len(providers), billed)
 }
 
 // meterWorkerDevice bills ONE connected worker for the current month: the flat

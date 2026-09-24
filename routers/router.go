@@ -144,11 +144,6 @@ func registerAPI(app *zip.App) {
 	app.Post("/v1/records", h((*controllers.ApiController).AddRecord))
 	app.Delete("/v1/records/:owner/:name", h((*controllers.ApiController).DeleteRecord))
 
-	// Committing a record writes its BLOCK on the chain (object.Record.Block);
-	// querying reads it back. One noun, written and read.
-	app.Put("/v1/records/:owner/:name/block", h((*controllers.ApiController).CommitRecord))
-	app.Get("/v1/records/:owner/:name/block", h((*controllers.ApiController).QueryRecord))
-
 	// An asset is a resource. The collection lists and creates; the item, named
 	// by its (owner, name) key, is read, replaced and removed.
 	app.Get("/v1/assets", h((*controllers.ApiController).GetAssets))
@@ -157,9 +152,8 @@ func registerAPI(app *zip.App) {
 	app.Put("/v1/assets/:owner/:name", h((*controllers.ApiController).UpdateAsset))
 	app.Delete("/v1/assets/:owner/:name", h((*controllers.ApiController).DeleteAsset))
 
-	// A provider holds a cloud credential, so the authorization on each address
-	// is the one the verb spelling had: the seam reads the (owner, name) out of
-	// the path (see pathTarget) and compares it to the subject exactly as before.
+	// A provider names a cloud account whose credential egress holds; the row
+	// stores no key.
 	app.Get("/v1/providers", h((*controllers.ApiController).GetProviders))
 	app.Post("/v1/providers", h((*controllers.ApiController).AddProvider))
 	app.Get("/v1/providers/:owner/:name", h((*controllers.ApiController).GetProvider))
@@ -180,25 +174,6 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/machines/:owner/:name", h((*controllers.ApiController).GetMachine))
 	app.Put("/v1/machines/:owner/:name", h((*controllers.ApiController).UpdateMachine))
 	app.Delete("/v1/machines/:owner/:name", h((*controllers.ApiController).DeleteMachine))
-	// Unified /v1/k8s noun — the ONE Kubernetes surface: cluster lifecycle on the
-	// platform accounts (list / detail+nodes / create / delete) plus the worker
-	// NODES on the fleet.
-	app.Get("/v1/k8s/providers", h((*controllers.ApiController).ListComputeKubernetesProviders))
-	app.Get("/v1/k8s/clusters", h((*controllers.ApiController).ListComputeKubernetesClusters))
-	app.Post("/v1/k8s/clusters", h((*controllers.ApiController).CreateComputeKubernetesCluster))
-	app.Get("/v1/k8s/clusters/:id", h((*controllers.ApiController).GetComputeKubernetesCluster))
-	app.Delete("/v1/k8s/clusters/:id", h((*controllers.ApiController).DeleteComputeKubernetesCluster))
-	// The worker NODES are a TYPED op. Every other line in this table registers a
-	// handler and nothing else: the route exists on the wire and in none of the
-	// projections, so the OpenAPI document, the MCP tool list, the CLI and the
-	// generated SDKs do not know it is there. This one is declared with its In and
-	// Out, so it appears in all of them — and cloud, which folds these nodes into
-	// the fleet, can be generated against it instead of hand-written to match.
-	zip.Get[controllers.Scope, controllers.Nodes](app, "/v1/k8s/nodes", controllers.ListNodes,
-		zip.WithSummary("List the org's managed-Kubernetes worker nodes as machines"),
-		zip.WithOperationID("nodes"),
-		zip.WithTags("Compute"),
-	)
 
 	app.Get("/v1/sessions", h((*controllers.ApiController).GetSessions))
 	app.Get("/v1/sessions/:owner/:name", h((*controllers.ApiController).GetConnSession))
@@ -222,15 +197,6 @@ func registerAPI(app *zip.App) {
 	// session it connects to.
 	app.Post("/v1/assets/:owner/:name/sessions", h((*controllers.ApiController).AddAssetTunnel))
 	app.Get("/v1/sessions/:owner/:name/connection", h((*controllers.ApiController).GetAssetTunnel))
-
-	app.Get("/v1/pools", h((*controllers.ApiController).GetNodePools))
-	app.Post("/v1/pools", h((*controllers.ApiController).CreateNodePool))
-	app.Get("/v1/pools/:owner/:name", h((*controllers.ApiController).GetNodePool))
-	app.Put("/v1/pools/:owner/:name", h((*controllers.ApiController).UpdateNodePool))
-	app.Delete("/v1/pools/:owner/:name", h((*controllers.ApiController).DeleteNodePool))
-	// How many nodes the pool runs is a property of the pool, so scaling is
-	// writing that property — not a verb of its own.
-	app.Put("/v1/pools/:owner/:name/size", h((*controllers.ApiController).ScaleNodePool))
 
 	app.Get("/v1/plans", h((*controllers.ApiController).GetPlans))
 	app.Get("/v1/plans/:owner/:name", h((*controllers.ApiController).GetPlan))

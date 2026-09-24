@@ -66,14 +66,6 @@ func init() {
 	Retire("/v1/add-asset-tunnel", "/v1/assets")
 	Retire("/v1/get-asset-tunnel", "/v1/sessions")
 
-	// Node pools.
-	Retire("/v1/get-node-pools", "/v1/pools")
-	Retire("/v1/get-node-pool", "/v1/pools")
-	Retire("/v1/create-node-pool", "/v1/pools")
-	Retire("/v1/update-node-pool", "/v1/pools")
-	Retire("/v1/delete-node-pool", "/v1/pools")
-	Retire("/v1/scale-node-pool", "/v1/pools")
-
 	// Volumes.
 	Retire("/v1/get-volumes", "/v1/volumes")
 	Retire("/v1/get-volume", "/v1/volumes")

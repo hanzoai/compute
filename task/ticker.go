@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/hanzoai/compute/billing"
 	"github.com/hanzoai/compute/logs"
 	"github.com/hanzoai/compute/object"
 	"github.com/hanzoai/compute/service"
@@ -43,19 +42,9 @@ func (t *Ticker) SetupTicker() {
 		}
 	}()
 
-	// compute metering: debit every RUNNING resell resource one hour of its resale
-	// price to its owning org, every hour, through the one commerce client (the same
-	// one the launch debit uses). A running machine and a running node
-	// pool both keep drawing down the org's credit balance.
-	//
-	// ONE sweep, TWO resource kinds, ONE lease. Machines are enumerated from the
-	// configured cloud account and node pools from the store, but they are the
-	// same billable hour, so they share the per-hour claim below. Two tickers each
-	// calling ClaimMeterHour would have one starve the other: the hour is a single
-	// PK, so whichever claimed first would win it and the other kind would never be
-	// billed at all. (Node pools used to run on a second, unleased ticker — so
-	// every replica swept them, and nothing stopped a rolling deploy re-billing an
-	// hour.)
+	// compute metering: debit every hosted machine each hour it owes, through the
+	// one commerce client (the same one the launch debit uses), under ONE
+	// per-hour lease.
 	//
 	// Enablement is decided inside each sweep (no-op when commerce or compute is
 	// unconfigured), so this is wired unconditionally — no second config gate to
@@ -101,7 +90,7 @@ func (t *Ticker) SetupTicker() {
 			liveHour().run(context.Background(), now)
 		}
 	}()
-	logs.Info("compute metering: hourly running-resource drawdown enabled (machines + node pools, single-flight per hour, elected owner)")
+	logs.Info("compute metering: hourly drawdown enabled (hosted machines, single-flight per hour, elected owner)")
 }
 
 // hour is one hourly tick's four collaborators, named so the ORDER they compose
@@ -127,10 +116,7 @@ func liveHour() hour {
 		owner:     object.IsBillingOwner,
 		reachable: service.ComputeReachable,
 		claim:     object.ClaimMeterHour,
-		meter: func(ctx context.Context, now time.Time) {
-			service.MeterRunningMachines(ctx, now)
-			billing.MeterRunningNodePools(ctx, now)
-		},
+		meter: service.MeterRunningMachines,
 	}
 }
 

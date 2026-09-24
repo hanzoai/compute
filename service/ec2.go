@@ -142,7 +142,7 @@ func (a hostedAccount) launchable(o offer) error {
 		return fmt.Errorf("hosted compute cannot launch %s: %s not set", o.slug, strings.Join(missing, ", "))
 	}
 	if !carrierRegistered() {
-		return errNoEgress
+		return fmt.Errorf("hosted compute needs egress: %w", errNoEgress)
 	}
 	return nil
 }
@@ -150,10 +150,10 @@ func (a hostedAccount) launchable(o offer) error {
 // errNoRegion is the account with no region: there is nothing to reach.
 var errNoRegion = fmt.Errorf("hosted compute is not configured: %s (%s) is not set", keyRegion, envOf[keyRegion])
 
-// errNoEgress is a configured account with no egress to reach it through. It is
-// a refusal, not a reason to call AWS directly: this process holds nothing that
-// signs, and is meant to.
-var errNoEgress = errors.New("hosted compute needs egress: egressAddress is not set")
+// errNoEgress is a cloud call with no egress to make it through. It is a
+// refusal, not a reason to call a cloud directly: this process holds no key, and
+// is meant to.
+var errNoEgress = errors.New("compute calls clouds only through egress: egressAddress is not set")
 
 // hostedEC2 returns an EC2 client for the hosted account and the region it
 // serves. The client is built from explicit options — the region, the carrier's
@@ -169,7 +169,7 @@ func hostedEC2(ctx context.Context) (*ec2.Client, string, error) {
 		return nil, "", errNoRegion
 	}
 	if !carrierRegistered() {
-		return nil, "", errNoEgress
+		return nil, "", fmt.Errorf("hosted compute needs egress: %w", errNoEgress)
 	}
 	hc, err := carried(Credential{Provider: "AWS", Name: hostedLabel, Region: region})
 	if err != nil {

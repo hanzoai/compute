@@ -15,7 +15,10 @@
 package object
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/hanzoai/compute/service"
@@ -35,49 +38,24 @@ type Provider struct {
 
 	Category string `xorm:"varchar(100)" json:"category"`
 	Type     string `xorm:"varchar(100)" json:"type"`
-
-	ClientId     string `xorm:"varchar(100)" json:"clientId"`
-	ClientSecret string `xorm:"varchar(100)" json:"clientSecret"`
-	Region       string `xorm:"varchar(100)" json:"region"`
-	Network      string `xorm:"varchar(100)" json:"network"`
-	Chain        string `xorm:"varchar(100)" json:"chain"`
-	BrowserUrl   string `xorm:"varchar(200)" json:"browserUrl"`
+	Region   string `xorm:"varchar(100)" json:"region"`
 
 	State       string `xorm:"varchar(100)" json:"state"`
 	ProviderUrl string `xorm:"varchar(200)" json:"providerUrl"`
 
-	ClusterID string `xorm:"varchar(100)" json:"clusterId"` // DOKS cluster UUID
-
-	// CostReadScope carries the per-cloud identifier the fleet-billing cost collector
-	// needs to read this BYOC account's spend, beyond the (ClientId, ClientSecret,
-	// Region) triple used to manage machines. It is cloud-specific and additive
-	// (Sync2-safe, defaults ""):
-	//   AWS  — ignored (Cost Explorer is account-wide from the access key).
-	//   DO   — ignored (the balance endpoint is account-wide from the token).
-	//   Azure— "<tenantId>/<subscriptionId>" (Cost Management query scope + auth tenant).
-	//   GCP  — "<project>.<dataset>.<table>" of the BigQuery billing-export table.
-	// Empty means "cost-read not configured": the collector honestly skips this
-	// provider (no fee) rather than fabricating spend.
-	CostReadScope string `xorm:"varchar(300)" json:"costReadScope"`
-
-	// Keys holds ADDITIONAL credentials for the same cloud account family under
-	// one provider row, so a launch can cycle across accounts without a row per
-	// key. The row's own (ClientId, ClientSecret) is key index 0; these are 1..n.
-	// A key carries its own liveness so one rate-limited or revoked account is
-	// skipped without disabling the provider. Additive and Sync2-safe: an empty
-	// slice is a single-key provider, exactly as before.
+	// Keys names ADDITIONAL accounts of the same cloud under one provider row, so
+	// a launch can cycle across accounts without a row per account. The row's
+	// own account (labelled by its Name) is index 0; these are 1..n. A key is a
+	// LABEL in egress custody and nothing else: the credential it names is held
+	// by egress, never here. A key carries its own liveness so one rate-limited
+	// or revoked account is skipped without disabling the provider.
 	Keys []ProviderKey `xorm:"mediumtext" json:"keys"`
 }
 
-// ProviderKey is one credential in a provider's rotation.
+// ProviderKey is one account in a provider's rotation.
 type ProviderKey struct {
-	// Name distinguishes keys within a provider for attribution and logs; it is
-	// not the cloud account id.
+	// Name is the account's label in egress custody.
 	Name string `json:"name"`
-	// KeyID/Secret are the account's credential. For DO, Secret is the token and
-	// KeyID is left empty, matching how the row's own ClientId/ClientSecret map.
-	KeyID  string `json:"keyId"`
-	Secret string `json:"secret"`
 	// Region overrides the provider row's Region for launches on this key; empty
 	// inherits the row's Region.
 	Region string `json:"region"`
@@ -86,6 +64,38 @@ type ProviderKey struct {
 	// until an operator clears it, so one bad account never fails a launch that
 	// another account could serve.
 	State string `json:"state"`
+}
+
+// ErrKeyNotStored is a provider write that carries a cloud key. A key is
+// enrolled in egress custody, where it is spent and never read back; a provider
+// row names the account and holds nothing that spends.
+var ErrKeyNotStored = errors.New("a provider row stores no cloud key: enrol the key in egress custody and name its label here")
+
+// RefuseProviderKeys reports ErrKeyNotStored when a provider write's raw JSON
+// carries a key — clientSecret, clientId, or a secret or keyId on any key — so
+// a key sent here is refused, rather than dropped by the decoder and believed
+// saved by whoever sent it.
+func RefuseProviderKeys(body []byte) error {
+	var raw struct {
+		ClientID     string `json:"clientId"`
+		ClientSecret string `json:"clientSecret"`
+		Keys         []struct {
+			KeyID  string `json:"keyId"`
+			Secret string `json:"secret"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return err
+	}
+	if strings.TrimSpace(raw.ClientID) != "" || strings.TrimSpace(raw.ClientSecret) != "" {
+		return ErrKeyNotStored
+	}
+	for _, k := range raw.Keys {
+		if strings.TrimSpace(k.KeyID) != "" || strings.TrimSpace(k.Secret) != "" {
+			return ErrKeyNotStored
+		}
+	}
+	return nil
 }
 
 func GetProviderCount(owner, field, value string) (int64, error) {
@@ -145,46 +155,6 @@ func GetProvider(id string) (*Provider, error) {
 	return getProvider(owner, name)
 }
 
-func GetMaskedProvider(provider *Provider, errs ...error) (*Provider, error) {
-	if len(errs) > 0 && errs[0] != nil {
-		return nil, errs[0]
-	}
-
-	if provider == nil {
-		return nil, nil
-	}
-
-	if provider.ClientSecret != "" {
-		provider.ClientSecret = "***"
-	}
-	// The rotation keys are credentials too, so they mask the same way the row's
-	// own secret does — otherwise adding a key would leak it through every API
-	// read that masks the primary one. A masked key still shows its name and
-	// region so an operator can see the rotation without seeing the secrets.
-	for i := range provider.Keys {
-		if provider.Keys[i].Secret != "" {
-			provider.Keys[i].Secret = "***"
-		}
-	}
-	return provider, nil
-}
-
-func GetMaskedProviders(providers []*Provider, errs ...error) ([]*Provider, error) {
-	if len(errs) > 0 && errs[0] != nil {
-		return nil, errs[0]
-	}
-
-	var err error
-	for _, provider := range providers {
-		provider, err = GetMaskedProvider(provider)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return providers, nil
-}
-
 func UpdateProvider(id string, provider *Provider) (bool, error) {
 	owner, name := util.GetOwnerAndNameFromId(id)
 	p, err := getProvider(owner, name)
@@ -192,10 +162,6 @@ func UpdateProvider(id string, provider *Provider) (bool, error) {
 		return false, err
 	} else if p == nil {
 		return false, nil
-	}
-
-	if provider.ClientSecret == "***" {
-		provider.ClientSecret = p.ClientSecret
 	}
 
 	engine, err := EngineFor(owner)
@@ -219,21 +185,10 @@ func AddProvider(provider *Provider) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-
-	if affected != 0 && provider.isManagedCluster() {
-		// A DOKS provider carrying a cluster UUID = a managed K8s cluster entering
-		// visor's fleet. Roll a launched event (best-effort) — kind=cluster.
-		service.EmitComputeEvent(provider.clusterEvent(service.ComputeLaunched))
-	}
-
 	return affected != 0, nil
 }
 
 func DeleteProvider(provider *Provider) (bool, error) {
-	// Load the authoritative record first so a destroyed cluster event carries
-	// the cluster UUID/region even when the caller supplied only the PK.
-	full, _ := getProvider(provider.Owner, provider.Name)
-
 	engine, err := EngineFor(provider.Owner)
 	if err != nil {
 		return false, err
@@ -242,19 +197,6 @@ func DeleteProvider(provider *Provider) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-
-	if affected != 0 {
-		p := full
-		if p == nil {
-			p = provider
-		}
-		if p.isManagedCluster() {
-			// The managed cluster is leaving visor's fleet. Roll a destroyed
-			// event (best-effort) — kind=cluster.
-			service.EmitComputeEvent(p.clusterEvent(service.ComputeDestroyed))
-		}
-	}
-
 	return affected != 0, nil
 }
 
@@ -262,35 +204,11 @@ func (provider *Provider) getId() string {
 	return fmt.Sprintf("%s/%s", provider.Owner, provider.Name)
 }
 
-// isManagedCluster reports whether this provider registers a real DOKS cluster —
-// a DigitalOcean provider carrying a cluster UUID. Only such providers are a
-// cluster in the compute-analytics sense; blockchain/other providers are not.
-func (provider *Provider) isManagedCluster() bool {
-	return provider.Type == "DigitalOcean" && provider.ClusterID != ""
-}
-
-// clusterEvent builds the analytics fleet event for the DOKS cluster this
-// provider registers (kind=cluster). org is the provider's IAM owner; the
-// cluster UUID identifies the unit and Region is its size lens. Price is 0 — the
-// DOKS control plane is free; a cluster's compute cost lives in its node pools
-// (kind=nodepool).
-func (provider *Provider) clusterEvent(event string) service.ComputeEvent {
-	return service.ComputeEvent{
-		Org:       provider.Owner,
-		Kind:      service.KindCluster,
-		Event:     event,
-		MachineID: provider.ClusterID,
-		Size:      provider.Region,
-	}
-}
-
 // LaunchCredential is one usable (account, region) a launch can run on. It flattens
 // a provider's own credential and its rotation Keys into the uniform shape the
 // selector cycles over, so the caller never reaches into either representation.
 type LaunchCredential struct {
-	KeyName string // the ProviderKey.Name, or "" for the provider's own credential
-	KeyID   string
-	Secret  string
+	KeyName string // the ProviderKey.Name, or "" for the provider's own account
 	Region  string
 }
 
@@ -304,50 +222,25 @@ func keyIsActive(state string) bool {
 	return state == "" || state == "active"
 }
 
-// LaunchCredentials returns every usable credential on a provider, in a stable
-// order: the provider's own (ClientId, ClientSecret) first, then each active key
-// in declared order. A revoked or rate-limited key is omitted, so the caller
-// cycles only over accounts that can actually serve a launch.
-//
-// The provider's own credential leads because it is the one that already ran the
-// fleet; adding Keys must never demote it. A provider with no usable credential
-// at all returns an empty slice, and the caller must treat that as "cannot
-// launch here" rather than launching on a zero-value credential.
+// LaunchCredentials returns every usable account on a provider, in a stable
+// order: the provider's own account (labelled by the row's Name) first, then each
+// active key in declared order. A revoked or rate-limited key is omitted, so the
+// caller cycles only over accounts that can actually serve a launch.
 func (p *Provider) LaunchCredentials() []LaunchCredential {
 	if p == nil {
 		return nil
 	}
 	out := make([]LaunchCredential, 0, len(p.Keys)+1)
-	// The row's own credential is key 0 whenever the row carries one. Its
-	// lifecycle is the provider-level State, enforced where providers are
-	// selected (isActiveCloudProvider) — this does not re-judge it in the key
-	// vocabulary. A multi-account provider that wants every account independently
-	// skippable leaves the row credential empty and lists all accounts as Keys.
-	if p.ClientSecret != "" || p.ClientId != "" {
-		out = append(out, LaunchCredential{
-			KeyName: "",
-			KeyID:   p.ClientId,
-			Secret:  p.ClientSecret,
-			Region:  p.Region,
-		})
-	}
+	out = append(out, LaunchCredential{KeyName: "", Region: p.Region})
 	for _, k := range p.Keys {
-		if !keyIsActive(k.State) {
-			continue
-		}
-		if k.Secret == "" && k.KeyID == "" {
+		if !keyIsActive(k.State) || k.Name == "" {
 			continue
 		}
 		region := k.Region
 		if region == "" {
 			region = p.Region
 		}
-		out = append(out, LaunchCredential{
-			KeyName: k.Name,
-			KeyID:   k.KeyID,
-			Secret:  k.Secret,
-			Region:  region,
-		})
+		out = append(out, LaunchCredential{KeyName: k.Name, Region: region})
 	}
 	return out
 }
@@ -409,12 +302,10 @@ func (p *Provider) launchCredentialNamed(account string) (LaunchCredential, bool
 // credential builds the cloud credential for one of this provider's accounts.
 //
 // Name is the account's egress label — the carrier passes it as the spend
-// Account, which selects the credential KMS holds, so each account MUST carry a
-// distinct label or a carried launch resolves them all to one KMS key and the
-// cycling has no effect. The row's own account keeps the provider's own label
-// (unchanged from the single-account past); an additional key uses its own name.
-// KeyID/Secret are consulted only on the carrier-less path, where visor holds
-// the token itself; under the carrier they are empty and egress attaches the key.
+// Account, which selects the credential egress holds, so each account MUST carry
+// a distinct label or a carried launch resolves them all to one key and the
+// cycling has no effect. The row's own account keeps the provider's own label;
+// an additional key uses its own name. It carries no key: there is none here.
 //
 // A row the SuperAdmin org does not own is a tenant's own account, and says so
 // (Tenant), so it is never carried under compute's identity. Only the reserved
@@ -432,8 +323,6 @@ func (p *Provider) credential(c LaunchCredential) service.Credential {
 	return service.Credential{
 		Provider: p.Type,
 		Name:     label,
-		KeyID:    c.KeyID,
-		Secret:   c.Secret,
 		Region:   c.Region,
 		Tenant:   tenant,
 	}

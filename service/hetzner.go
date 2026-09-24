@@ -29,29 +29,15 @@ type MachineHetznerClient struct {
 	region string
 }
 
-// Volumes is Hetzner's volume noun over the same hcloud client. Hetzner sells no
-// managed Kubernetes, VPC or load balancer through this service, so it implements
-// none of those capabilities and the factories say so without a list.
+// Volumes is Hetzner's volume noun over the same hcloud client.
 func (c MachineHetznerClient) Volumes() VolumeClientInterface {
 	return &VolumeHetznerClient{Client: c.Client, region: c.region}
 }
 
-func newMachineHetznerClient(accessKeySecret string, accessKeyId string, region string, hc *http.Client) (MachineHetznerClient, error) {
-	token := accessKeySecret
-	if token == "" {
-		token = accessKeyId
-	}
-
-	// Options in order: the carried transport, then the token only if we hold
-	// one. Under a carrier the token is empty and egress attaches it.
-	opts := []hcloud.ClientOption{}
-	if hc != nil {
-		opts = append(opts, hcloud.WithHTTPClient(hc))
-	}
-	if token != "" {
-		opts = append(opts, hcloud.WithToken(token))
-	}
-	return MachineHetznerClient{Client: hcloud.NewClient(opts...), region: region}, nil
+// newMachineHetznerClient is the Hetzner client over hc, the carrier's client:
+// it holds no token, and egress attaches the account's bearer to every call.
+func newMachineHetznerClient(region string, hc *http.Client) (MachineHetznerClient, error) {
+	return MachineHetznerClient{Client: hcloud.NewClient(hcloud.WithHTTPClient(hc)), region: region}, nil
 }
 
 func getMachineFromHetznerServer(server *hcloud.Server) *Machine {

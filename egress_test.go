@@ -83,12 +83,15 @@ func (d *stub) fetch(t *testing.T) spend.Fetch {
 	return in
 }
 
-// The whole point, end to end: a real DigitalOcean SDK client, built by the one
+// The whole point, end to end: a real Hetzner SDK client, built by the one
 // provider registry, makes its calls through egress. Visor holds no cloud
-// credential — the Credential here carries no secret at all — and the call still
-// reaches the cloud, because the key is attached at egress.
+// credential — a Credential has no field for one — and the call still reaches the
+// cloud, because the key is attached at egress.
 func TestTheSDKCallsThroughEgress(t *testing.T) {
-	d := &stub{status: 200, answer: json.RawMessage(`{"droplets":[{"id":7,"name":"web-1","vcpus":2,"memory":4096,"status":"active","region":{"slug":"nyc3"},"size":{"slug":"s-2vcpu-4gb"},"image":{"slug":"ubuntu-24-04","distribution":"Ubuntu","name":"24.04"}}]}`)}
+	d := &stub{status: 200, answer: json.RawMessage(`{"servers":[{"id":7,"name":"web-1","status":"running",` +
+		`"server_type":{"name":"cx22","cores":2,"memory":4},"datacenter":{"name":"fsn1-dc14","location":{"name":"fsn1"}},` +
+		`"image":{"name":"ubuntu-24.04","os_flavor":"ubuntu","os_version":"24.04"},"public_net":{},"private_net":[],"labels":{}}],` +
+		`"meta":{"pagination":{"page":1,"per_page":50,"previous_page":null,"next_page":null,"last_page":1,"total_entries":1}}}`)}
 	addr := d.listen(t)
 
 	t.Cleanup(func() { service.RegisterCarrier(nil) })
@@ -99,14 +102,9 @@ func TestTheSDKCallsThroughEgress(t *testing.T) {
 		}), nil
 	})
 
-	// No Secret. Under a carrier there is nothing to put there, which is the
-	// property being tested: a pod with this configuration holds nothing that
-	// spends.
-	client, err := service.NewMachineClient(service.Credential{
-		Provider: "DigitalOcean", Name: "prod", Region: "nyc3",
-	})
+	client, err := service.NewMachineClient(service.Credential{Provider: "Hetzner", Name: "prod", Region: "fsn1"})
 	if err != nil {
-		t.Fatalf("the registry refused a carried DigitalOcean: %v", err)
+		t.Fatalf("the registry refused a carried Hetzner: %v", err)
 	}
 
 	machines, err := client.GetMachines()
@@ -115,7 +113,7 @@ func TestTheSDKCallsThroughEgress(t *testing.T) {
 	}
 
 	asked := d.fetch(t)
-	if asked.Provider != "DigitalOcean" {
+	if asked.Provider != "Hetzner" {
 		t.Errorf("egress was asked for provider %q", asked.Provider)
 	}
 	if asked.Label != "prod" {
@@ -130,7 +128,7 @@ func TestTheSDKCallsThroughEgress(t *testing.T) {
 	if len(machines) != 1 {
 		t.Fatalf("the SDK could not read the cloud's answer: %+v", machines)
 	}
-	if m := machines[0]; m.DisplayName != "web-1" || m.Region != "nyc3" || m.Size != "s-2vcpu-4gb" || m.State != "Running" {
+	if m := machines[0]; m.DisplayName != "web-1" || m.Region != "fsn1-dc14" || m.Size != "cx22" || m.State != "Running" {
 		t.Errorf("the cloud's answer arrived damaged: %+v", m)
 	}
 }
@@ -154,7 +152,7 @@ func TestDial(t *testing.T) {
 
 // carry() is the operator contract, and each of its three states matters.
 func TestCarry(t *testing.T) {
-	t.Run("unset, visor calls clouds itself", func(t *testing.T) {
+	t.Run("unset, visor makes no cloud call", func(t *testing.T) {
 		t.Setenv("egressAddress", "")
 		t.Cleanup(func() { service.RegisterCarrier(nil) })
 		service.RegisterCarrier(nil)
@@ -162,12 +160,10 @@ func TestCarry(t *testing.T) {
 		if err := carry(); err != nil {
 			t.Fatalf("an unconfigured visor must start: %v", err)
 		}
-		// Lightsail builds its own transport, so it is refused ONLY under a
-		// carrier. Building here is what proves none was registered.
-		if _, err := service.NewMachineClient(service.Credential{
-			Provider: "AWS Lightsail", KeyID: "k", Secret: "s", Region: "us-east-1",
-		}); err != nil {
-			t.Errorf("a carrier was registered when none was configured: %v", err)
+		// There is no direct mode: with no egress, no cloud client is built.
+		if _, err := service.NewMachineClient(service.Credential{Provider: "Hetzner", Region: "fsn1"}); err == nil ||
+			!strings.Contains(err.Error(), "egress") {
+			t.Errorf("a cloud client was built with no egress: %v", err)
 		}
 	})
 
@@ -198,12 +194,9 @@ func TestCarry(t *testing.T) {
 		if err := carry(); err != nil {
 			t.Fatalf("carry: %v", err)
 		}
-		// Under a carrier, a cloud that cannot use one is refused rather than
-		// falling back to holding a key.
-		if _, err := service.NewMachineClient(service.Credential{
-			Provider: "AWS Lightsail", KeyID: "k", Secret: "s", Region: "us-east-1",
-		}); err == nil {
-			t.Error("Lightsail was built under a carrier it cannot use — the token would be held here")
+		// A cloud whose SDK would hold its own key is not offered at all.
+		if _, err := service.NewMachineClient(service.Credential{Provider: "AWS Lightsail", Region: "us-east-1"}); err == nil {
+			t.Error("Lightsail was built — its SDK would hold the key here")
 		}
 	})
 }

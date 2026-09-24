@@ -15,13 +15,12 @@
 package object
 
 // isActiveCloudProvider reports whether a provider is an active cloud provider
-// usable for machine and node-pool reconciliation. The API token may live in
-// either ClientId or ClientSecret, and the category may be the generic "Cloud"
-// as well as the legacy "Public Cloud"/"Private Cloud" labels.
+// usable for machine reconciliation. The category may be the generic "Cloud" as
+// well as the legacy "Public Cloud"/"Private Cloud" labels. What makes it usable
+// is its state: the account's credential is in egress custody, never here.
 func isActiveCloudProvider(p *Provider) bool {
-	hasToken := p.ClientId != "" || p.ClientSecret != ""
 	isCloud := p.Category == "Cloud" || p.Category == "Public Cloud" || p.Category == "Private Cloud"
-	return hasToken && isCloud && p.State == "Active"
+	return isCloud && p.State == "Active"
 }
 
 func getActiveCloudProviders(owner string) ([]*Provider, error) {
@@ -37,36 +36,4 @@ func getActiveCloudProviders(owner string) ([]*Provider, error) {
 		}
 	}
 	return res, nil
-}
-
-// GetAllActiveCloudProviders returns every org's active BYOC cloud provider — the
-// set the daily fleet cost collector bills 1% of spend against. Like the running-
-// machine sweep it scans cross-tenant and each row carries its own Owner/Project, so
-// one pass attributes every org's cloud fee correctly.
-func GetAllActiveCloudProviders() ([]*Provider, error) {
-	providers := []*Provider{}
-	if err := adapter.engine.Where("state = ?", "Active").Find(&providers); err != nil {
-		return nil, err
-	}
-	res := []*Provider{}
-	for _, p := range providers {
-		if isActiveCloudProvider(p) {
-			res = append(res, p)
-		}
-	}
-	return res, nil
-}
-
-func getActiveBlockchainProvider(owner string) (*Provider, error) {
-	providers, err := GetProviders(owner)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, provider := range providers {
-		if provider.ClientId != "" && provider.ClientSecret != "" && provider.Category == "Blockchain" && provider.State == "Active" {
-			return provider, nil
-		}
-	}
-	return nil, nil
 }

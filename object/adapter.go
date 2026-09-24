@@ -157,6 +157,9 @@ func (a *Adapter) createTable() {
 			panic(err)
 		}
 	}
+	if err := forgetProviderKeys(a.engine); err != nil {
+		panic(err)
+	}
 }
 
 func GetSession(owner string, offset, limit int, field, value, sortField, sortOrder string) *relational.Session {

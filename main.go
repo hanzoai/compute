@@ -106,18 +106,12 @@ func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	// real membership source first — see object/coordinator.go.
 	object.RegisterMembership(ha.Static(object.SelfID()))
 
-	// Which platform Kubernetes accounts this deployment may spend on: the
-	// active cloud Providers of the reserved SuperAdmin org. Hosted machines do
-	// not come from here: they run in the EC2 account egress holds as
-	// hanzo-compute (service/ec2.go).
-	object.RegisterCloudCredentials()
-
 	// Where each hosted machine's billed hours are kept: the shared store, so a
 	// restart resumes billing from the last hour charged instead of forgetting it.
 	object.RegisterMeterLedger()
 
-	// And how those accounts are reached: through hanzoai/egress when it is
-	// configured, so the cloud keys are not in this process at all.
+	// How every cloud is reached: through hanzoai/egress, so no cloud key is in
+	// this process at all. With no egress configured, no cloud call is made.
 	if err := carry(); err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}

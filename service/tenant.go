@@ -28,7 +28,7 @@ package service
 import "strings"
 
 // orgFromTag recovers the owning org from a machine's comma-joined tag string (as
-// getMachineFromDroplet builds it: "k1:v1,k2:v2,"): the value after "hanzo-org:".
+// tagString builds it: "k1:v1,k2:v2,"): the value after "hanzo-org:".
 // Empty when the machine carries no org tag — such a machine is unattributable and
 // is skipped rather than billed to a wrong tenant. This is the authoritative org
 // read-back; projectFromTag mirrors it for the project dimension.

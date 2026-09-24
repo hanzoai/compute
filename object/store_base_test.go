@@ -98,30 +98,16 @@ func TestBaseBackendPerOrgIsolation(t *testing.T) {
 	}
 }
 
-// TestBaseBackendCrossOrgFanOut proves the cluster-wide sweeps (billing node
-// pools, stale-session GC) union every per-org DB rather than reading one table.
+// TestBaseBackendCrossOrgFanOut proves the cluster-wide sweeps (stale-session
+// GC) union every per-org DB rather than reading one table.
 func TestBaseBackendCrossOrgFanOut(t *testing.T) {
 	installBaseStore(t)
 
-	if _, err := AddNodePool(&NodePool{Owner: "org-a", Name: "pool-a", State: "Active", Count: 1}); err != nil {
-		t.Fatalf("AddNodePool org-a: %v", err)
-	}
-	if _, err := AddNodePool(&NodePool{Owner: "org-b", Name: "pool-b", State: "Active", Count: 2}); err != nil {
-		t.Fatalf("AddNodePool org-b: %v", err)
-	}
 	if _, err := AddSession(&Session{Owner: "org-a", Name: "s-a", Status: NoConnect}); err != nil {
 		t.Fatalf("AddSession org-a: %v", err)
 	}
 	if _, err := AddSession(&Session{Owner: "org-b", Name: "s-b", Status: Connecting}); err != nil {
 		t.Fatalf("AddSession org-b: %v", err)
-	}
-
-	pools := []*NodePool{}
-	if err := GetAllNodePools(&pools); err != nil {
-		t.Fatalf("GetAllNodePools: %v", err)
-	}
-	if len(pools) != 2 {
-		t.Fatalf("GetAllNodePools returned %d pools, want 2 (fan-out across orgs)", len(pools))
 	}
 
 	sessions, err := GetSessionsByStatus([]string{NoConnect, Connecting})

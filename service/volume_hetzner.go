@@ -27,15 +27,6 @@ type VolumeHetznerClient struct {
 	region string
 }
 
-func newVolumeHetznerClient(accessKeyId string, accessKeySecret string, region string) (*VolumeHetznerClient, error) {
-	token := accessKeySecret
-	if token == "" {
-		token = accessKeyId
-	}
-	client := hcloud.NewClient(hcloud.WithToken(token))
-	return &VolumeHetznerClient{Client: client, region: region}, nil
-}
-
 func getVolumeFromHetzner(vol *hcloud.Volume) *Volume {
 	v := &Volume{
 		Name:        strconv.FormatInt(vol.ID, 10),

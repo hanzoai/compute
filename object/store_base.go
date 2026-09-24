@@ -134,6 +134,10 @@ func (s *baseStore) EngineFor(owner string) (*relational.Engine, error) {
 		_ = engine.Close()
 		return nil, fmt.Errorf("visor: base store sync %s: %w", path, err)
 	}
+	if err := forgetProviderKeys(engine); err != nil {
+		_ = engine.Close()
+		return nil, err
+	}
 
 	s.engines[owner] = engine
 	s.repl.ship(owner, path) // back this org's DB up to the object store on an interval

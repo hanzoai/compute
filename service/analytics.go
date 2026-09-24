@@ -213,6 +213,10 @@ func MachineProject(m *Machine) string { return tagValue(m.Tag, projectTagKey) }
 // analytical plane wired" signal: unset ⇒ every emit is a safe no-op, so a
 // deployment without a datastore is never blocked nor spammed with failed writes
 // (mirrors how visor's IAM identity gates metering).
+// datastoreHTTP is the bounded client analytics rows are sent with. The
+// datastore is ours, not a cloud, so it is not carried.
+var datastoreHTTP = &http.Client{Timeout: providerTimeout}
+
 func datastoreURL() string { return strings.TrimSpace(os.Getenv("DATASTORE_URL")) }
 
 // datastoreDB is the target database; defaults to the datastore's canonical
@@ -314,7 +318,7 @@ func writeComputeEvent(ev ComputeEvent) {
 		req.Header.Set("X-Datastore-Key", p)
 	}
 
-	resp, err := directHTTP().Do(req)
+	resp, err := datastoreHTTP.Do(req)
 	if err != nil {
 		logs.Warning("compute analytics: emit %s for machine %s: %v", ev.Event, ev.MachineID, err)
 		return

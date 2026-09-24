@@ -658,9 +658,8 @@ func TestATenantsOwnAccountIsNeverCarried(t *testing.T) {
 	RegisterCarrier(func(Credential) (*http.Client, error) { asked++; return &http.Client{}, nil })
 	t.Cleanup(func() { RegisterCarrier(nil) })
 
-	for _, provider := range []string{"AWS", providerDigitalOcean, "Hetzner"} {
-		_, err := NewMachineClient(Credential{Provider: provider, Name: "hanzo-compute", Tenant: "mallory",
-			KeyID: "AKIAROWKEY", Secret: "row-secret", Region: "us-east-1"})
+	for _, provider := range []string{"AWS", "Hetzner"} {
+		_, err := NewMachineClient(Credential{Provider: provider, Name: "hanzo-compute", Tenant: "mallory", Region: "us-east-1"})
 		if !errors.Is(err, ErrTenantNotCarried) {
 			t.Errorf("mallory's %s row under a carrier = %v, want ErrTenantNotCarried", provider, err)
 		}
@@ -721,7 +720,7 @@ func TestTheHourlySweepBillsEachOrgItsRunningMachines(t *testing.T) {
 	for _, d := range debits {
 		got[d.ID] = d
 	}
-	now := time.Now()
+	now := time.Now().Truncate(time.Hour).Add(5 * time.Minute)
 	a, b := got[MeterID("m-44444444444444444444", now)], got[MeterID("m-55555555555555555555", now)]
 	disk := got[DiskMeterID("m-77777777777777777777", now)]
 	if len(debits) != 3 || a.Org != "acme" || a.Cents() != 138 || a.Model != "g5.xlarge" || b.Org != "beta" || b.Cents() != 7 {
@@ -787,22 +786,16 @@ func TestAListAsksForSmallPages(t *testing.T) {
 	}
 }
 
-// A volume, a VPC and a load balancer are built from the same Credential a
-// machine is, so a tenant's own row is refused before the carrier for each.
+// A volume is built from the same Credential a machine is, so a tenant's own row
+// is refused before the carrier for it too.
 func TestATenantsOwnAccountIsRefusedForEveryResource(t *testing.T) {
 	var asked int
 	RegisterCarrier(func(Credential) (*http.Client, error) { asked++; return &http.Client{}, nil })
 	t.Cleanup(func() { RegisterCarrier(nil) })
-	tenant := Credential{Provider: providerDigitalOcean, Name: "do", Tenant: "mallory", Secret: "dop_mallory", Region: "nyc3"}
+	tenant := Credential{Provider: "Hetzner", Name: "hz", Tenant: "mallory", Region: "fsn1"}
 
 	if _, err := NewVolumeClient(tenant); !errors.Is(err, ErrTenantNotCarried) {
 		t.Errorf("volume = %v", err)
-	}
-	if _, err := NewVpcClient(tenant); !errors.Is(err, ErrTenantNotCarried) {
-		t.Errorf("vpc = %v", err)
-	}
-	if _, err := NewLoadBalancerClient(tenant); !errors.Is(err, ErrTenantNotCarried) {
-		t.Errorf("load balancer = %v", err)
 	}
 	if asked != 0 {
 		t.Fatalf("the carrier was asked %d times for a tenant's own account", asked)
@@ -853,7 +846,7 @@ func TestTransferIsReadThroughEgressAndCharged(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	now := time.Now()
+	now := time.Now().Truncate(time.Hour).Add(5 * time.Minute)
 	h := func(n int) time.Time { return now.Add(time.Duration(-n) * time.Hour) }
 	inst := f.Add(ec2test.Instance{Type: "t3.medium", State: "running", LaunchTime: h(4),
 		Tags: map[string]string{orgTagKey: "acme", machineTagKey: "m-99999999999999999999", managedByKey: managedBy}})

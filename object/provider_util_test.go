@@ -16,24 +16,22 @@ package object
 
 import "testing"
 
-// TestIsActiveCloudProvider pins the widened predicate: the live prod DO row
-// carries its token in ClientId (ClientSecret empty) with Category "Cloud", and
-// must be accepted alongside the legacy Public/Private Cloud shapes.
+// TestIsActiveCloudProvider pins the predicate: an active row of a cloud
+// category, whatever label it carries — the account's key is in egress custody,
+// so a row is never judged by whether it holds one.
 func TestIsActiveCloudProvider(t *testing.T) {
 	cases := []struct {
 		name string
 		p    *Provider
 		want bool
 	}{
-		{"prod DO row: token in ClientId, Category Cloud", &Provider{ClientId: "dop_v1_token", Category: "Cloud", State: "Active"}, true},
-		{"token in ClientSecret, Public Cloud", &Provider{ClientSecret: "secret", Category: "Public Cloud", State: "Active"}, true},
-		{"token in ClientId, Private Cloud", &Provider{ClientId: "token", Category: "Private Cloud", State: "Active"}, true},
-		{"both tokens set, Cloud", &Provider{ClientId: "a", ClientSecret: "b", Category: "Cloud", State: "Active"}, true},
-		{"no token rejected", &Provider{Category: "Cloud", State: "Active"}, false},
-		{"inactive state rejected", &Provider{ClientId: "token", Category: "Cloud", State: "Inactive"}, false},
-		{"empty state rejected", &Provider{ClientId: "token", Category: "Cloud", State: ""}, false},
-		{"blockchain category rejected", &Provider{ClientId: "token", Category: "Blockchain", State: "Active"}, false},
-		{"unknown category rejected", &Provider{ClientId: "token", Category: "Storage", State: "Active"}, false},
+		{"Cloud", &Provider{Category: "Cloud", State: "Active"}, true},
+		{"Public Cloud", &Provider{Category: "Public Cloud", State: "Active"}, true},
+		{"Private Cloud", &Provider{Category: "Private Cloud", State: "Active"}, true},
+		{"inactive state rejected", &Provider{Category: "Cloud", State: "Inactive"}, false},
+		{"empty state rejected", &Provider{Category: "Cloud", State: ""}, false},
+		{"blockchain category rejected", &Provider{Category: "Blockchain", State: "Active"}, false},
+		{"unknown category rejected", &Provider{Category: "Storage", State: "Active"}, false},
 	}
 	for _, tc := range cases {
 		if got := isActiveCloudProvider(tc.p); got != tc.want {

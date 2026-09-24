@@ -34,7 +34,6 @@ func perOrgModels() []any {
 		new(Machine),
 		new(Record),
 		new(Session),
-		new(NodePool),
 		new(Volume),
 		new(AgentBinding),
 	}
@@ -54,7 +53,6 @@ func sharedModels() []any {
 		new(MeterLease),
 		new(BillingLease),
 		new(FleetWorker),
-		new(CostCursor),
 		new(MeterMark),
 	}
 }

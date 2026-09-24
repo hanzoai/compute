@@ -53,16 +53,16 @@ func registry(t *testing.T) []declared {
 	return out
 }
 
-// TestNodesIsDeclared is the whole point of registering /v1/k8s/nodes as
-// zip.Get[Scope, Nodes] rather than as a handler.
+// TestAgentsIsDeclared is the whole point of registering /v1/machines/agents as
+// zip.Get[Scope, Agents] rather than as a handler.
 //
 // Being SERVED is not the property — the untyped spelling served it too. The
 // property is being in the REGISTRY, because that single entry is what the
 // OpenAPI document, the MCP tool list, the CLI and every generated SDK are
 // derived from. A route absent from it is on the wire and nowhere else, which is
 // how cloud came to hand-write a client for a shape visor never published.
-func TestNodesIsDeclared(t *testing.T) {
-	const want = "GET /v1/k8s/nodes"
+func TestAgentsIsDeclared(t *testing.T) {
+	const want = "GET /v1/machines/agents"
 
 	for _, op := range registry(t) {
 		if op.key != want {
@@ -71,8 +71,8 @@ func TestNodesIsDeclared(t *testing.T) {
 		if op.in == nil || op.in.Name() != "Scope" {
 			t.Errorf("%s In = %v, want controllers.Scope", want, op.in)
 		}
-		if op.out == nil || op.out.Name() != "Nodes" {
-			t.Errorf("%s Out = %v, want controllers.Nodes", want, op.out)
+		if op.out == nil || op.out.Name() != "Agents" {
+			t.Errorf("%s Out = %v, want controllers.Agents", want, op.out)
 		}
 		if op.summary == "" {
 			t.Errorf("%s has no summary — the document would publish it unnamed", want)
@@ -114,12 +114,12 @@ func TestDeclaredOpsAreServed(t *testing.T) {
 	}
 }
 
-// TestNodesStaysBehindTheChain is the security half, and it is not implied by any
-// of the above.
+// TestAgentsStaysBehindTheChain is the security half, and it is not implied by
+// any of the above.
 //
 // Health is registered AHEAD of the filter chain on purpose — a probe must reach
 // its handler with no credentials — and that same spelling one line higher would
-// make a tenant-scoped fleet read anonymous. Being a typed op changes nothing
+// make a tenant-scoped read anonymous. Being a typed op changes nothing
 // about where a route sits, so the position has to be asserted rather than
 // assumed.
 //
@@ -133,16 +133,16 @@ func TestDeclaredOpsAreServed(t *testing.T) {
 // tell "the authorizer stopped it" from "it ran and found nothing to scope to".
 // Only the authorizer writes "Unauthorized operation" (routers.requestDeny), so
 // only that string means the request never got in.
-func TestNodesStaysBehindTheChain(t *testing.T) {
-	status, body := get(t, "/v1/k8s/nodes")
+func TestAgentsStaysBehindTheChain(t *testing.T) {
+	status, body := get(t, "/v1/machines/agents")
 
 	if status == http.StatusOK {
-		t.Fatalf("GET /v1/k8s/nodes = 200 %s — an unauthenticated fleet read was served", body)
+		t.Fatalf("GET /v1/machines/agents = 200 %s — an unauthenticated read was served", body)
 	}
 	if status != http.StatusForbidden {
-		t.Fatalf("GET /v1/k8s/nodes = %d %s, want 403", status, body)
+		t.Fatalf("GET /v1/machines/agents = %d %s, want 403", status, body)
 	}
 	if !strings.Contains(body, "Unauthorized operation") {
-		t.Fatalf("GET /v1/k8s/nodes = %s — that is the handler's own refusal, so the request reached it: the route is outside the filter chain", body)
+		t.Fatalf("GET /v1/machines/agents = %s — that is the handler's own refusal, so the request reached it: the route is outside the filter chain", body)
 	}
 }

@@ -17,13 +17,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
-
-	"github.com/digitalocean/godo"
 
 	"github.com/hanzoai/compute/service/commercetest"
 )
@@ -86,86 +86,65 @@ func TestProvisionSerialisesAnOrgSoOneBalanceBuysOneCluster(t *testing.T) {
 	l := ledgerOf(t, map[string]int64{"acme": 3178}) // exactly one node-hour
 
 	const n = 16
-	clients := make([]*DOKSClient, n)
-	dos := make([]*doksTestServer, n)
-	for i := range clients {
-		dos[i] = &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}}
-		clients[i] = newDOKSTestClient(t, dos[i])
-	}
-
+	var provisioned atomic.Int32
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	granted := 0
-	for i := range n {
+	var granted atomic.Int32
+	for range n {
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
-			_, err := createClusterMetered(context.Background(), clients[i], newPoolLedger().record, "acme", "",
-				&CreateClusterSpec{Name: "g", Region: "nyc3",
-					NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: 1}})
-			if err == nil {
-				mu.Lock()
-				granted++
-				mu.Unlock()
+			if provisionOne("acme", &provisioned) == nil {
+				granted.Add(1)
 			}
-		}(i)
+		}()
 	}
 	wg.Wait()
 
-	provisioned := 0
-	for _, d := range dos {
-		if d.created != nil {
-			provisioned++
-		}
-	}
 	available, debits := l.state("acme")
-	t.Logf("balance funded ONE cluster-hour (3178c): %d/%d granted, %d provisioned, %d debits, balance now %d cents",
-		granted, n, provisioned, debits, available)
-
-	if granted != 1 {
-		t.Fatalf("a one-cluster balance must buy exactly one cluster, %d of %d were granted", granted, n)
+	t.Logf("balance funded ONE node-hour (3178c): %d/%d granted, %d provisioned, %d debits, balance now %d cents",
+		granted.Load(), n, provisioned.Load(), debits, available)
+	if granted.Load() != 1 {
+		t.Fatalf("a one-hour balance must buy exactly one provision, %d of %d were granted", granted.Load(), n)
 	}
-	if provisioned != 1 {
-		t.Fatalf("%d clusters reached DigitalOcean on a balance that funded 1", provisioned)
+	if provisioned.Load() != 1 {
+		t.Fatalf("%d provisions ran on a balance that funded 1", provisioned.Load())
 	}
 	if debits != 1 || available != 0 {
 		t.Fatalf("want exactly one debit taking the balance to 0, got %d debits and %d cents", debits, available)
 	}
 }
 
-// Serialising must not deny a funded org: sixteen creates against sixteen
-// cluster-hours all succeed. A gate that refuses everyone is not fail-closed,
-// it is broken, and concurrency is where that is easiest to ship by accident.
+// provisionOne is one metered provision of a node-hour, counting the provisions
+// that actually ran.
+func provisionOne(org string, provisioned *atomic.Int32) error {
+	return Provision(context.Background(), org, "", 3178, 3178, "gpu-h100x8-640gb", func() (string, error) {
+		return fmt.Sprintf("p-%s-%d", org, provisioned.Add(1)), nil
+	}, nil)
+}
+
+// Serialising must not deny a funded org: sixteen provisions against sixteen
+// node-hours all succeed. A gate that refuses everyone is not fail-closed, it is
+// broken, and concurrency is where that is easiest to ship by accident.
 func TestProvisionDoesNotRefuseAFundedOrgUnderLoad(t *testing.T) {
 	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	const n = 16
 	l := ledgerOf(t, map[string]int64{"acme": 3178 * n})
 
-	clients := make([]*DOKSClient, n)
-	for i := range clients {
-		clients[i] = newDOKSTestClient(t, &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}})
-	}
-
+	var provisioned, granted atomic.Int32
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	granted := 0
-	for i := range n {
+	for range n {
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
-			if _, err := createClusterMetered(context.Background(), clients[i], newPoolLedger().record, "acme", "",
-				&CreateClusterSpec{Name: "g", Region: "nyc3",
-					NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: 1}}); err == nil {
-				mu.Lock()
-				granted++
-				mu.Unlock()
+			if provisionOne("acme", &provisioned) == nil {
+				granted.Add(1)
 			}
-		}(i)
+		}()
 	}
 	wg.Wait()
 
-	if granted != n {
-		t.Fatalf("a fully funded org must get all %d clusters, got %d", n, granted)
+	if granted.Load() != n {
+		t.Fatalf("a fully funded org must get all %d provisions, got %d", n, granted.Load())
 	}
 	if available, debits := l.state("acme"); debits != n || available != 0 {
 		t.Fatalf("want %d debits taking the balance to 0, got %d debits and %d cents", n, debits, available)
@@ -173,7 +152,7 @@ func TestProvisionDoesNotRefuseAFundedOrgUnderLoad(t *testing.T) {
 }
 
 // The hold is per ORG: one tenant's provisions never serialise behind another's,
-// so two orgs each funded for one cluster each get one.
+// so two orgs each funded for one node-hour each get one.
 func TestProvisionHoldsPerOrgNotGlobally(t *testing.T) {
 	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))
 	l := ledgerOf(t, map[string]int64{"acme": 3178, "globex": 3178})
@@ -181,15 +160,13 @@ func TestProvisionHoldsPerOrgNotGlobally(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	granted := map[string]int{}
+	var provisioned atomic.Int32
 	for _, org := range []string{"acme", "globex"} {
 		for range 4 {
-			client := newDOKSTestClient(t, &doksTestServer{clusters: map[string]*godo.KubernetesCluster{}})
 			wg.Add(1)
 			go func(org string) {
 				defer wg.Done()
-				if _, err := createClusterMetered(context.Background(), client, newPoolLedger().record, org, "",
-					&CreateClusterSpec{Name: "g", Region: "nyc3",
-						NodePool: CreateClusterNodePool{Size: "gpu-h100x8-640gb", Count: 1}}); err == nil {
+				if provisionOne(org, &provisioned) == nil {
 					mu.Lock()
 					granted[org]++
 					mu.Unlock()
@@ -203,7 +180,7 @@ func TestProvisionHoldsPerOrgNotGlobally(t *testing.T) {
 	defer mu.Unlock()
 	for _, org := range []string{"acme", "globex"} {
 		if granted[org] != 1 {
-			t.Fatalf("each org funded for one cluster must get exactly one, got %v", granted)
+			t.Fatalf("each org funded for one node-hour must get exactly one, got %v", granted)
 		}
 		if available, debits := l.state(org); debits != 1 || available != 0 {
 			t.Fatalf("%s: want one debit taking its own balance to 0, got %d debits and %d cents", org, debits, available)

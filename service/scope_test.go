@@ -20,20 +20,9 @@ import (
 	"time"
 )
 
-// joinTags mirrors getMachineFromDroplet's tag read-back build: the DO tags a
-// launch emits are joined into the comma-terminated Machine.Tag string EmitCompute
-// later parses. This is the exact launch -> droplet tag -> read-back chain.
-func joinTags(tags []string) string {
-	joined := ""
-	for _, t := range tags {
-		joined += t + ","
-	}
-	return joined
-}
-
 // TestSetScopeRoundTripToComputeUsage proves the whole org > app > project chain:
-// a launch that sets a scope (SetScope) lands hanzo-app/hanzo-project as droplet
-// tags (buildDropletTags), the tags survive the read-back (Machine.Tag), and
+// a launch that sets a scope (SetScope) lands hanzo-app/hanzo-project as instance
+// tags, the tags survive the read-back (tagString into Machine.Tag), and
 // EmitCompute records app/project on the compute_usage row — the columns that were
 // empty (0/0) before launch injected them.
 func TestSetScopeRoundTripToComputeUsage(t *testing.T) {
@@ -42,10 +31,9 @@ func TestSetScopeRoundTripToComputeUsage(t *testing.T) {
 	spec := &CreateMachineSpec{Tags: map[string]string{orgTagKey: "acme"}}
 	SetScope(spec, "web", "api")
 
-	tags := buildDropletTags(spec)
-	joined := joinTags(tags)
+	joined := tagString(spec.Tags)
 	if tagValue(joined, appTagKey) != "web" || tagValue(joined, projectTagKey) != "api" {
-		t.Fatalf("scope tags not emitted onto the droplet: %v", tags)
+		t.Fatalf("scope tags not carried onto the machine: %q", joined)
 	}
 
 	m := &Machine{Id: "77", Size: "s-1vcpu-1gb", Tag: joined}
@@ -69,14 +57,12 @@ func TestNoScopeLeavesProjectEmpty(t *testing.T) {
 	spec := &CreateMachineSpec{Tags: map[string]string{orgTagKey: "acme"}}
 	SetScope(spec, "", "") // omitted on this launch
 
-	tags := buildDropletTags(spec)
-	for _, tg := range tags {
-		if strings.HasPrefix(tg, appTagKey+":") || strings.HasPrefix(tg, projectTagKey+":") {
-			t.Fatalf("omitted scope must emit no app/project tag, got %q", tg)
-		}
+	joined := tagString(spec.Tags)
+	if strings.Contains(joined, appTagKey+":") || strings.Contains(joined, projectTagKey+":") {
+		t.Fatalf("omitted scope must emit no app/project tag, got %q", joined)
 	}
 
-	m := &Machine{Id: "78", Size: "s-1vcpu-1gb", Tag: joinTags(tags)}
+	m := &Machine{Id: "78", Size: "s-1vcpu-1gb", Tag: joined}
 	EmitCompute("acme", ComputeLaunched, m, 5)
 	select {
 	case c := <-got:

@@ -19,7 +19,6 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
@@ -27,24 +26,6 @@ import (
 type MachineAwsClient struct {
 	Client *ec2.Client
 	region string
-}
-
-func newMachineAwsClient(accessKeyId string, accessKeySecret string, region string) (MachineAwsClient, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(region),
-		config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-			return aws.Credentials{
-				AccessKeyID:     accessKeyId,
-				SecretAccessKey: accessKeySecret,
-			}, nil
-		})),
-	)
-	if err != nil {
-		return MachineAwsClient{}, err
-	}
-
-	client := ec2.NewFromConfig(cfg)
-	return MachineAwsClient{Client: client, region: region}, nil
 }
 
 func getMachineFromAwsInstance(instance ec2Types.Instance) *Machine {

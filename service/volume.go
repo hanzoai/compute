@@ -46,6 +46,12 @@ type VolumeClientInterface interface {
 	ResizeVolume(volumeName string, sizeGB int) error
 }
 
+// VolumeCapable is a provider client that also speaks volumes: an assertion on
+// the one client, never a second registry of clouds.
+type VolumeCapable interface {
+	Volumes() VolumeClientInterface
+}
+
 func NewVolumeClient(c Credential) (VolumeClientInterface, error) {
 	// ONE registry. NewMachineClient is the only place a cloud name is matched;
 	// volume support is a capability of the client it returns, so a cloud

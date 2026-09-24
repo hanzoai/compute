@@ -143,9 +143,8 @@ func (r *replicator) mergeSharedLeases(owner string, coord *relational.Engine) e
 
 // mergeLeaseRows copies every billing-lease row present in src but absent in dst,
 // inserting-if-absent so an existing PK is a no-op. It covers exactly the tables whose
-// insert-once claim guards money: MeterLease (hourly compute sweep), BillingLease
-// (daily/monthly fleet units), and CostCursor (the BYOC watermark advanced under the
-// BillingLease). One error aborts the merge so the caller fails CLOSED (a claim that
+// rows guard money: MeterLease (hourly compute sweep), BillingLease (monthly fleet
+// units), and MeterMark (each machine's billed hours, kept at the more advanced). One error aborts the merge so the caller fails CLOSED (a claim that
 // cannot confirm it has the prior owner's rows must not proceed).
 func mergeLeaseRows(src, dst *relational.Engine) error {
 	var meters []MeterLease
@@ -179,21 +178,28 @@ func mergeLeaseRows(src, dst *relational.Engine) error {
 		}
 	}
 
-	var cursors []CostCursor
-	if err := src.Find(&cursors); err != nil {
+	// A billed-hours mark never REGRESSES: the more advanced of the two is kept,
+	// because the lesser one would have the next sweep charge hours again.
+	var marks []MeterMark
+	if err := src.Find(&marks); err != nil {
 		return err
 	}
-	for i := range cursors {
-		c := cursors[i]
-		exists, err := dst.Exist(&CostCursor{Owner: c.Owner, Provider: c.Provider, Month: c.Month})
+	for i := range marks {
+		m := marks[i]
+		local := MeterMark{Machine: m.Machine}
+		has, err := dst.Get(&local)
 		if err != nil {
 			return err
 		}
-		if exists {
-			continue // never REGRESS a watermark: the local value is at least as advanced.
-		}
-		if _, err := dst.Insert(&c); err != nil {
-			return err
+		switch {
+		case !has:
+			if _, err := dst.Insert(&m); err != nil {
+				return err
+			}
+		case local.Hour < m.Hour:
+			if _, err := dst.ID(m.Machine).Cols("hour", "updated_time").Update(&m); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

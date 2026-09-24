@@ -44,7 +44,7 @@ func TestRedATenantsAWSRowIsNeverThePlatformAccount(t *testing.T) {
 
 	if _, err := object.AddProvider(&object.Provider{
 		Owner: "mallory", Name: "hanzo-compute", Category: "Cloud", Type: "AWS",
-		ClientId: "AKIAMALLORY000000000", ClientSecret: "anything", Region: ec2test.Region, State: "Active",
+		Region: ec2test.Region, State: "Active",
 	}); err != nil {
 		t.Fatal(err)
 	}

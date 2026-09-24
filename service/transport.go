@@ -29,14 +29,14 @@ const providerTimeout = 30 * time.Second
 
 // Carrier builds the http.Client a provider SDK makes its calls with.
 //
-// This is the ONE place a cloud credential turns into an outbound request, which
-// is what makes it the one place the credential can stop being here. Registered
-// with a carrier that reaches hanzoai/egress, visor sends the request and egress
-// attaches the key: the token is never in this process, never in its environment
-// and never in its config, so reading a pod here yields nothing to spend.
+// This is the ONE place a cloud account turns into an outbound request, and it
+// goes through hanzoai/egress: visor describes the request and egress attaches
+// the key. The key is never in this process, never in its environment and never
+// in its config — reading a pod here yields nothing to spend — and there is no
+// other way out: with no carrier registered, no cloud call is made at all.
 //
-// Both SDKs take an http.Client — godo.NewClient(c), hcloud.WithHTTPClient(c) —
-// so this is a transport swap and not an SDK rewrite.
+// The SDKs take an http.Client — hcloud.WithHTTPClient(c), ec2.Options — so
+// this is a transport swap and not an SDK rewrite.
 type Carrier func(p Credential) (*http.Client, error)
 
 var (
@@ -45,17 +45,14 @@ var (
 )
 
 // RegisterCarrier installs the carrier every provider client is built with.
-// Unregistered, visor holds the token itself and calls the cloud directly —
-// which is what it did before egress existed and what a single-binary or local
-// run still wants.
+// Unregistered, every cloud call refuses: there is no direct mode.
 func RegisterCarrier(c Carrier) {
 	carrierMu.Lock()
 	defer carrierMu.Unlock()
 	carrier = c
 }
 
-// carrierRegistered reports whether outbound calls are carried. A provider that
-// cannot use the carrier asks this before falling back to holding a token.
+// carrierRegistered reports whether outbound calls can be made at all.
 func carrierRegistered() bool {
 	carrierMu.RLock()
 	defer carrierMu.RUnlock()
@@ -95,7 +92,7 @@ func IsSuperAdmin(owner string) bool { return owner == SuperAdminOrg }
 // it through carried, and nothing else does.
 func httpFor(p Credential) (*http.Client, error) {
 	if !carrierRegistered() {
-		return directHTTP(), nil
+		return nil, errNoEgress
 	}
 	if p.Tenant != "" {
 		return nil, fmt.Errorf("%w: %s's %s account %q", ErrTenantNotCarried, p.Tenant, p.Provider, p.Name)
@@ -116,10 +113,4 @@ func carried(p Credential) (*http.Client, error) {
 		return nil, errNoEgress
 	}
 	return c(p)
-}
-
-// directHTTP is the carrier-less client: visor's own transport, bounded, with no
-// credential attached — the SDK adds that from the token it was handed.
-func directHTTP() *http.Client {
-	return &http.Client{Timeout: providerTimeout}
 }

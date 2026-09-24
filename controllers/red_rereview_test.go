@@ -52,7 +52,7 @@ func TestRedATenantsVolumeRowIsNeverCarried(t *testing.T) {
 
 	if _, err := object.AddProvider(&object.Provider{
 		Owner: "mallory2", Name: "do", Category: "Cloud", Type: "DigitalOcean",
-		ClientSecret: "dop_mallory", Region: "nyc3", State: "Active",
+		Region: "nyc3", State: "Active",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestRedAPlatformOrgRowIsNotTheHostedAccount(t *testing.T) {
 	}})
 	if _, err := object.AddProvider(&object.Provider{
 		Owner: "hanzo", Name: "hanzo-compute", Category: "Cloud", Type: "AWS",
-		ClientId: "AKIAANYMEMBER0000000", ClientSecret: "anything", Region: ec2test.Region, State: "Active",
+		Region: ec2test.Region, State: "Active",
 	}); err != nil {
 		t.Fatal(err)
 	}

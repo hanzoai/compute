@@ -39,7 +39,7 @@ func (c *ApiController) GetProviders() {
 	sortOrder := c.Ctx.Query("sortOrder")
 
 	if limit == "" || page == "" {
-		providers, err := object.GetMaskedProviders(object.GetProviders(owner))
+		providers, err := object.GetProviders(owner)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
@@ -55,7 +55,7 @@ func (c *ApiController) GetProviders() {
 		}
 
 		offset, nums := util.Paginate(page, limit, count)
-		providers, err := object.GetMaskedProviders(object.GetPaginationProviders(owner, offset, limit, field, value, sortField, sortOrder))
+		providers, err := object.GetPaginationProviders(owner, offset, limit, field, value, sortField, sortOrder)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
@@ -75,7 +75,7 @@ func (c *ApiController) GetProviders() {
 func (c *ApiController) GetProvider() {
 	id := c.Id()
 
-	provider, err := object.GetMaskedProvider(object.GetProvider(id))
+	provider, err := object.GetProvider(id)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -95,6 +95,12 @@ func (c *ApiController) GetProvider() {
 func (c *ApiController) UpdateProvider() {
 	id := c.Id()
 
+	// A cloud key is enrolled in egress custody and never stored here, so a
+	// write carrying one is refused rather than having the key dropped.
+	if err := object.RefuseProviderKeys(c.Ctx.Body()); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
 	var provider object.Provider
 	err := json.Unmarshal(c.Ctx.Body(), &provider)
 	if err != nil {
@@ -114,6 +120,12 @@ func (c *ApiController) UpdateProvider() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /add-provider [post]
 func (c *ApiController) AddProvider() {
+	// A cloud key is enrolled in egress custody and never stored here, so a
+	// write carrying one is refused rather than having the key dropped.
+	if err := object.RefuseProviderKeys(c.Ctx.Body()); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
 	var provider object.Provider
 	err := json.Unmarshal(c.Ctx.Body(), &provider)
 	if err != nil {

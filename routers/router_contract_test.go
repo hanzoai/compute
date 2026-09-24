@@ -53,7 +53,6 @@ var apiContract = []route{
 	// agent below. A typed op is in the registry every projection reads rather
 	// than only on the wire.
 	{"GET", "/v1/health", "health"},
-	{"GET", "/v1/k8s/nodes", "ListNodes"},
 
 	{"POST", "/v1/signin", "Signin"},
 	{"POST", "/v1/signout", "Signout"},
@@ -63,8 +62,6 @@ var apiContract = []route{
 	{"PUT", "/v1/records/:owner/:name", "UpdateRecord"},
 	{"POST", "/v1/records", "AddRecord"},
 	{"DELETE", "/v1/records/:owner/:name", "DeleteRecord"},
-	{"PUT", "/v1/records/:owner/:name/block", "CommitRecord"},
-	{"GET", "/v1/records/:owner/:name/block", "QueryRecord"},
 	{"GET", "/v1/assets", "GetAssets"},
 	{"GET", "/v1/assets/:owner/:name", "GetAsset"},
 	{"PUT", "/v1/assets/:owner/:name", "UpdateAsset"},
@@ -91,11 +88,6 @@ var apiContract = []route{
 	{"PUT", "/v1/machines/:owner/:name/agent", "BindAgent"},
 	{"GET", "/v1/machines/:owner/:name/agent", "GetAgent"},
 	{"DELETE", "/v1/machines/:owner/:name/agent", "UnbindAgent"},
-	{"GET", "/v1/k8s/providers", "ListComputeKubernetesProviders"},
-	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
-	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
-	{"GET", "/v1/k8s/clusters/:id", "GetComputeKubernetesCluster"},
-	{"DELETE", "/v1/k8s/clusters/:id", "DeleteComputeKubernetesCluster"},
 	{"GET", "/v1/sessions", "GetSessions"},
 	{"GET", "/v1/sessions/:owner/:name", "GetConnSession"},
 	{"PUT", "/v1/sessions/:owner/:name", "UpdateSession"},
@@ -105,12 +97,6 @@ var apiContract = []route{
 	{"DELETE", "/v1/sessions/:owner/:name/status", "StopSession"},
 	{"POST", "/v1/assets/:owner/:name/sessions", "AddAssetTunnel"},
 	{"GET", "/v1/sessions/:owner/:name/connection", "GetAssetTunnel"},
-	{"GET", "/v1/pools", "GetNodePools"},
-	{"GET", "/v1/pools/:owner/:name", "GetNodePool"},
-	{"POST", "/v1/pools", "CreateNodePool"},
-	{"PUT", "/v1/pools/:owner/:name", "UpdateNodePool"},
-	{"DELETE", "/v1/pools/:owner/:name", "DeleteNodePool"},
-	{"PUT", "/v1/pools/:owner/:name/size", "ScaleNodePool"},
 	{"GET", "/v1/plans", "GetPlans"},
 	{"GET", "/v1/plans/:owner/:name", "GetPlan"},
 	{"POST", "/v1/plans", "AddPlan"},
@@ -205,7 +191,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 67
+	const wantRoutes = 53
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -249,7 +235,14 @@ func TestAPIContractVerbMix(t *testing.T) {
 	// image catalog to browse or upload to: /v1/images serves nothing.
 	//
 	//	GET 31 -> 30    POST 13 -> 12    PUT 13 unchanged    DELETE 12 unchanged
-	want := map[string]int{"GET": 30, "POST": 12, "DELETE": 12, "PUT": 13}
+	//
+	// DigitalOcean is gone, and with it the only managed Kubernetes this service
+	// sold: the cluster and node-pool surfaces, the worker-node read and the
+	// record block a chain provider's stored key wrote. These are removals with
+	// no successor, not moves, so the counts fall.
+	//
+	//	GET 30 -> 23    POST 12 -> 10    PUT 13 -> 10    DELETE 12 -> 10
+	want := map[string]int{"GET": 23, "POST": 10, "DELETE": 10, "PUT": 10}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

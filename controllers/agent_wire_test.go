@@ -109,6 +109,13 @@ func ask(t *testing.T, app *zip.App, method, path, bearer, body string) (int, st
 	return res.StatusCode, string(b)
 }
 
+// get drives one real GET, with an optional bearer, and returns the body.
+func get(t *testing.T, app *zip.App, path, bearer string) string {
+	t.Helper()
+	_, b := ask(t, app, http.MethodGet, path, bearer, "")
+	return b
+}
+
 // TestReadOfAnAbsentBindingIs404 is the answer cloud's getAgent turns into its
 // own 404, and the reason it can stop inspecting fields to find out.
 //

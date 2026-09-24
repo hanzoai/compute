@@ -208,17 +208,6 @@ func AddRecord(record *Record) bool {
 		return false
 	}
 
-	if record.Provider == "" {
-		provider, err := getActiveBlockchainProvider(record.Organization)
-		if err != nil {
-			panic(err)
-		}
-
-		if provider != nil {
-			record.Provider = provider.Name
-		}
-	}
-
 	record.Owner = record.Organization
 
 	affected, err := mustEngineFor(record.Owner).Insert(record)

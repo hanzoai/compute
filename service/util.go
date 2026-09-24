@@ -14,7 +14,10 @@
 
 package service
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 func getLocalTimestamp(input string) string {
 	if input == "" {
@@ -36,4 +39,12 @@ func getLocalTimestamp(input string) string {
 	}
 
 	return ""
+}
+
+// safeTagField rejects a tag key/value that could corrupt the comma-joined tag
+// read-back every tag reader parses (a Machine's Tag is joined with "," and
+// orgFromTag splits on ","). A "," would fabricate a tag boundary; a ":" in a
+// value could fabricate a "key:value" pair. Empty is fine (dropped upstream).
+func safeTagField(s string) bool {
+	return !strings.ContainsAny(s, ",:")
 }
