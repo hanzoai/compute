@@ -251,9 +251,10 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 // cannot be read. The next one stops them.
 const mostUnread = 6
 
-// readKey is the ledger key of org's balance reads: Hour is the last hour the
-// sweep asked, and Streak how many hours in a row through it the answer could
-// not be read.
+// readKey is the ledger key of org's unreadable balances: Hour is the last hour
+// the sweep could not read it, and Streak how many hours in a row through that
+// one it could not. A run is consecutive hours; an hour read, or an hour no sweep
+// asked, ends it.
 func readKey(org string) string { return "balance/" + org }
 
 // balanceOf is what org can spend on the hour now starting, and whether that is
@@ -266,7 +267,6 @@ func readKey(org string) string { return "balance/" + org }
 func balanceOf(ctx context.Context, org string, current time.Time, marks map[string]Mark) (int64, bool) {
 	have, err := available(ctx, org)
 	if err == nil {
-		marks[readKey(org)] = Mark{Hour: hourOf(current)}
 		return have, true
 	}
 	if refusesOrg(err) {

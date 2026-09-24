@@ -717,6 +717,9 @@ func TestAnUnreadableBalanceStopsMachinesAfterSixHours(t *testing.T) {
 	set("acme", 100_000, http.StatusOK)
 	meterMachines(context.Background(), m, at(5)) // read: the count starts again
 	set("acme", 0, http.StatusBadGateway)
+	if got := stopped(); len(got) != 0 {
+		t.Fatalf("stopped = %v", got)
+	}
 	for h := 6; h < 6+mostUnread; h++ {
 		meterMachines(context.Background(), m, at(h))
 	}
@@ -816,5 +819,62 @@ func TestAnUnreadableNetworkOutStopsNothing(t *testing.T) {
 	}
 	if got := debits(); !slices.Equal(got, []string{"compute-n1-2026070214"}) {
 		t.Fatalf("debits = %v", got)
+	}
+}
+
+// An org's starting hours are decided under its provisioning hold, so a launch
+// and the sweep never both spend what one balance covers: the balance the sweep
+// reads is read while the hold is taken.
+func TestTheSweepReadsABalanceUnderTheOrgsHold(t *testing.T) {
+	freshLedger(t)
+	stops(t)
+	seedCatalog(t, priced("s", 5))
+	var mu sync.Mutex
+	var held []bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/billing/balance", func(w http.ResponseWriter, r *http.Request) {
+		holdsMu.Lock()
+		h := holds[r.Header.Get("X-Org-Id")]
+		holdsMu.Unlock()
+		mu.Lock()
+		held = append(held, h != nil)
+		mu.Unlock()
+		_, _ = io.WriteString(w, `{"available":100}`)
+	})
+	mux.HandleFunc("/v1/billing/usage", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{}`)
+	})
+	commercetest.Serve(t, mux)
+	at := time.Date(2026, 7, 2, 14, 10, 0, 0, time.UTC)
+	MarkBilled("h1", at.Add(-time.Hour))
+	meterMachines(context.Background(), []*Machine{
+		{Id: "h1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at.Add(-2 * time.Hour).Format(time.RFC3339)},
+	}, at)
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(held, []bool{true}) {
+		t.Fatalf("balance reads under the hold = %v, want one, held", held)
+	}
+}
+
+// A run of unreadable balances is consecutive hours: an hour no sweep asked
+// about ends it, as a read does.
+func TestAGapInSweepsEndsARunOfUnreadableHours(t *testing.T) {
+	set, _ := answering(t)
+	stopped := stops(t)
+	seedCatalog(t, priced("s", 5))
+	at := func(h int) time.Time { return time.Date(2026, 7, 2, h, 10, 0, 0, time.UTC) }
+	m := []*Machine{{Id: "g1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at(0).Format(time.RFC3339)}}
+	MarkBilled("g1", at(0))
+	set("acme", 0, http.StatusBadGateway)
+	for h := 1; h <= mostUnread-1; h++ {
+		meterMachines(context.Background(), m, at(h))
+	}
+	// No sweep at hour mostUnread.
+	for h := mostUnread + 1; h <= 2*mostUnread; h++ {
+		meterMachines(context.Background(), m, at(h))
+	}
+	if got := stopped(); len(got) != 0 {
+		t.Fatalf("two runs of fewer than %d hours stopped %v", mostUnread+1, got)
 	}
 }

@@ -29,15 +29,14 @@ type owned struct {
 // ownedWrite is the one rule for which row a write touches. The owner is the org
 // the caller acts in, resolved as every org-scoped route resolves it (principal: a
 // bearer's signed membership of the org it names, or the service caller's named
-// org); the name is the one the address gives. A body may repeat them and may not
-// differ, because the body is what the handler writes while the address is what
-// authorization was asked about: a body naming another owner or another row asks
-// to write where nobody checked. The requested org is the address's owner, else
-// the body's; a bearer that is not a member of it is refused, so a row of the
-// reserved admin org is written only by a member of admin (IsSuperAdmin).
+// org), and the name is the one the address gives. The requested org is the
+// address's owner, else the body's; a bearer that is not a member of it is
+// refused, so a row of the reserved admin org is written only by a member of
+// admin (IsSuperAdmin). A body naming another owner is refused: the body is what
+// the handler writes, and the address is what authorization was asked about. A
+// body's name is used only by a create, whose address names no row.
 //
-// It returns the target, or a refusal to answer with. A create names its row in
-// the body alone, so its name comes from there when the address gives none.
+// It returns the target, or a refusal to answer with.
 func (c *ApiController) ownedWrite(body []byte) (owned, string) {
 	target, refusal := c.ownedTarget(body)
 	if refusal == "" && target.Name == "" {
@@ -56,12 +55,6 @@ func (c *ApiController) ownedTarget(body []byte) (owned, string) {
 	claimed.Owner, claimed.Name = strings.TrimSpace(claimed.Owner), strings.TrimSpace(claimed.Name)
 	owner, name := c.Target()
 	owner, name = strings.TrimSpace(owner), strings.TrimSpace(name)
-	if owner != "" && claimed.Owner != "" && claimed.Owner != owner {
-		return owned{}, fmt.Sprintf("the body names org %q; the address names %q", claimed.Owner, owner)
-	}
-	if name != "" && claimed.Name != "" && claimed.Name != name {
-		return owned{}, fmt.Sprintf("the body names %q; the address names %q", claimed.Name, name)
-	}
 	if owner == "" {
 		owner = claimed.Owner
 	}

@@ -15,14 +15,23 @@
 package routers
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/compute/controllers"
@@ -158,9 +167,23 @@ func TestAWriteLandsOnTheCallersOwnRow(t *testing.T) {
 			if row("admin", "evil") != "" {
 				t.Errorf("a tenant created admin/evil")
 			}
+			if row("mallory", "evil") != "" {
+				t.Errorf("a body naming admin was written to mallory/evil instead of refused")
+			}
 			send("mallory", "PUT", "/v1/"+k.kind+"/mallory/seed", `{"owner":"admin","name":"seed","displayName":"pwned","protocol":"pwned","action":"pwned"}`)
 			if after := row("admin", "seed"); after != before {
 				t.Errorf("a tenant changed admin/seed:\n%s\n%s", before, after)
+			}
+			send("mallory", "PUT", "/v1/"+k.kind+"/mallory/seed", `{"owner":"mallory","name":"renamed"}`)
+			if row("mallory", "renamed") != "" || row("mallory", "seed") == "" {
+				t.Errorf("a body's name moved mallory/seed")
+			}
+			if err := k.seed("mallory", "keep"); err != nil {
+				t.Fatal(err)
+			}
+			send("mallory", "DELETE", "/v1/"+k.kind+"/mallory/anything", `{"owner":"mallory","name":"keep"}`)
+			if row("mallory", "keep") == "" {
+				t.Errorf("a delete of mallory/anything deleted the body's mallory/keep")
 			}
 			send("mallory", "DELETE", "/v1/"+k.kind+"/mallory/anything", `{"owner":"admin","name":"seed"}`)
 			send("mallory", "DELETE", "/v1/"+k.kind+"/mallory/seed", ``)
@@ -178,6 +201,18 @@ func TestAWriteLandsOnTheCallersOwnRow(t *testing.T) {
 			send("admin", "POST", "/v1/"+k.kind, `{"owner":"admin","name":"platform"}`)
 			if row("admin", "platform") == "" {
 				t.Errorf("a member of admin could not create admin/platform")
+			}
+
+			// A member of two orgs creates in the second by naming it.
+			req := httptest.NewRequest("POST", "/v1/"+k.kind, strings.NewReader(`{"owner":"beta","name":"second"}`))
+			req.Header.Set("Authorization", signMember(t, "acme", "beta"))
+			req.Header.Set("X-Org-Id", "beta")
+			req.Header.Set("Content-Type", "application/json")
+			if _, err := app.Test(req); err != nil {
+				t.Fatal(err)
+			}
+			if row("beta", "second") == "" {
+				t.Errorf("a member of acme and beta could not create beta/second")
 			}
 		})
 	}
@@ -216,4 +251,30 @@ func TestTheServiceCallerIsBasicWithItsOwnId(t *testing.T) {
 			t.Errorf("%s: subject %q, want %q", tc.name, got, tc.want)
 		}
 	}
+}
+
+// signMember is a bearer for a person who is a member of orgs, the first being
+// their home org, signed by a key the IAM configuration is set to trust.
+func signMember(t *testing.T, orgs ...string) string {
+	t.Helper()
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "t"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	iamsdk.InitConfig("", "", "", string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), "", "")
+	t.Setenv("iamIssuer", "https://test.id")
+	t.Setenv("iamAudience", "hanzo-visor")
+	c := &iamsdk.Claims{}
+	c.Owner, c.Name = orgs[0], "member"
+	c.Issuer = "https://test.id"
+	c.Audience = []string{"hanzo-visor"}
+	c.ExpiresAt = jwt.NewNumericDate(time.Now().Add(time.Hour))
+	for _, o := range orgs {
+		c.Orgs = append(c.Orgs, iamsdk.OrgRef{Org: o, Role: "member"})
+	}
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodRS256, c).SignedString(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "Bearer " + signed
 }

@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -917,3 +918,20 @@ func TestNetworkOutPagesAndRefusesAnUncountedQuery(t *testing.T) {
 		t.Fatalf("an uncounted query read as %v", err)
 	}
 }
+
+// A GetMetricData answer longer than mostAnswer is refused, never parsed short.
+func TestAnOversizedCloudWatchAnswerIsRefused(t *testing.T) {
+	big := strings.Repeat(" ", mostAnswer+1)
+	hc := &http.Client{Transport: answer(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(big)), Header: http.Header{}}, nil
+	})}
+	at := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	if _, _, err := metricPage(context.Background(), hc, "us-east-1", []string{"i-1"}, at, at.Add(time.Hour), ""); err == nil || !strings.Contains(err.Error(), "more than") {
+		t.Fatalf("a %d-byte answer read as %v", len(big), err)
+	}
+}
+
+// answer is an http.RoundTripper that is one function.
+type answer func(*http.Request) (*http.Response, error)
+
+func (a answer) RoundTrip(r *http.Request) (*http.Response, error) { return a(r) }
