@@ -94,14 +94,12 @@ func (c *ApiController) GetConnSession() {
 // @Success 200 {object} Response
 // @router /delete-session [post]
 func (c *ApiController) DeleteSession() {
-	var session object.Session
-	err := json.Unmarshal(c.Ctx.Body(), &session)
-	if err != nil {
-		c.ResponseError(err.Error())
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
 		return
 	}
-
-	affected, err := object.DeleteSession(&session)
+	affected, err := object.DeleteSession(&object.Session{Owner: target.Owner, Name: target.Name})
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -120,16 +118,20 @@ func (c *ApiController) DeleteSession() {
 // @Success 200 {object} Response
 // @router /update-session [post]
 func (c *ApiController) UpdateSession() {
-	id := c.Id()
-
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var session object.Session
 	err := json.Unmarshal(c.Ctx.Body(), &session)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	session.Owner, session.Name = target.Owner, target.Name
 
-	c.Data["json"] = wrapActionResponse(object.UpdateSession(id, &session))
+	c.Data["json"] = wrapActionResponse(object.UpdateSession(target.Owner+"/"+target.Name, &session))
 	c.ServeJSON()
 }
 
@@ -141,12 +143,18 @@ func (c *ApiController) UpdateSession() {
 // @Success 200 {object} Response
 // @router /add-session [post]
 func (c *ApiController) AddSession() {
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var session object.Session
 	err := json.Unmarshal(c.Ctx.Body(), &session)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	session.Owner, session.Name = target.Owner, target.Name
 
 	c.Data["json"] = wrapActionResponse(object.AddSession(&session))
 	c.ServeJSON()

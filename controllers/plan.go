@@ -65,12 +65,18 @@ func (c *ApiController) GetPlan() {
 // @Success 200 {object} controllers.Response
 // @router /add-plan [post]
 func (c *ApiController) AddPlan() {
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var plan object.Plan
 	err := json.Unmarshal(c.Ctx.Body(), &plan)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	plan.Owner, plan.Name = target.Owner, target.Name
 	c.Data["json"] = wrapActionResponse(object.AddPlan(&plan))
 	c.ServeJSON()
 }
@@ -85,16 +91,19 @@ func (c *ApiController) AddPlan() {
 // @Success 200 {object} controllers.Response
 // @router /update-plan [post]
 func (c *ApiController) UpdatePlan() {
-	owner := c.Ctx.Query("owner")
-	name := c.Ctx.Query("name")
-
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var plan object.Plan
 	err := json.Unmarshal(c.Ctx.Body(), &plan)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.Data["json"] = wrapActionResponse(object.UpdatePlan(owner, name, &plan))
+	plan.Owner, plan.Name = target.Owner, target.Name
+	c.Data["json"] = wrapActionResponse(object.UpdatePlan(target.Owner, target.Name, &plan))
 	c.ServeJSON()
 }
 
@@ -106,12 +115,11 @@ func (c *ApiController) UpdatePlan() {
 // @Success 200 {object} controllers.Response
 // @router /delete-plan [post]
 func (c *ApiController) DeletePlan() {
-	var plan object.Plan
-	err := json.Unmarshal(c.Ctx.Body(), &plan)
-	if err != nil {
-		c.ResponseError(err.Error())
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
 		return
 	}
-	c.Data["json"] = wrapActionResponse(object.DeletePlan(&plan))
+	c.Data["json"] = wrapActionResponse(object.DeletePlan(&object.Plan{Owner: target.Owner, Name: target.Name}))
 	c.ServeJSON()
 }

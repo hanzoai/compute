@@ -93,16 +93,20 @@ func (c *ApiController) GetAsset() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-asset [post]
 func (c *ApiController) UpdateAsset() {
-	id := c.Id()
-
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var asset object.Asset
 	err := json.Unmarshal(c.Ctx.Body(), &asset)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	asset.Owner, asset.Name = target.Owner, target.Name
 
-	c.Data["json"] = wrapActionResponse(object.UpdateAsset(id, &asset))
+	c.Data["json"] = wrapActionResponse(object.UpdateAsset(target.Owner+"/"+target.Name, &asset))
 	c.ServeJSON()
 }
 
@@ -114,12 +118,18 @@ func (c *ApiController) UpdateAsset() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /add-asset [post]
 func (c *ApiController) AddAsset() {
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var asset object.Asset
 	err := json.Unmarshal(c.Ctx.Body(), &asset)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	asset.Owner, asset.Name = target.Owner, target.Name
 
 	c.Data["json"] = wrapActionResponse(object.AddAsset(&asset))
 	c.ServeJSON()
@@ -133,13 +143,11 @@ func (c *ApiController) AddAsset() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /delete-asset [post]
 func (c *ApiController) DeleteAsset() {
-	var asset object.Asset
-	err := json.Unmarshal(c.Ctx.Body(), &asset)
-	if err != nil {
-		c.ResponseError(err.Error())
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
 		return
 	}
-
-	c.Data["json"] = wrapActionResponse(object.DeleteAsset(&asset))
+	c.Data["json"] = wrapActionResponse(object.DeleteAsset(&object.Asset{Owner: target.Owner, Name: target.Name}))
 	c.ServeJSON()
 }

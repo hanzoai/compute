@@ -93,12 +93,15 @@ func (c *ApiController) GetProvider() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-provider [post]
 func (c *ApiController) UpdateProvider() {
-	id := c.Id()
-
 	// A cloud key is enrolled in egress custody and never stored here, so a
 	// write carrying one is refused rather than having the key dropped.
 	if err := object.RefuseProviderKeys(c.Ctx.Body()); err != nil {
 		c.ResponseError(err.Error())
+		return
+	}
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
 		return
 	}
 	var provider object.Provider
@@ -107,8 +110,9 @@ func (c *ApiController) UpdateProvider() {
 		c.ResponseError(err.Error())
 		return
 	}
+	provider.Owner, provider.Name = target.Owner, target.Name
 
-	c.Data["json"] = wrapActionResponse(object.UpdateProvider(id, &provider))
+	c.Data["json"] = wrapActionResponse(object.UpdateProvider(target.Owner+"/"+target.Name, &provider))
 	c.ServeJSON()
 }
 
@@ -126,12 +130,18 @@ func (c *ApiController) AddProvider() {
 		c.ResponseError(err.Error())
 		return
 	}
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var provider object.Provider
 	err := json.Unmarshal(c.Ctx.Body(), &provider)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	provider.Owner, provider.Name = target.Owner, target.Name
 
 	c.Data["json"] = wrapActionResponse(object.AddProvider(&provider))
 	c.ServeJSON()
@@ -145,13 +155,11 @@ func (c *ApiController) AddProvider() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /delete-provider [post]
 func (c *ApiController) DeleteProvider() {
-	var provider object.Provider
-	err := json.Unmarshal(c.Ctx.Body(), &provider)
-	if err != nil {
-		c.ResponseError(err.Error())
+	target, refusal := c.ownedWrite(bodyOrEmpty(c.Ctx.Body()))
+	if refusal != "" {
+		c.ResponseError(refusal)
 		return
 	}
-
-	c.Data["json"] = wrapActionResponse(object.DeleteProvider(&provider))
+	c.Data["json"] = wrapActionResponse(object.DeleteProvider(&object.Provider{Owner: target.Owner, Name: target.Name}))
 	c.ServeJSON()
 }

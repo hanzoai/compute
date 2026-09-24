@@ -123,7 +123,7 @@ func provisionOne(org string, provisioned *atomic.Int32) error {
 }
 
 // Serialising must not deny a funded org: sixteen provisions against sixteen
-// node-hours all succeed. A gate that refuses everyone is not fail-closed, it is
+// node-hours all succeed. A check that refuses everyone is not fail-closed, it is
 // broken, and concurrency is where that is easiest to ship by accident.
 func TestProvisionDoesNotRefuseAFundedOrgUnderLoad(t *testing.T) {
 	seedCatalog(t, priced("gpu-h100x8-640gb", 3178))

@@ -17,6 +17,7 @@ package controllers
 import (
 	"encoding/json"
 
+	"github.com/google/uuid"
 	"github.com/hanzoai/compute/object"
 	"github.com/hanzoai/compute/util"
 )
@@ -94,16 +95,20 @@ func (c *ApiController) GetRecord() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-record [post]
 func (c *ApiController) UpdateRecord() {
-	id := c.Id()
-
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var record object.Record
 	err := json.Unmarshal(c.Ctx.Body(), &record)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	record.Owner, record.Organization, record.Name = target.Owner, target.Owner, target.Name
 
-	c.Data["json"] = wrapActionResponse(object.UpdateRecord(id, &record))
+	c.Data["json"] = wrapActionResponse(object.UpdateRecord(target.Owner+"/"+target.Name, &record))
 	c.ServeJSON()
 }
 
@@ -115,12 +120,21 @@ func (c *ApiController) UpdateRecord() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /add-record [post]
 func (c *ApiController) AddRecord() {
+	target, refusal := c.ownedTarget(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
+		return
+	}
 	var record object.Record
 	err := json.Unmarshal(c.Ctx.Body(), &record)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	if target.Name == "" {
+		target.Name = uuid.NewString()
+	}
+	record.Owner, record.Organization, record.Name = target.Owner, target.Owner, target.Name
 
 	if record.ClientIp == "" {
 		record.ClientIp = c.getClientIp()
@@ -141,13 +155,11 @@ func (c *ApiController) AddRecord() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /delete-record [post]
 func (c *ApiController) DeleteRecord() {
-	var record object.Record
-	err := json.Unmarshal(c.Ctx.Body(), &record)
-	if err != nil {
-		c.ResponseError(err.Error())
+	target, refusal := c.ownedWrite(c.Ctx.Body())
+	if refusal != "" {
+		c.ResponseError(refusal)
 		return
 	}
-
-	c.Data["json"] = wrapActionResponse(object.DeleteRecord(&record))
+	c.Data["json"] = wrapActionResponse(object.DeleteRecord(&object.Record{Owner: target.Owner, Name: target.Name}))
 	c.ServeJSON()
 }
