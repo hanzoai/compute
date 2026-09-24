@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -83,13 +84,20 @@ func TestComputeOrgComesFromTheTokenNotTheAddress(t *testing.T) {
 	app.Get("/v1/machines", echo)
 	app.Get("/v1/machines/:owner/:name", echo)
 
-	if got := get(t, app, "/v1/machines?owner=victimlaunch", mint("attackerlaunch")); got != "attackerlaunch" {
-		t.Errorf("the query's org won: %q", got)
+	// An org the token's membership does not include resolves to none, and the
+	// caller fails closed — neither the named org nor a quiet substitute.
+	if got := get(t, app, "/v1/machines?owner=victimlaunch", mint("attackerlaunch")); got != "" {
+		t.Errorf("the query's org resolved to %q", got)
 	}
 	// The address is the newer vector: the owner moved out of the query and into
 	// a path segment, and it must not have gained authority on the way.
-	if got := get(t, app, "/v1/machines/victimlaunch/m1", mint("attackerlaunch")); got != "attackerlaunch" {
-		t.Errorf("the address's org won: %q", got)
+	if got := get(t, app, "/v1/machines/victimlaunch/m1", mint("attackerlaunch")); got != "" {
+		t.Errorf("the address's org resolved to %q", got)
+	}
+	for _, path := range []string{"/v1/machines", "/v1/machines?owner=attackerlaunch", "/v1/machines/attackerlaunch/m1"} {
+		if got := get(t, app, path, mint("attackerlaunch")); got != "attackerlaunch" {
+			t.Errorf("%s resolved to %q, want the caller's own org", path, got)
+		}
 	}
 	// The control, and the actual contract: with no token there is nothing to
 	// override the address, so the address resolves. That is why an
@@ -100,38 +108,36 @@ func TestComputeOrgComesFromTheTokenNotTheAddress(t *testing.T) {
 	}
 }
 
-// Every volume WRITE takes its tenant from the token too. Each fails on the
-// missing provider, and the org named in that failure is the proof: it is the
-// caller's, never the query's.
+// Every volume WRITE takes its tenant from the token's membership too. Addressed
+// at an org the caller is not a member of, each is refused before any provider
+// is looked up; addressed at its own org, each fails on the missing provider,
+// named in the caller's org.
 func TestVolumeWritesUseTheSignedOrgNotTheQuery(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := tenantWire(t)
 
-	// The victim's org is now named in the ADDRESS, which is the stronger form of
-	// the same attack: the caller is asking for a path it has no claim to.
 	for name, tc := range map[string]struct{ method, path string }{
-		"create": {http.MethodPost, "/v1/volumes?owner=victimvol&provider=platformdo"},
-		"delete": {http.MethodDelete, "/v1/volumes/victimvol/vol-1?provider=platformdo"},
-		"attach": {http.MethodPut, "/v1/volumes/victimvol/vol-1/attachment?provider=platformdo&machine=m-1"},
-		"detach": {http.MethodDelete, "/v1/volumes/victimvol/vol-1/attachment?provider=platformdo"},
-		"resize": {http.MethodPut, "/v1/volumes/victimvol/vol-1/size?provider=platformdo&size=200"},
+		"create": {http.MethodPost, "/v1/volumes?owner=%s&provider=platformdo"},
+		"delete": {http.MethodDelete, "/v1/volumes/%s/vol-1?provider=platformdo"},
+		"attach": {http.MethodPut, "/v1/volumes/%s/vol-1/attachment?provider=platformdo&machine=m-1"},
+		"detach": {http.MethodDelete, "/v1/volumes/%s/vol-1/attachment?provider=platformdo"},
+		"resize": {http.MethodPut, "/v1/volumes/%s/vol-1/size?provider=platformdo&size=200"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, body := ask(t, app, tc.method, tc.path, mint("attackervol"), `{"owner":"attackervol","name":"vol-1","sizeGb":100}`)
+			_, body := ask(t, app, tc.method, fmt.Sprintf(tc.path, "victimvol"), mint("attackervol"), `{"owner":"attackervol","name":"vol-1","sizeGb":100}`)
+			if !strings.Contains(body, refuseNoOrg) || strings.Contains(body, "victimvol") {
+				t.Fatalf("%s addressed at another org was not refused: %s", name, body)
+			}
+			_, body = ask(t, app, tc.method, fmt.Sprintf(tc.path, "attackervol"), mint("attackervol"), `{"owner":"attackervol","name":"vol-1","sizeGb":100}`)
 			if !strings.Contains(body, "attackervol") {
 				t.Fatalf("%s must resolve the provider in the CALLER's org, got %s", name, body)
-			}
-			if strings.Contains(body, "victimvol") {
-				t.Fatalf("%s reached another org's provider credentials: %s", name, body)
 			}
 		})
 	}
 }
 
-// The volume READS are scoped to the caller as well. The owner is now a PATH
-// segment, which is the same segment the authorization seam reads, so the two
-// can no longer disagree — a caller naming another org's volume in the address
-// is judged on that address. This asks for exactly that.
+// The volume READS are scoped to the caller as well: another org's list or
+// volume is refused, and the caller's own are served.
 func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := tenantWire(t)
@@ -142,8 +148,10 @@ func TestVolumeReadsAreScopedToTheCaller(t *testing.T) {
 	if strings.Contains(list, "secret-disk") || strings.Contains(list, "victimvolread") {
 		t.Fatalf("another org's volumes were listed: %s", list)
 	}
-	if !strings.Contains(list, "own-disk") {
-		t.Fatalf("the caller must still see its OWN volumes: %s", list)
+	for _, path := range []string{"/v1/volumes", "/v1/volumes?owner=attackervolread"} {
+		if own := get(t, app, path, mint("attackervolread")); !strings.Contains(own, "own-disk") {
+			t.Fatalf("the caller must still see its OWN volumes at %s: %s", path, own)
+		}
 	}
 
 	one := get(t, app, "/v1/volumes/victimvolread/secret-disk", mint("attackervolread"))

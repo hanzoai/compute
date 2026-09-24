@@ -113,15 +113,26 @@ type Agents struct {
 // principal answers both halves of "who is asking" from the two things a request
 // can carry them in, and it is the ONE rule for this: an authenticated
 // principal's org is an org its SIGNED membership includes — the owner the
-// request addresses when the user is a member of it, the home org otherwise —
-// and never a client-supplied ?owner the membership does not include. Only an
-// unauthenticated service/app call (Basic client-id/secret; no Bearer user) may
-// pass ?owner, and ApiFilter has already authorized it as subOwner=="app".
+// request addresses, or the home org when it addresses none. A bearer that does
+// not establish a user in that org — refused, foreign, or naming an org it is
+// not a member of — resolves to "", and the caller fails closed: it never falls
+// through to the ?owner it named. Only an unauthenticated service/app call
+// (Basic client-id/secret; no Bearer at all) may pass ?owner, and ApiFilter has
+// already authorized it as subOwner=="app".
 func principal(authorization string, owner string) (*iamsdk.User, string) {
 	if u := object.GetBearerUser(authorization, owner); u != nil {
 		return u, strings.TrimSpace(u.Owner)
 	}
+	if bearing(authorization) {
+		return nil, ""
+	}
 	return nil, strings.TrimSpace(owner)
+}
+
+// bearing reports whether an Authorization header presents a bearer token.
+func bearing(authorization string) bool {
+	const prefix = "bearer "
+	return len(authorization) >= len(prefix) && strings.EqualFold(authorization[:len(prefix)], prefix)
 }
 
 // machine resolves a request into the fully-qualified `owner/name` machine id it

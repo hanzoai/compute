@@ -25,7 +25,8 @@ import (
 // GetBearerUser validates an "Authorization: Bearer <IAM JWT>" header and
 // returns the authenticated user acting in org, or nil. org is the org the
 // request names (X-Org-Id, or the owner it addresses); the user acts in it only
-// when the token's signed membership includes it, and in its home org otherwise.
+// when the token's signed membership includes it, in its home org when the
+// request names none, and not at all when it names an org it is not a member of.
 // iamsdk.ParseJwtToken verifies the token SIGNATURE (jwt.ParseWithClaims +
 // x509), so a forged/tampered token is rejected.
 //
@@ -73,20 +74,24 @@ func GetBearerUser(authHeader, org string) *iamsdk.User {
 	return &user
 }
 
-// member is the org a request acts in: the one it names when the signed
-// membership includes it, and the home org (the first) otherwise. No membership
-// is "".
+// member is the org a request acts in: the one it names, when the signed
+// membership includes it; the home org (the first) when it names none. An org
+// the membership does not include is refused — "" — rather than answered with
+// another org the caller did not ask for. No membership is "".
 func member(orgs []iamsdk.OrgRef, want string) string {
 	want = strings.TrimSpace(want)
+	if want == "" {
+		if len(orgs) == 0 {
+			return ""
+		}
+		return strings.TrimSpace(orgs[0].Org)
+	}
 	for _, o := range orgs {
-		if want != "" && strings.TrimSpace(o.Org) == want {
+		if strings.TrimSpace(o.Org) == want {
 			return want
 		}
 	}
-	if len(orgs) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(orgs[0].Org)
+	return ""
 }
 
 // audienceAllowed reports whether a token was minted for this service: one of

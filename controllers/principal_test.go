@@ -51,9 +51,9 @@ func TestPrincipalOrg(t *testing.T) {
 		{"owner is trimmed", "", "  acme  ", "acme"},
 		{"no credential and no owner fails closed", "", "", ""},
 		{"whitespace-only owner fails closed", "", "   ", ""},
-		{"unparseable bearer establishes nothing", "Bearer not-a-token", "acme", "acme"},
-		{"non-bearer scheme establishes nothing", "Basic dXNlcjpwYXNz", "acme", "acme"},
-		{"empty bearer establishes nothing", "Bearer ", "acme", "acme"},
+		{"unparseable bearer fails closed", "Bearer not-a-token", "acme", ""},
+		{"non-bearer scheme is the service branch", "Basic dXNlcjpwYXNz", "acme", "acme"},
+		{"empty bearer fails closed", "Bearer ", "acme", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -138,8 +138,8 @@ func signing(t *testing.T, issuer string) func(edit func(*iamsdk.Claims)) string
 func TestPrincipalBearerBeatsOwner(t *testing.T) {
 	mint := signer(t, "https://test.id")
 
-	if _, got := principal(mint("trueorg"), "victim"); got != "trueorg" {
-		t.Fatalf("principal(bearer(trueorg), ?owner=victim) org = %q, want %q — a signed claim must beat a typed query", got, "trueorg")
+	if _, got := principal(mint("trueorg"), "victim"); got != "" {
+		t.Fatalf("principal(bearer(trueorg), ?owner=victim) org = %q, want none — an org the membership does not include is refused", got)
 	}
 	if _, got := principal(mint("trueorg"), ""); got != "trueorg" {
 		t.Fatalf("principal(bearer(trueorg), no owner) org = %q, want %q", got, "trueorg")
@@ -149,8 +149,8 @@ func TestPrincipalBearerBeatsOwner(t *testing.T) {
 	// through to a ?owner the caller chose.
 	other := signer(t, "https://other.id")
 	t.Setenv("iamIssuer", "https://test.id")
-	if _, got := principal(other("trueorg"), "victim"); got != "victim" {
-		t.Fatalf("principal(foreign bearer, ?owner=victim) org = %q, want %q — a rejected token leaves the service-call branch", got, "victim")
+	if _, got := principal(other("trueorg"), "victim"); got != "" {
+		t.Fatalf("principal(foreign bearer, ?owner=victim) org = %q, want none — a rejected bearer is not the service-call branch", got)
 	}
 }
 
@@ -163,9 +163,18 @@ func TestAUserActsOnlyInAnOrgTheyAreAMemberOf(t *testing.T) {
 	sign := signing(t, "https://test.id")
 	acmeOnly := sign(func(c *iamsdk.Claims) { c.Orgs = []iamsdk.OrgRef{{Org: "acme", Role: "owner"}} })
 
-	for _, asked := range []string{"hanzo", "", "victim"} {
-		if _, got := principal(acmeOnly, asked); got != "acme" {
-			t.Errorf("acme's user signed in through a hanzo app, asking for %q, acts in %q — want acme", asked, got)
+	if _, got := principal(acmeOnly, ""); got != "acme" {
+		t.Errorf("acme's user signed in through a hanzo app, naming no org, acts in %q — want acme", got)
+	}
+	if _, got := principal(acmeOnly, "acme"); got != "acme" {
+		t.Errorf("acme's user naming acme acts in %q", got)
+	}
+	for _, asked := range []string{"hanzo", "victim"} {
+		if _, got := principal(acmeOnly, asked); got != "" {
+			t.Errorf("acme's user signed in through a hanzo app, asking for %q, acts in %q — want a refusal", asked, got)
+		}
+		if u := object.GetBearerUser(acmeOnly, asked); u != nil {
+			t.Errorf("a bearer naming %q, not a member of it, established a user in %q", asked, u.Owner)
 		}
 	}
 	both := sign(func(c *iamsdk.Claims) {

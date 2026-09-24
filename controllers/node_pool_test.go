@@ -96,18 +96,21 @@ func storedPool(t *testing.T, owner, name string) *object.NodePool {
 	return p
 }
 
-// A signed-in customer cannot reach another org's pool by naming it in `?id=`.
-// The handler took the tenant from the id while the authorization filter took it
-// from the id too — so the two agreed, and both were the caller's to choose.
+// A signed-in customer cannot reach another org's pool by naming it in the
+// address: the edit is refused, the victim's pool is untouched, and nothing is
+// quietly re-aimed at the caller's own pool of that name. Addressed at its own
+// org, the same caller's edit lands.
 func TestUpdateNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
 	victim := storedPool(t, "victimorg", "gpu")
-	storedPool(t, "attackerorg", "gpu")
+	mine := storedPool(t, "attackerorg", "gpu")
 
-	ask(t, app, http.MethodPut, "/v1/pools/victimorg/gpu", mint("attackerorg"),
+	_, body := ask(t, app, http.MethodPut, "/v1/pools/victimorg/gpu", mint("attackerorg"),
 		`{"owner":"victimorg","name":"gpu","maxNodes":99}`)
-
+	if !strings.Contains(body, refuseNoOrg) {
+		t.Fatalf("an edit addressed at another org was not refused: %s", body)
+	}
 	after, err := object.GetNodePool("victimorg/gpu")
 	if err != nil || after == nil {
 		t.Fatalf("read back victim: %v", err)
@@ -115,19 +118,20 @@ func TestUpdateNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	if after.MaxNodes != victim.MaxNodes {
 		t.Fatalf("another org's pool was edited: maxNodes %d -> %d", victim.MaxNodes, after.MaxNodes)
 	}
-	// The edit landed on the CALLER's own pool of that name, which is the whole
-	// point: the request is not refused, it is re-scoped to the caller.
 	own, err := object.GetNodePool("attackerorg/gpu")
-	if err != nil || own == nil {
-		t.Fatalf("read back caller's own: %v", err)
+	if err != nil || own == nil || own.MaxNodes != mine.MaxNodes {
+		t.Fatalf("a refused edit reached the caller's own pool: %+v (err=%v)", own, err)
 	}
-	if own.MaxNodes != 99 {
-		t.Fatalf("the caller's own pool must take the edit, got maxNodes=%d", own.MaxNodes)
+
+	ask(t, app, http.MethodPut, "/v1/pools/attackerorg/gpu", mint("attackerorg"),
+		`{"owner":"attackerorg","name":"gpu","maxNodes":99}`)
+	if own, err := object.GetNodePool("attackerorg/gpu"); err != nil || own == nil || own.MaxNodes != 99 {
+		t.Fatalf("the caller's edit of its own pool did not land: %+v (err=%v)", own, err)
 	}
 }
 
-// The address names WHICH pool, never WHOSE — a caller aiming the address at
-// another org still deletes its own.
+// A delete addressed at another org is refused and deletes nothing; addressed at
+// the caller's own org, it deletes the caller's pool.
 func TestDeleteNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
@@ -135,10 +139,13 @@ func TestDeleteNodePoolActsOnTheCallersOwnOrgOnly(t *testing.T) {
 	storedPool(t, "attackerdel", "gpu")
 
 	ask(t, app, http.MethodDelete, "/v1/pools/victimdel/gpu", mint("attackerdel"), "")
-
 	if p, err := object.GetNodePool("victimdel/gpu"); err != nil || p == nil {
 		t.Fatalf("another org's pool was deleted (err=%v)", err)
 	}
+	if p, err := object.GetNodePool("attackerdel/gpu"); err != nil || p == nil {
+		t.Fatalf("a refused delete removed the caller's own pool (err=%v)", err)
+	}
+	ask(t, app, http.MethodDelete, "/v1/pools/attackerdel/gpu", mint("attackerdel"), "")
 	if p, err := object.GetNodePool("attackerdel/gpu"); err != nil || p != nil {
 		t.Fatalf("the caller's own pool must be the one deleted, got %+v (err=%v)", p, err)
 	}
@@ -161,10 +168,10 @@ func TestNodePoolWritesFailClosedWithoutAnOrg(t *testing.T) {
 	}
 }
 
-// The provision paths take their org from the signed claim, so `?owner=` cannot
-// point the provision at another tenant's provider credentials, balance and
-// invoice. They fail on the missing PROVIDER — which is proof they got past the
-// tenant resolution carrying the caller's own org, and looked it up there.
+// The provision paths take their org from the signed membership, so `?owner=`
+// naming an org the caller is not a member of cannot point the provision at
+// another tenant's provider credentials, balance and invoice: it is refused
+// before any provider is looked up.
 func TestProvisionUsesTheSignedOrgNotTheQuery(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
@@ -176,20 +183,24 @@ func TestProvisionUsesTheSignedOrgNotTheQuery(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, body := ask(t, app, tc.method, tc.path, mint("acmeprov"), `{"owner":"hanzo","size":"gpu-h100x8-640gb","count":8}`)
-			if !strings.Contains(body, "acmeprov") {
-				t.Fatalf("the provision must resolve the provider in the CALLER's org, got %s", body)
+			if !strings.Contains(body, refuseNoOrg) {
+				t.Fatalf("a provision addressed at an org the caller is not a member of was not refused: %s", body)
 			}
-			if strings.Contains(body, "hanzo") {
+			if strings.Contains(body, "platformdo") {
 				t.Fatalf("the query's org reached the provision: %s", body)
 			}
 		})
 	}
+	// Addressed at its own org, the provision runs there and fails on the
+	// missing provider, named in the caller's org.
+	_, body := ask(t, app, http.MethodPost, "/v1/pools?owner=acmeprov&provider=platformdo", mint("acmeprov"), `{"size":"gpu-h100x8-640gb","count":1}`)
+	if !strings.Contains(body, "acmeprov") {
+		t.Fatalf("the caller's own provision did not resolve in its org: %s", body)
+	}
 }
 
-// The READS take their tenant from the caller too. Authorization keys a GET on
-// the very ?owner= the handler used to read, so the two agreed and the caller
-// chose both — a customer listing another org's pools was one query parameter
-// away, and the agreement is exactly what hid it.
+// The READS take their tenant from the caller's membership too: a list or a read
+// naming another org is refused, and the caller's own are served.
 func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := poolWire(t)
@@ -200,8 +211,10 @@ func TestNodePoolReadsAreScopedToTheCaller(t *testing.T) {
 	if strings.Contains(list, "secret-gpu") || strings.Contains(list, "victimread") {
 		t.Fatalf("another org's pools were listed: %s", list)
 	}
-	if !strings.Contains(list, "own-gpu") {
-		t.Fatalf("the caller must still see its OWN pools: %s", list)
+	for _, path := range []string{"/v1/pools", "/v1/pools?owner=attackerread"} {
+		if own := get(t, app, path, mint("attackerread")); !strings.Contains(own, "own-gpu") {
+			t.Fatalf("the caller must still see its OWN pools at %s: %s", path, own)
+		}
 	}
 
 	one := get(t, app, "/v1/pools/victimread/secret-gpu", mint("attackerread"))

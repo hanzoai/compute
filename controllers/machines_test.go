@@ -97,33 +97,26 @@ func TestListMachinesFailsClosedWithoutAnOrg(t *testing.T) {
 	}
 }
 
-// THE ADDRESS NAMES WHICH MACHINE, THE TOKEN NAMES WHOSE. A signed caller
-// aiming the path at another org reads its own org, and finds nothing there —
-// never the victim's row.
+// THE ADDRESS NAMES WHICH MACHINE, AND ONLY AN ORG THE TOKEN'S MEMBERSHIP
+// INCLUDES. A signed caller aiming the path at another org is refused outright —
+// never the victim's row, and never quietly answered from its own org instead —
+// while the same caller addressing its own org is looked up there.
 func TestGetMachineIsScopedToTheCaller(t *testing.T) {
 	mint := signer(t, "https://test.id")
 	app := machineWire(t)
 	storedMachine(t, "victimread", "secret-box")
 	storedMachine(t, "attackerread", "own-box")
 
-	// Two reads by the same caller, differing ONLY in the org named in the path.
-	// Both must be looked up in the CALLER's org: the address changes which
-	// machine is asked for, never whose.
-	//
-	// A successful read is not available as a control here — the registry is
-	// rebuilt on read and this org has no provider, so both answers are
-	// refusals. The org NAMED in each refusal is what separates them, and it is
-	// enough: were the owner taken from the path, the first would say
-	// "in victimread".
 	one := get(t, app, "/v1/machines/victimread/secret-box", mint("attackerread"))
+	if !strings.Contains(one, refuseNoOrg) || strings.Contains(one, "victimread") || strings.Contains(one, "drop-secret-box") {
+		t.Errorf("another org's machine was not refused: %s", one)
+	}
+	// A successful read is not available as a control here — the registry is
+	// rebuilt on read and this org has no provider — so the org NAMED in the
+	// refusal is what shows the lookup ran in the caller's own org.
 	own := get(t, app, "/v1/machines/attackerread/own-box", mint("attackerread"))
-	for what, body := range map[string]string{"another org's": one, "its own": own} {
-		if !strings.Contains(body, "attackerread") {
-			t.Errorf("%s machine was not looked up in the caller's org: %s", what, body)
-		}
-		if strings.Contains(body, "victimread") || strings.Contains(body, "drop-secret-box") {
-			t.Errorf("%s read reached another org: %s", what, body)
-		}
+	if !strings.Contains(own, "attackerread") || strings.Contains(own, "victimread") {
+		t.Errorf("its own machine was not looked up in its own org: %s", own)
 	}
 }
 
