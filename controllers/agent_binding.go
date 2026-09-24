@@ -112,13 +112,13 @@ type Agents struct {
 
 // principal answers both halves of "who is asking" from the two things a request
 // can carry them in, and it is the ONE rule for this: an authenticated
-// principal's org is authoritative and NOT overridable by a client-supplied
-// ?owner. An authenticated user with an empty Owner claim resolves to "" and the
-// caller fails closed — it does NOT fall through to ?owner. Only an
+// principal's org is an org its SIGNED membership includes — the owner the
+// request addresses when the user is a member of it, the home org otherwise —
+// and never a client-supplied ?owner the membership does not include. Only an
 // unauthenticated service/app call (Basic client-id/secret; no Bearer user) may
 // pass ?owner, and ApiFilter has already authorized it as subOwner=="app".
 func principal(authorization string, owner string) (*iamsdk.User, string) {
-	if u := object.GetBearerUser(authorization); u != nil {
+	if u := object.GetBearerUser(authorization, owner); u != nil {
 		return u, strings.TrimSpace(u.Owner)
 	}
 	return nil, strings.TrimSpace(owner)

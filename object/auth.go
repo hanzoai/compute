@@ -15,6 +15,7 @@
 package object
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/hanzoai/compute/conf"
@@ -22,27 +23,29 @@ import (
 )
 
 // GetBearerUser validates an "Authorization: Bearer <IAM JWT>" header and
-// returns the authenticated user, or nil. iamsdk.ParseJwtToken verifies the token
-// SIGNATURE (jwt.ParseWithClaims + x509), so a forged/tampered token is rejected.
+// returns the authenticated user acting in org, or nil. org is the org the
+// request names (X-Org-Id, or the owner it addresses); the user acts in it only
+// when the token's signed membership includes it, and in its home org otherwise.
+// iamsdk.ParseJwtToken verifies the token SIGNATURE (jwt.ParseWithClaims +
+// x509), so a forged/tampered token is rejected.
 //
-// Signature alone is NOT sufficient: Hanzo IAM publishes ONE shared JWKS holding
-// every brand's cert (hanzo/lux/zoo/pars/...), so a validly-signed token from any
-// brand — including public self-service signups — passes the signature check. We
-// therefore bind the token to THIS deployment by BRAND (issuer), not by a single
-// org:
-//   - owner (org) must be non-empty (an empty-org token can't be scoped), and
-//   - issuer must match the configured brand issuer(s) in iamIssuer, so a sibling
-//     brand's token (lux.id/zoo.id/pars.id) is rejected even though its signature
-//     verifies.
+// Signature alone is NOT sufficient, and three more things are checked:
+//   - the ISSUER is this deployment's brand (iamIssuer): Hanzo IAM publishes ONE
+//     shared JWKS holding every brand's cert, so a sibling brand's token
+//     (lux.id/zoo.id/pars.id) verifies and is still not ours;
+//   - the AUDIENCE is this service's own (iamAudience, else clientId): a token
+//     minted for any other application of the brand is that application's, and
+//     accepting it lets whoever holds one act here;
+//   - the TENANT is the signed membership (`orgs`, home first), never `owner`.
+//     IAM stamps `owner` with the MINTING APPLICATION's org, so a user of any
+//     org signed in through an application filed under hanzo carries
+//     owner=hanzo. A token with no membership fails closed rather than falling
+//     back to that application's org.
 //
-// EVERY org within this brand is accepted — the resell compute surface is
-// multi-tenant (org "hanzo", "maxpower", and every self-service customer org).
-// Each request is org-scoped downstream: resolveComputeOrg pins org = user.Owner
-// (no ?owner override for real users) and Casbin enforces subOwner==objOwner, so
-// one org can never reach another's machines. This is how API/console callers
-// authenticate as a user (org = user.Owner) from a forwarded short-lived Bearer,
-// without a browser cookie session.
-func GetBearerUser(authHeader string) *iamsdk.User {
+// The returned user's Owner is the resolved tenant, so every reader downstream
+// (resolveComputeOrg, Casbin's subOwner==objOwner) scopes to an org the user is
+// a member of.
+func GetBearerUser(authHeader, org string) *iamsdk.User {
 	const prefix = "Bearer "
 	if len(authHeader) <= len(prefix) || !strings.EqualFold(authHeader[:len(prefix)], prefix) {
 		return nil
@@ -55,14 +58,55 @@ func GetBearerUser(authHeader string) *iamsdk.User {
 	if err != nil || claims == nil {
 		return nil
 	}
-	owner := strings.TrimSpace(claims.User.Owner)
-	if owner == "" {
-		return nil // empty-org token cannot be scoped — fail closed
-	}
 	if !issuerAllowed(claims.RegisteredClaims.Issuer) {
 		return nil // token from a different brand's IAM — reject on this surface
 	}
-	return &claims.User
+	if !audienceAllowed(claims.RegisteredClaims.Audience) {
+		return nil // minted for another application — not this service's to honour
+	}
+	tenant := member(claims.Orgs, org)
+	if tenant == "" {
+		return nil // no signed membership cannot be scoped — fail closed
+	}
+	user := claims.User
+	user.Owner = tenant
+	return &user
+}
+
+// member is the org a request acts in: the one it names when the signed
+// membership includes it, and the home org (the first) otherwise. No membership
+// is "".
+func member(orgs []iamsdk.OrgRef, want string) string {
+	want = strings.TrimSpace(want)
+	for _, o := range orgs {
+		if want != "" && strings.TrimSpace(o.Org) == want {
+			return want
+		}
+	}
+	if len(orgs) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(orgs[0].Org)
+}
+
+// audienceAllowed reports whether a token was minted for this service: one of
+// its audiences is in iamAudience (a single value or a comma list), or, with
+// that unset, is this service's own clientId. Neither configured fails closed.
+func audienceAllowed(audiences []string) bool {
+	configured := strings.TrimSpace(conf.GetConfigString("iamAudience"))
+	if configured == "" {
+		configured = strings.TrimSpace(conf.GetConfigString("clientId"))
+	}
+	if configured == "" {
+		return false
+	}
+	for want := range strings.SplitSeq(configured, ",") {
+		want = strings.TrimSpace(want)
+		if want != "" && slices.Contains(audiences, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // issuerAllowed reports whether a token's issuer matches the configured brand

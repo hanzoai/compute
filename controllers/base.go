@@ -89,7 +89,7 @@ func (c *ApiController) SetSessionClaims(claims *iamsdk.Claims) {}
 // GetSessionUser resolves the authenticated user from the forwarded IAM Bearer
 // JWT (brand/issuer-bound in object.GetBearerUser), or nil.
 func (c *ApiController) GetSessionUser() *iamsdk.User {
-	return object.GetBearerUser(c.Ctx.Header("Authorization"))
+	return object.GetBearerUser(c.Ctx.Header("Authorization"), c.Ctx.Header("X-Org-Id"))
 }
 
 // SetSessionUser is a no-op in the stateless model (see SetSessionClaims).

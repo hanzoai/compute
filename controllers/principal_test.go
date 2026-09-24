@@ -26,6 +26,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
+
+	"github.com/hanzoai/compute/object"
 )
 
 // principal is the ONE org resolution both visor surfaces run — the controller methods
@@ -62,13 +64,30 @@ func TestPrincipalOrg(t *testing.T) {
 	}
 }
 
+// visorAudience is the audience a token minted for this service carries.
+const visorAudience = "hanzo-visor"
+
 // signer mints tokens the way IAM does, so a test can present a bearer that
 // GetBearerUser actually accepts: RS256 over a key whose self-signed certificate
-// is the SDK's configured PEM, with an issuer this deployment is bound to.
+// is the SDK's configured PEM, with an issuer this deployment is bound to, this
+// service's audience, and IAM's real claim shape — `owner` is the MINTING
+// APPLICATION's org (hanzo, for every app filed there), and the user's own org
+// is the signed membership `orgs`.
 //
 // Without it the precedence rule below is untestable, and an untestable rule is
 // one a refactor can invert silently — which is the whole reason it is here.
-func signer(t *testing.T, issuer string) func(owner string) string {
+func signer(t *testing.T, issuer string) func(org string) string {
+	t.Helper()
+	sign := signing(t, issuer)
+	return func(org string) string {
+		return sign(func(c *iamsdk.Claims) { c.Orgs = []iamsdk.OrgRef{{Org: org, Role: "member"}} })
+	}
+}
+
+// signing is signer with every claim open to the test: edit starts from a token
+// minted through an application filed under hanzo, for this service, with no
+// membership.
+func signing(t *testing.T, issuer string) func(edit func(*iamsdk.Claims)) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -90,12 +109,16 @@ func signer(t *testing.T, issuer string) func(owner string) string {
 	iamsdk.InitConfig("", "", "", cert, "", "")
 	t.Cleanup(func() { iamsdk.InitConfig("", "", "", "", "", "") })
 	t.Setenv("iamIssuer", issuer)
+	t.Setenv("iamAudience", visorAudience)
 
-	return func(owner string) string {
-		claims := &iamsdk.Claims{
-			Owner: owner, Name: "alice",
-			Issuer:    issuer,
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	return func(edit func(*iamsdk.Claims)) string {
+		claims := &iamsdk.Claims{}
+		claims.Owner, claims.Name = "hanzo", "alice"
+		claims.Issuer = issuer
+		claims.Audience = []string{visorAudience}
+		claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(time.Hour))
+		if edit != nil {
+			edit(claims)
 		}
 		s, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
 		if err != nil {
@@ -128,5 +151,53 @@ func TestPrincipalBearerBeatsOwner(t *testing.T) {
 	t.Setenv("iamIssuer", "https://test.id")
 	if _, got := principal(other("trueorg"), "victim"); got != "victim" {
 		t.Fatalf("principal(foreign bearer, ?owner=victim) org = %q, want %q — a rejected token leaves the service-call branch", got, "victim")
+	}
+}
+
+// The tenant is the user's signed membership, never `owner`. IAM stamps `owner`
+// with the minting application's org, so a user of acme signed in through any
+// application filed under hanzo carries owner=hanzo; read as the tenant, that
+// would let them act on org hanzo's machines. They act in hanzo only if they are
+// a member of it, and in their own org otherwise.
+func TestAUserActsOnlyInAnOrgTheyAreAMemberOf(t *testing.T) {
+	sign := signing(t, "https://test.id")
+	acmeOnly := sign(func(c *iamsdk.Claims) { c.Orgs = []iamsdk.OrgRef{{Org: "acme", Role: "owner"}} })
+
+	for _, asked := range []string{"hanzo", "", "victim"} {
+		if _, got := principal(acmeOnly, asked); got != "acme" {
+			t.Errorf("acme's user signed in through a hanzo app, asking for %q, acts in %q — want acme", asked, got)
+		}
+	}
+	both := sign(func(c *iamsdk.Claims) {
+		c.Orgs = []iamsdk.OrgRef{{Org: "acme", Role: "owner"}, {Org: "hanzo", Role: "member"}}
+	})
+	if _, got := principal(both, "hanzo"); got != "hanzo" {
+		t.Errorf("a member of hanzo asking for hanzo acts in %q", got)
+	}
+	if _, got := principal(both, ""); got != "acme" {
+		t.Errorf("a member of two orgs asking for none acts in %q, want the home org acme", got)
+	}
+
+	// No membership is no tenant: never the application's org.
+	if u := object.GetBearerUser(sign(nil), "hanzo"); u != nil {
+		t.Fatalf("a token with no membership acts in %q", u.Owner)
+	}
+	// A token minted for another application is not this service's to honour.
+	other := sign(func(c *iamsdk.Claims) {
+		c.Audience = []string{"hanzo-chat"}
+		c.Orgs = []iamsdk.OrgRef{{Org: "hanzo"}}
+	})
+	if u := object.GetBearerUser(other, "hanzo"); u != nil {
+		t.Fatalf("a token for hanzo-chat was accepted here, acting in %q", u.Owner)
+	}
+	// And with no audience configured at all, nothing is.
+	t.Setenv("iamAudience", "")
+	t.Setenv("clientId", "")
+	if u := object.GetBearerUser(both, "hanzo"); u != nil {
+		t.Fatal("a bearer was accepted with no audience configured")
+	}
+	t.Setenv("clientId", visorAudience)
+	if u := object.GetBearerUser(both, "hanzo"); u == nil {
+		t.Fatal("clientId is this service's audience when iamAudience is unset")
 	}
 }

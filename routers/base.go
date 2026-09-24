@@ -39,7 +39,7 @@ type Response struct {
 // caller presents a short-lived Bearer, verified and brand-bound in
 // object.GetBearerUser.
 func GetSessionUser(c *zip.Ctx) *iamsdk.User {
-	return object.GetBearerUser(c.Header("Authorization"))
+	return object.GetBearerUser(c.Header("Authorization"), c.Header("X-Org-Id"))
 }
 
 func getUsername(c *zip.Ctx) (username string) {
