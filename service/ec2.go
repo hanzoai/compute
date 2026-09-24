@@ -228,6 +228,9 @@ func validFilterValue(s string) bool {
 
 // ---- reads ----
 
+// pageSize is how many instances one DescribeInstances answer holds.
+const pageSize = 50
+
 // liveStates are the instance states a machine exists in. A terminated instance
 // stays visible for about an hour after termination and is not a machine.
 var liveStates = []string{"pending", "running", "stopping", "stopped", "shutting-down"}
@@ -236,12 +239,14 @@ func filter(name string, values ...string) ec2Types.Filter {
 	return ec2Types.Filter{Name: aws.String(name), Values: values}
 }
 
-// describe returns every instance matching filters, across pages. A page is a
-// hundred instances, which keeps one answer well under the megabyte egress reads.
+// describe returns every instance matching filters, across pages. A page is
+// fifty instances: an instance's XML runs to several kilobytes once it carries
+// network interfaces, volumes and tags, and fifty keeps one answer far under the
+// megabyte egress reads.
 func describe(ctx context.Context, api *ec2.Client, filters ...ec2Types.Filter) ([]ec2Types.Instance, error) {
 	pages := ec2.NewDescribeInstancesPaginator(api, &ec2.DescribeInstancesInput{
 		Filters:    filters,
-		MaxResults: aws.Int32(100),
+		MaxResults: aws.Int32(pageSize),
 	})
 	var out []ec2Types.Instance
 	for pages.HasMorePages() {

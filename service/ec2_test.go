@@ -710,3 +710,20 @@ func TestTheHourlySweepBillsEachOrgItsRunningMachines(t *testing.T) {
 		t.Fatalf("sweep debits = %+v, want acme 138c for g5.xlarge and beta 7c for t3.medium", debits)
 	}
 }
+
+// A list asks for pages small enough to cross egress: fifty instances.
+func TestAListAsksForSmallPages(t *testing.T) {
+	f := hostedFake(t)
+	if _, err := ListOrgMachines("acme", ""); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.Calls("DescribeInstances")
+	if len(calls) == 0 {
+		t.Fatal("no list reached egress")
+	}
+	for _, c := range calls {
+		if n := c.Form.Get("MaxResults"); n != "50" {
+			t.Fatalf("a list asked for %s instances a page", n)
+		}
+	}
+}
