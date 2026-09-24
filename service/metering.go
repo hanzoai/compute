@@ -66,27 +66,34 @@ func CreatedInHour(createdTime, stamp string) bool {
 	return t.UTC().Format("2006010215") == stamp
 }
 
-// MeterRunningMachines debits every RUNNING metered machine one hour of its
-// price to its OWNING org — the recurring counterpart to the launch debit.
-// It is the "a running bound machine debits the org" rule: a machine that stays
-// up keeps drawing down the org's credit balance, hour by hour.
+// mostCatchUp bounds how many hours one sweep bills a machine. Hours are owed
+// from the last one billed, so this is reached only by an outage longer than a
+// week or a ledger that lost its rows, and in both cases billing a week at a
+// time is safer than billing a machine's whole life in one sweep.
+const mostCatchUp = 7 * 24
+
+// MeterRunningMachines debits every RUNNING metered machine every hour of its
+// price it has run and not yet been billed for, through the hour now falls in,
+// to its OWNING org — the recurring counterpart to the launch debit. A machine
+// that stays up keeps drawing down the org's credit balance, hour by hour, and
+// an hour a sweep missed is billed by the next one.
 //
 // Per machine: org is recovered from the machine's own hanzo-org tag (never
 // trusted from a client — it is the tag LaunchOrgMachine set), the hourly price
-// comes from the catalog (HourlyCents), and the debit carries the usage id
-// MeterID: "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled
-// from gating (the machine already ran that hour, so the cost must be recorded);
+// comes from the catalog (HourlyCents), and each hour's debit carries the usage
+// id MeterID: "compute-<machineID>-<YYYYMMDDHH>". Recording is decoupled from
+// gating (the machine already ran that hour, so the cost must be recorded);
 // enforcement/suspend on a depleted balance is a separate control. A per-machine
 // error is logged and does not abort the sweep.
 //
-// EXACTLY-ONCE PER HOUR: cloud debits one usage id once, so a retried or
-// overlapping sweep of the same hour moves no more money; the ticker's per-hour
-// single-flight lease (object.ClaimMeterHour) keeps other replicas from sweeping,
-// and the LAUNCH hour is skipped here because the launch path already billed it.
+// EXACTLY-ONCE PER HOUR is the Ledger: the sweep advances each machine's mark
+// before it debits and debits only the hours the mark moved over, the launch and
+// a start advance the same mark, and the ticker's per-hour single-flight lease
+// (object.ClaimMeterHour) keeps other replicas from sweeping at all.
 //
 // No-op when metering is unconfigured or when the hosted account is unconfigured
 // — nothing to enumerate, nothing to debit.
-func MeterRunningMachines(ctx context.Context) {
+func MeterRunningMachines(ctx context.Context, now time.Time) {
 	if !ComputeConfigured() || !Billable(ctx, "compute.hourly") {
 		return
 	}
@@ -98,38 +105,34 @@ func MeterRunningMachines(ctx context.Context) {
 		logs.Warning("compute metering: list running machines: %v", err)
 		return
 	}
-	metered, skipped := meterMachines(ctx, machines, time.Now())
+	metered, skipped := meterMachines(ctx, machines, now)
 	logs.Info("compute metering: hourly sweep done (metered=%d skipped=%d total=%d)", metered, skipped, len(machines))
+}
+
+// owed is one machine's unbilled hours and what each costs.
+type owed struct {
+	m       *Machine
+	org     string
+	project string
+	cents   int64
+	hours   []time.Time
 }
 
 // meterMachines is the pure sweep over a machine set at a fixed wall-clock `now`
 // (injected so the idempotency bucket is deterministic under test). It resolves
-// each machine's org from its tag, prices it from the catalog, and records
-// one hour's debit with an hour-bucketed RequestID. Returns (metered, skipped).
-// A per-machine failure is logged and skipped — one bad machine never aborts the
-// sweep. Isolated from the EC2 enumeration so the billing contract is testable
-// against a fake commerce API.
+// each machine's org from its tag, prices it from the catalog, finds the hours it
+// owes, advances every mark at once, and debits each owed hour under its own
+// MeterID. Returns (metered hours, skipped). A per-machine failure is logged and
+// skipped — one bad machine never aborts the sweep.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
-	stamp := HourStamp(now)
+	current, _ := parseHour(hourOf(now))
+	var due []owed
+	marks := map[string]string{}
 	for _, m := range machines {
 		org := orgFromTag(m.Tag)
 		if org == "" {
 			skipped++
 			logs.Warning("compute metering: machine %s has no %s tag; skipping (unattributable)", m.Id, orgTagKey)
-			continue
-		}
-		// Project is the second attribution dimension recovered from the machine's
-		// own tag (empty == the org's default project). It never changes the debit
-		// destination (always the org), only the metering Actor, so the ledger is
-		// attributable per project.
-		project := projectFromTag(m.Tag)
-		// Skip the LAUNCH hour: the launch path already debited this machine one
-		// hour at create time (LaunchCharge). Metering it again for the same
-		// wall-clock hour would double-charge the launch hour. CreatedTime is the last
-		// start, so a started machine's first hour — debited by the start under
-		// this very MeterID — is skipped too. A machine with no parseable create
-		// time is metered normally.
-		if CreatedInHour(m.CreatedTime, stamp) {
 			continue
 		}
 		// ONE price resolver, shared with the provision gate. An unresolvable
@@ -141,17 +144,89 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			logs.Warning("compute metering: machine %s not billed: %v", m.Id, err)
 			continue
 		}
-		if err := RecordCompute(ctx, org, project, cents, m.Size, MeterID(m.Id, now)); err != nil {
+		hours, err := unbilled(m, current)
+		if err != nil {
 			skipped++
-			logs.Warning("compute metering: debit machine %s (org %s): %v", m.Id, org, err)
+			logs.Warning("compute metering: machine %s: read billed hours: %v", m.Id, err)
 			continue
 		}
-		metered++
-		// Roll a running event into the analytics datastore alongside this
-		// hour's debit (best-effort; never blocks or affects the sweep).
-		EmitCompute(org, ComputeRunning, m, cents)
+		if len(hours) == 0 {
+			continue
+		}
+		// Project is the second attribution dimension recovered from the
+		// machine's own tag (empty == the org's default project). It never changes
+		// the debit destination (always the org), only the metering Actor.
+		due = append(due, owed{m: m, org: org, project: projectFromTag(m.Tag), cents: cents, hours: hours})
+		marks[m.Id] = hourOf(current)
+	}
+	if len(marks) == 0 {
+		return metered, skipped
+	}
+	// The marks move BEFORE any money does, so a debit that fails under-bills
+	// its hour rather than a retried sweep charging it twice. A write that fails
+	// part-way bills the machines it moved and leaves the rest owed.
+	moved, err := billed().Advance(marks)
+	if err != nil {
+		logs.Warning("compute metering: record billed hours: %v — machines not recorded stay owed", err)
+	}
+	for _, d := range due {
+		if !moved[d.m.Id] {
+			continue
+		}
+		for _, h := range d.hours {
+			if err := RecordCompute(ctx, d.org, d.project, d.cents, d.m.Size, MeterID(d.m.Id, h)); err != nil {
+				skipped++
+				logs.Warning("compute metering: debit machine %s hour %s (org %s): %v", d.m.Id, hourOf(h), d.org, err)
+				continue
+			}
+			metered++
+			// Roll a running event into the analytics datastore alongside this
+			// hour's debit (best-effort; never blocks or affects the sweep).
+			EmitCompute(d.org, ComputeRunning, d.m, d.cents)
+		}
 	}
 	return metered, skipped
+}
+
+// unbilled is every whole clock hour machine m has run and not been billed for,
+// through current.
+//
+// m.CreatedTime is EC2's LaunchTime, the machine's LAST start, and the machine
+// has run without a stop since, so no hour before it is owed. A machine with a
+// mark owes every hour after the mark from its last start on. A machine with no
+// mark was billed before the ledger held it (its launch or start hour under its
+// own id), so it owes the current hour only, and not even that in the hour it
+// started.
+func unbilled(m *Machine, current time.Time) ([]time.Time, error) {
+	mark, err := billed().Through(m.Id)
+	if err != nil {
+		return nil, err
+	}
+	started, known := time.Time{}, false
+	if t, err := time.Parse(time.RFC3339, m.CreatedTime); err == nil {
+		started, known = t.UTC().Truncate(time.Hour), true
+	}
+	var from time.Time
+	if last, ok := parseHour(mark); ok {
+		from = last.Add(time.Hour)
+		if known && started.After(from) {
+			from = started
+		}
+	} else {
+		if known && !started.Before(current) {
+			return nil, nil
+		}
+		from = current
+	}
+	if earliest := current.Add(-mostCatchUp * time.Hour); from.Before(earliest) {
+		logs.Warning("compute metering: machine %s owes hours from %s; billing the last %d", m.Id, hourOf(from), mostCatchUp)
+		from = earliest
+	}
+	var hours []time.Time
+	for h := from; !h.After(current); h = h.Add(time.Hour) {
+		hours = append(hours, h)
+	}
+	return hours, nil
 }
 
 // LaunchCharge names a launch's debit: its first hour, under the id the sweep

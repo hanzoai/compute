@@ -252,3 +252,29 @@ func TestANonOwnerNeverProbesOrClaims(t *testing.T) {
 		t.Fatal("a non-owner's skipped hour must still be claimable by the owner")
 	}
 }
+
+// The tick asks many times an hour and the claim makes the work hourly. An
+// hourly tick's phase is the pod's start, so a pod restarting inside every hour
+// never reached one; asked every few minutes, a restart costs minutes, and a
+// tick whose hour the provider refused is retried within the same hour.
+func TestTheSweepIsAskedWithinEveryHour(t *testing.T) {
+	soleWriter(t)
+	if sweepEvery <= 0 || sweepEvery > 15*time.Minute {
+		t.Fatalf("the sweep is asked every %s — a restart or a refused hour waits that long", sweepEvery)
+	}
+	at := billedHour()
+	var billed int
+	h := hour{
+		owner:     func() bool { return true },
+		reachable: unreachable,
+		claim:     object.ClaimMeterHour,
+		meter:     func(context.Context, time.Time) { billed++ },
+	}
+	h.run(context.Background(), at)
+	h.reachable = reachable
+	h.run(context.Background(), at.Add(sweepEvery))
+	h.run(context.Background(), at.Add(2*sweepEvery))
+	if billed != 1 {
+		t.Fatalf("an hour refused at its first tick was billed %d times by the next ticks, want 1", billed)
+	}
+}

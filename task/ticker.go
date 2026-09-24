@@ -26,6 +26,10 @@ import (
 
 type Ticker struct{}
 
+// sweepEvery is how often the metering tick asks whether the hour's sweep is
+// due. The hour claim makes it once per hour whatever this is.
+const sweepEvery = 5 * time.Minute
+
 func NewTicker() *Ticker {
 	return &Ticker{}
 }
@@ -83,10 +87,18 @@ func (t *Ticker) SetupTicker() {
 	// provider must answer before the hour is spent. Those two exactly-once
 	// guarantees are untouched by it; see run for why a read-only probe cannot
 	// weaken them.
-	computeTicker := time.NewTicker(time.Hour)
+	//
+	// The tick is every few minutes and once at boot, not hourly, and the hour
+	// claim is what makes the work hourly. An hourly ticker's phase is the pod's
+	// start time, so a pod that restarts inside the hour never reaches a tick; a
+	// tick whose hour it could not claim (the provider unreachable) is retried by
+	// the next one; and an hour no tick swept at all is billed by the next sweep,
+	// which bills every hour a machine owes since the last one billed.
+	computeTicker := time.NewTicker(sweepEvery)
 	go func() {
-		for range computeTicker.C {
-			liveHour().run(context.Background(), time.Now())
+		liveHour().run(context.Background(), time.Now())
+		for now := range computeTicker.C {
+			liveHour().run(context.Background(), now)
 		}
 	}()
 	logs.Info("compute metering: hourly running-resource drawdown enabled (machines + node pools, single-flight per hour, elected owner)")
@@ -116,7 +128,7 @@ func liveHour() hour {
 		reachable: service.ComputeReachable,
 		claim:     object.ClaimMeterHour,
 		meter: func(ctx context.Context, now time.Time) {
-			service.MeterRunningMachines(ctx)
+			service.MeterRunningMachines(ctx, now)
 			billing.MeterRunningNodePools(ctx, now)
 		},
 	}

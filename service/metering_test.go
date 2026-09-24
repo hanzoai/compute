@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -229,8 +230,8 @@ func TestMeterMachines_DebitsRunningMachinePerOrg(t *testing.T) {
 	}
 }
 
-// The usage id is stable across two sweeps in the SAME hour (the ledger debits
-// one id once), and changes in the NEXT hour (a new billable unit).
+// A second sweep in the SAME hour bills nothing — the ledger already holds the
+// hour — and the NEXT hour is a new billable unit under a new id.
 func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
 	recs, mu := fakeCommerce(t)
 	seedCatalog(t, priced("t3.medium", 1))
@@ -243,15 +244,82 @@ func TestMeterMachines_IdempotentWithinHour(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(*recs) != 3 {
-		t.Fatalf("recorded %d, want 3 (the ledger dedups by id, not us)", len(*recs))
+	if len(*recs) != 2 {
+		t.Fatalf("recorded %d, want 2 — a second sweep in one hour charged it again", len(*recs))
 	}
-	id1, id2, id3 := (*recs)[0].usage.ID, (*recs)[1].usage.ID, (*recs)[2].usage.ID
-	if id1 != id2 {
-		t.Fatalf("same-hour requestIds differ: %q vs %q (would let a sweep overlap double-bill)", id1, id2)
+	if id1, id2 := (*recs)[0].usage.ID, (*recs)[1].usage.ID; id1 != "compute-222-2026070215" || id2 != "compute-222-2026070216" {
+		t.Fatalf("ids = %q, %q", id1, id2)
 	}
-	if id1 == id3 {
-		t.Fatalf("cross-hour requestIds equal: %q (a new hour must be a new billable unit)", id1)
+}
+
+// Hours a sweep missed are billed by the next one, each once. A machine billed
+// through 16:00 whose next sweep is at 20:10 — the ticker restarted, the
+// provider was down, a tick failed — owes 17, 18, 19 and 20, and a second sweep
+// in the same hour, or one after a restart that kept the ledger, owes nothing.
+func TestMeterMachines_BillsMissedHoursOnce(t *testing.T) {
+	recs, mu := fakeCommerce(t)
+	seedCatalog(t, priced("s", 5))
+
+	launched := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
+	m := []*Machine{{Id: "gap", Size: "s", Tag: "hanzo-org:acme", CreatedTime: launched.Format(time.RFC3339)}}
+	if id := LaunchCharge("gap", launched); id != "compute-gap-2026070215" {
+		t.Fatalf("launch charge = %q", id)
+	}
+	meterMachines(context.Background(), m, launched.Add(time.Hour)) // 16:05
+	at := time.Date(2026, 7, 2, 20, 10, 0, 0, time.UTC)
+	if metered, _ := meterMachines(context.Background(), m, at); metered != 4 {
+		t.Fatalf("the sweep after a four-hour gap billed %d hours, want 4", metered)
+	}
+	if metered, _ := meterMachines(context.Background(), m, at.Add(30*time.Minute)); metered != 0 {
+		t.Fatalf("a second sweep in the same hour billed %d hours", metered)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var ids []string
+	for _, r := range *recs {
+		ids = append(ids, r.usage.ID)
+	}
+	want := []string{"compute-gap-2026070216", "compute-gap-2026070217", "compute-gap-2026070218", "compute-gap-2026070219", "compute-gap-2026070220"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("debits = %v, want %v — each hour once, the launch hour not again", ids, want)
+	}
+}
+
+// A machine owes nothing for the hours it was stopped: CreatedTime is its last
+// start, and billing resumes there, not after the last hour it was billed.
+func TestMeterMachines_OwesNothingForStoppedHours(t *testing.T) {
+	recs, mu := fakeCommerce(t)
+	seedCatalog(t, priced("s", 5))
+
+	LaunchCharge("nap", time.Date(2026, 7, 2, 10, 5, 0, 0, time.UTC))
+	restarted := time.Date(2026, 7, 2, 14, 20, 0, 0, time.UTC)
+	if id := startCharge("nap", restarted); id != "compute-nap-2026070214" {
+		t.Fatalf("start charge = %q", id)
+	}
+	m := []*Machine{{Id: "nap", Size: "s", Tag: "hanzo-org:acme", CreatedTime: restarted.Format(time.RFC3339)}}
+	meterMachines(context.Background(), m, time.Date(2026, 7, 2, 15, 1, 0, 0, time.UTC))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*recs) != 1 || (*recs)[0].usage.ID != "compute-nap-2026070215" {
+		t.Fatalf("debits = %+v, want only hour 15", *recs)
+	}
+}
+
+// A start in an hour the launch already billed charges nothing, and a start in a
+// later hour charges that hour once.
+func TestAStartChargesOnlyAnUnbilledHour(t *testing.T) {
+	fakeCommerce(t)
+	at := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
+	LaunchCharge("twice", at)
+	if id := startCharge("twice", at.Add(40*time.Minute)); id != "" {
+		t.Fatalf("a start in the launch hour charges %q", id)
+	}
+	if id := startCharge("twice", at.Add(2*time.Hour)); id != "compute-twice-2026070217" {
+		t.Fatalf("a later start charges %q", id)
+	}
+	if id := startCharge("twice", at.Add(2*time.Hour+time.Minute)); id != "" {
+		t.Fatalf("a second start in that hour charges %q", id)
 	}
 }
 
@@ -386,22 +454,5 @@ func TestMetering_UnconfiguredIsNoop(t *testing.T) {
 	t.Setenv("clientSecret", "shh")
 	if !MeteringConfigured() {
 		t.Fatal("MeteringConfigured() = false with a full identity, want true")
-	}
-}
-
-// A start in an hour the launch already billed charges nothing, and a start in a
-// later hour charges that hour once.
-func TestAStartChargesOnlyAnUnbilledHour(t *testing.T) {
-	fakeCommerce(t)
-	at := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
-	LaunchCharge("twice", at)
-	if id := startCharge("twice", at.Add(40*time.Minute)); id != "" {
-		t.Fatalf("a start in the launch hour charges %q", id)
-	}
-	if id := startCharge("twice", at.Add(2*time.Hour)); id != "compute-twice-2026070217" {
-		t.Fatalf("a later start charges %q", id)
-	}
-	if id := startCharge("twice", at.Add(2*time.Hour+time.Minute)); id != "" {
-		t.Fatalf("a second start in that hour charges %q", id)
 	}
 }

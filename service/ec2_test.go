@@ -696,7 +696,7 @@ func TestTheHourlySweepBillsEachOrgItsRunningMachines(t *testing.T) {
 	f.Add(ec2test.Instance{Type: "t3.medium", State: "running", Tags: tags("beta", "m-66666666666666666666")}) // launched this hour
 	f.Add(ec2test.Instance{Type: "t3.medium", State: "stopped", LaunchTime: earlier, Tags: tags("acme", "m-77777777777777777777")})
 
-	MeterRunningMachines(context.Background())
+	MeterRunningMachines(context.Background(), time.Now())
 
 	mu.Lock()
 	defer mu.Unlock()
