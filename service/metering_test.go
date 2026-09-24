@@ -181,10 +181,11 @@ func seedCatalog(t *testing.T, sale ...offer) {
 	t.Cleanup(func() { offers = saved })
 }
 
-// priced is an offer whose Hanzo price is exactly cents per hour: its list price
-// is the cost that the fee turns into that many cents, with no disk.
+// priced is an offer whose Hanzo price is exactly cents per running hour: its
+// list price is the cost that, with the public address and the fee, is that many
+// cents, with no disk.
 func priced(slug string, cents int64) offer {
-	return offer{slug: slug, listMicros: cents * microsPerCent * feeDen / feeNum}
+	return offer{slug: slug, listMicros: cents*microsPerCent*feeDen/feeNum - ipv4MicrosPerHour}
 }
 
 // A running machine debits its OWNING org one hour of its price, attributed

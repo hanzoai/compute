@@ -61,6 +61,19 @@ func HourlyCents(slug string) (int64, error) {
 	return RateOf(si)
 }
 
+// StoppedCents is the price per stopped hour for a size: its root volume. It is
+// ErrPriceUnavailable for a size not in the catalog, as HourlyCents is.
+func StoppedCents(slug string) (int64, error) {
+	si := SizeBySlug(slug)
+	if si == nil {
+		return 0, fmt.Errorf("%w: size %q is not in the catalog", ErrPriceUnavailable, slug)
+	}
+	if si.CentsStopped <= 0 {
+		return 0, fmt.Errorf("%w: size %q has no stopped price", ErrPriceUnavailable, slug)
+	}
+	return si.CentsStopped, nil
+}
+
 // RateOf is the price half of HourlyCents, for a size the caller has ALREADY
 // resolved from the catalog — which the launch path has, since it resolved the
 // size to quote it. There is one refuse-rather-than-zero rule and this is it;

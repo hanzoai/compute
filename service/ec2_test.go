@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -470,8 +471,14 @@ func TestTheMeterSeesRunningHostedMachinesOnly(t *testing.T) {
 	for _, m := range got {
 		ids[m.Id] = orgFromTag(m.Tag)
 	}
-	if len(ids) != 2 || ids["m-11111111111111111111"] != "acme" || ids["m-22222222222222222222"] != "beta" {
-		t.Fatalf("metered = %v, want the two running hosted machines with their orgs", ids)
+	if len(ids) != 3 || ids["m-11111111111111111111"] != "acme" || ids["m-22222222222222222222"] != "beta" ||
+		ids["m-33333333333333333333"] != "acme" {
+		t.Fatalf("metered = %v, want the running and stopped hosted machines with their orgs", ids)
+	}
+	for _, m := range got {
+		if want := map[string]string{"m-33333333333333333333": "Stopped"}[m.Id]; want != "" && m.State != want {
+			t.Fatalf("%s reads %q", m.Id, m.State)
+		}
 	}
 }
 
@@ -706,8 +713,49 @@ func TestTheHourlySweepBillsEachOrgItsRunningMachines(t *testing.T) {
 	}
 	now := time.Now()
 	a, b := got[MeterID("m-44444444444444444444", now)], got[MeterID("m-55555555555555555555", now)]
-	if len(debits) != 2 || a.Org != "acme" || a.Cents() != 138 || a.Model != "g5.xlarge" || b.Org != "beta" || b.Cents() != 7 {
+	disk := got[DiskMeterID("m-77777777777777777777", now)]
+	if len(debits) != 3 || a.Org != "acme" || a.Cents() != 138 || a.Model != "g5.xlarge" || b.Org != "beta" || b.Cents() != 7 {
 		t.Fatalf("sweep debits = %+v, want acme 138c for g5.xlarge and beta 7c for t3.medium", debits)
+	}
+	// A stopped machine pays its disk: 50 GB of gp3 is 1c an hour.
+	if disk.Org != "acme" || disk.Cents() != 1 || disk.Model != "t3.medium/stopped" {
+		t.Fatalf("the stopped machine's disk debit = %+v, want acme 1c", disk)
+	}
+}
+
+// A stopped machine owes its disk for every hour after the last one billed,
+// running or stopped, and once each; a machine started again owes its running
+// hours from its start, not its stopped ones.
+func TestAStoppedMachinePaysItsDiskOnce(t *testing.T) {
+	recs, mu := fakeCommerce(t)
+	seedCatalog(t, offer{slug: "s", listMicros: 37_500 - ipv4MicrosPerHour, diskGB: 200})
+
+	at := func(h int) time.Time { return time.Date(2026, 7, 2, h, 10, 0, 0, time.UTC) }
+	LaunchCharge("rest", at(10))
+	running := &Machine{Id: "rest", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at(10).Format(time.RFC3339)}
+	meterMachines(context.Background(), []*Machine{running}, at(11)) // running 11
+	stopped := &Machine{Id: "rest", Size: "s", Tag: "hanzo-org:acme", State: "Stopped", CreatedTime: at(10).Format(time.RFC3339)}
+	meterMachines(context.Background(), []*Machine{stopped}, at(14)) // stopped 12, 13, 14
+	meterMachines(context.Background(), []*Machine{stopped}, at(14)) // nothing more
+	if id := startCharge("rest", at(15)); id != "compute-rest-2026070215" {
+		t.Fatalf("the start charges %q", id)
+	}
+	running.CreatedTime = at(15).Format(time.RFC3339)
+	meterMachines(context.Background(), []*Machine{running}, at(16)) // running 16
+
+	mu.Lock()
+	defer mu.Unlock()
+	var got []string
+	for _, r := range *recs {
+		got = append(got, r.usage.ID+"="+r.usage.Amount.Decimal)
+	}
+	want := []string{
+		"compute-rest-2026070211=0.08",
+		"compute-rest-disk-2026070212=0.03", "compute-rest-disk-2026070213=0.03", "compute-rest-disk-2026070214=0.03",
+		"compute-rest-2026070216=0.08",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("debits = %v, want %v", got, want)
 	}
 }
 

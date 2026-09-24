@@ -18,9 +18,10 @@ import (
 	"testing"
 )
 
-// The price arithmetic, worked by hand: cost is the instance's list price plus
-// its gp3 root volume, and the price is that plus one third, rounded UP to the
-// cent.
+// The price arithmetic, worked by hand: a running hour's cost is the
+// instance's list price, its public IPv4 address and its gp3 root volume, and the
+// price is that plus one third, rounded UP to the cent. A stopped hour is the
+// volume alone.
 func TestHourlyCentsArithmetic(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -28,37 +29,60 @@ func TestHourlyCentsArithmetic(t *testing.T) {
 		diskGB     int64
 		want       int64
 	}{
-		// $1.006/h + 200 GB x $0.08/730h = $1.027918/h; x 4/3 = $1.370557 -> 138c.
+		// $1.006/h + $0.005 IPv4 + 200 GB x $0.08/730h = $1.032918/h; x 4/3 = $1.377224 -> 138c.
 		{"g5.xlarge", 1_006_000, 200, 138},
-		// $0.0416/h + 50 GB = $0.047079/h; x 4/3 = $0.062772 -> 7c.
+		// $0.0416/h + $0.005 + 50 GB = $0.052079/h; x 4/3 = $0.069439 -> 7c.
 		{"t3.medium", 41_600, 50, 7},
+		// $0.2016/h + $0.005 + 50 GB = $0.212079/h; x 4/3 = $0.282772 -> 29c (28c without the address).
+		{"m7i.xlarge", 201_600, 50, 29},
 		// Exactly 3 cents of cost is exactly 4 cents of price: no rounding up.
-		{"exact", 30_000, 0, 4},
+		{"exact", 25_000, 0, 4},
 		// One micro-dollar over rounds up to the next cent.
-		{"one over", 30_001, 0, 5},
-		// Storage alone still costs something.
-		{"disk only", 0, 730, 11},
-		{"nothing", 0, 0, 0},
+		{"one over", 25_001, 0, 5},
+		// No instance is no running hour.
+		{"no instance", 0, 730, 0},
 	} {
 		if got := hourlyCents(tc.listMicros, tc.diskGB); got != tc.want {
 			t.Errorf("%s: hourlyCents(%d, %d) = %d, want %d", tc.name, tc.listMicros, tc.diskGB, got, tc.want)
 		}
 	}
+	for diskGB, want := range map[int64]int64{
+		// 50 GB x $0.08/730h = $0.005479/h; x 4/3 = $0.007306 -> 1c.
+		50: 1,
+		// 200 GB: $0.021918/h; x 4/3 = $0.029224 -> 3c.
+		200: 3,
+		500: 8, 1000: 15,
+		// 730 GB is exactly $0.08/h; x 4/3 = $0.106667 -> 11c.
+		730: 11,
+		0:   0,
+	} {
+		if got := stoppedCents(diskGB); got != want {
+			t.Errorf("stoppedCents(%d) = %d, want %d", diskGB, got, want)
+		}
+	}
 }
 
 // Every size is priced at cost plus one third, never below it and never a whole
-// cent above it.
+// cent above it, running and stopped.
 func TestEverySizeIsPricedAtCostPlusTheFee(t *testing.T) {
 	for _, o := range offers {
 		// Both sides over one 730-hour month in micro-dollars, times three, so the
 		// comparison is exact.
-		cost := o.listMicros*hoursPerMonth + o.diskGB*gp3MicrosPerGBMonth
-		price := o.cents() * microsPerCent * hoursPerMonth
-		if 3*price < 4*cost {
-			t.Errorf("%s: %d cents is below cost plus the fee", o.slug, o.cents())
-		}
-		if 3*(price-microsPerCent*hoursPerMonth) >= 4*cost {
-			t.Errorf("%s: %d cents is a whole cent above cost plus the fee", o.slug, o.cents())
+		for _, c := range []struct {
+			what  string
+			cost  int64
+			cents int64
+		}{
+			{"running", (o.listMicros+ipv4MicrosPerHour)*hoursPerMonth + o.diskGB*gp3MicrosPerGBMonth, o.cents()},
+			{"stopped", o.diskGB * gp3MicrosPerGBMonth, stoppedCents(o.diskGB)},
+		} {
+			price := c.cents * microsPerCent * hoursPerMonth
+			if 3*price < 4*c.cost {
+				t.Errorf("%s %s: %d cents is below cost plus the fee", o.slug, c.what, c.cents)
+			}
+			if 3*(price-microsPerCent*hoursPerMonth) >= 4*c.cost {
+				t.Errorf("%s %s: %d cents is a whole cent above cost plus the fee", o.slug, c.what, c.cents)
+			}
 		}
 	}
 }
@@ -73,15 +97,15 @@ func TestTheCatalogAsSold(t *testing.T) {
 	}{
 		"t3.medium":    {7, 0, ""},
 		"m7i.large":    {15, 0, ""},
-		"m7i.xlarge":   {28, 0, ""},
-		"m7i.2xlarge":  {55, 0, ""},
-		"c7i.xlarge":   {25, 0, ""},
+		"m7i.xlarge":   {29, 0, ""},
+		"m7i.2xlarge":  {56, 0, ""},
+		"c7i.xlarge":   {26, 0, ""},
 		"r7i.xlarge":   {37, 0, ""},
 		"g6.xlarge":    {111, 1, "L4"},
-		"g6.12xlarge":  {621, 4, "L4"},
+		"g6.12xlarge":  {622, 4, "L4"},
 		"g5.xlarge":    {138, 1, "A10G"},
-		"g5.12xlarge":  {764, 4, "A10G"},
-		"g5.48xlarge":  {2187, 8, "A10G"},
+		"g5.12xlarge":  {765, 4, "A10G"},
+		"g5.48xlarge":  {2188, 8, "A10G"},
 		"g6e.xlarge":   {252, 1, "L40S"},
 		"p4d.24xlarge": {2943, 8, "A100"},
 		"p5.48xlarge":  {7354, 8, "H100"},

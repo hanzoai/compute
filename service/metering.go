@@ -109,13 +109,27 @@ func MeterRunningMachines(ctx context.Context, now time.Time) {
 	logs.Info("compute metering: hourly sweep done (metered=%d skipped=%d total=%d)", metered, skipped, len(machines))
 }
 
-// owed is one machine's unbilled hours and what each costs.
+// owed is one machine's unbilled hours and what each costs, under one ledger
+// key: its running hours under its id, its stopped hours under its disk key.
 type owed struct {
 	m       *Machine
 	org     string
 	project string
+	key     string
 	cents   int64
+	model   string
+	id      func(time.Time) string
 	hours   []time.Time
+}
+
+// diskKey is the ledger key a machine's stopped hours are marked under, apart
+// from its running hours, so a stopped hour and a running hour are each billed
+// at their own price and neither mark hides the other.
+func diskKey(machine string) string { return machine + "/disk" }
+
+// DiskMeterID names one stopped hour of a machine: its disk.
+func DiskMeterID(machineID string, now time.Time) string {
+	return "compute-" + machineID + "-disk-" + HourStamp(now)
 }
 
 // meterMachines is the pure sweep over a machine set at a fixed wall-clock `now`
@@ -136,28 +150,38 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			continue
 		}
 		// ONE price resolver, shared with the provision gate. An unresolvable
-		// price is a LOUD skip, never a silent $0 debit — a running machine we
-		// cannot price is lost revenue, and the log line is how anyone learns.
-		cents, err := HourlyCents(m.Size)
+		// price is a LOUD skip, never a silent $0 debit — a machine we cannot
+		// price is lost revenue, and the log line is how anyone learns.
+		d := owed{m: m, org: org, key: m.Id, model: m.Size,
+			id: func(h time.Time) string { return MeterID(m.Id, h) }}
+		var err error
+		if m.State == "Stopped" {
+			d.key, d.model = diskKey(m.Id), m.Size+"/stopped"
+			d.id = func(h time.Time) string { return DiskMeterID(m.Id, h) }
+			d.cents, err = StoppedCents(m.Size)
+			if err == nil {
+				d.hours, err = stoppedHours(m, current)
+			}
+		} else {
+			d.cents, err = HourlyCents(m.Size)
+			if err == nil {
+				d.hours, err = unbilled(m, current)
+			}
+		}
 		if err != nil {
 			skipped++
 			logs.Warning("compute metering: machine %s not billed: %v", m.Id, err)
 			continue
 		}
-		hours, err := unbilled(m, current)
-		if err != nil {
-			skipped++
-			logs.Warning("compute metering: machine %s: read billed hours: %v", m.Id, err)
-			continue
-		}
-		if len(hours) == 0 {
+		if len(d.hours) == 0 {
 			continue
 		}
 		// Project is the second attribution dimension recovered from the
 		// machine's own tag (empty == the org's default project). It never changes
 		// the debit destination (always the org), only the metering Actor.
-		due = append(due, owed{m: m, org: org, project: projectFromTag(m.Tag), cents: cents, hours: hours})
-		marks[m.Id] = hourOf(current)
+		d.project = projectFromTag(m.Tag)
+		due = append(due, d)
+		marks[d.key] = hourOf(current)
 	}
 	if len(marks) == 0 {
 		return metered, skipped
@@ -170,22 +194,52 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		logs.Warning("compute metering: record billed hours: %v — machines not recorded stay owed", err)
 	}
 	for _, d := range due {
-		if !moved[d.m.Id] {
+		if !moved[d.key] {
 			continue
 		}
 		for _, h := range d.hours {
-			if err := RecordCompute(ctx, d.org, d.project, d.cents, d.m.Size, MeterID(d.m.Id, h)); err != nil {
+			if err := RecordCompute(ctx, d.org, d.project, d.cents, d.model, d.id(h)); err != nil {
 				skipped++
-				logs.Warning("compute metering: debit machine %s hour %s (org %s): %v", d.m.Id, hourOf(h), d.org, err)
+				logs.Warning("compute metering: debit %s hour %s (org %s): %v", d.key, hourOf(h), d.org, err)
 				continue
 			}
 			metered++
-			// Roll a running event into the analytics datastore alongside this
-			// hour's debit (best-effort; never blocks or affects the sweep).
-			EmitCompute(d.org, ComputeRunning, d.m, d.cents)
+			// Roll a running event into the analytics datastore alongside a
+			// running hour's debit (best-effort; never blocks or affects the sweep).
+			if d.key == d.m.Id {
+				EmitCompute(d.org, ComputeRunning, d.m, d.cents)
+			}
 		}
 	}
 	return metered, skipped
+}
+
+// stoppedHours is every whole clock hour a stopped machine owes for its disk,
+// through current: the hours after the last one billed either way, running or
+// stopped — a machine's running price already carries its disk. A machine with
+// neither mark owes the current hour only.
+func stoppedHours(m *Machine, current time.Time) ([]time.Time, error) {
+	run, err := billed().Through(m.Id)
+	if err != nil {
+		return nil, err
+	}
+	disk, err := billed().Through(diskKey(m.Id))
+	if err != nil {
+		return nil, err
+	}
+	from := current
+	if last, ok := parseHour(max(run, disk)); ok {
+		from = last.Add(time.Hour)
+	}
+	if earliest := current.Add(-mostCatchUp * time.Hour); from.Before(earliest) {
+		logs.Warning("compute metering: stopped machine %s owes hours from %s; billing the last %d", m.Id, hourOf(from), mostCatchUp)
+		from = earliest
+	}
+	var hours []time.Time
+	for h := from; !h.After(current); h = h.Add(time.Hour) {
+		hours = append(hours, h)
+	}
+	return hours, nil
 }
 
 // unbilled is every whole clock hour machine m has run and not been billed for,

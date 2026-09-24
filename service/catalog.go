@@ -42,6 +42,9 @@ type SizeInfo struct {
 	// CentsHourly is the price per running hour in whole cents, exactly what the
 	// launch and the hourly meter debit.
 	CentsHourly int64 `json:"centsHourly"`
+	// CentsStopped is the price per stopped hour in whole cents: the root volume,
+	// which the hourly meter debits while the machine is stopped.
+	CentsStopped int64 `json:"centsStopped"`
 	// PriceHourly and PriceMonthly are CentsHourly in dollars, per hour and per
 	// 730-hour month.
 	PriceHourly  float64 `json:"priceHourly"`
@@ -129,6 +132,7 @@ func (o offer) info(region string) SizeInfo {
 		Regions:      []string{},
 		Currency:     "USD",
 		CentsHourly:  cents,
+		CentsStopped: stoppedCents(o.diskGB),
 		PriceHourly:  float64(cents) / 100,
 		PriceMonthly: float64(cents*hoursPerMonth) / 100,
 	}

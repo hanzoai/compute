@@ -341,11 +341,12 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// ListMeteredMachines returns every running machine hosted compute launched, in
-// every org — the set the hourly meter debits. The org is recovered per machine
-// from its own tag, so ONE sweep meters every tenant. A running instance with no
-// machine id has no meter id either, so it is reported and left out rather than
-// billed under an id another instance could share.
+// ListMeteredMachines returns every running or stopped machine hosted compute
+// launched, in every org — the set the hourly meter debits: a running machine
+// its price, a stopped one its disk. The org is recovered per machine from its
+// own tag, so ONE sweep meters every tenant. An instance with no machine id has
+// no meter id either, so it is reported and left out rather than billed under an
+// id another instance could share.
 func ListMeteredMachines() ([]*Machine, error) {
 	ctx, cancel := bounded()
 	defer cancel()
@@ -355,15 +356,15 @@ func ListMeteredMachines() ([]*Machine, error) {
 	}
 	found, err := describe(ctx, api,
 		filter("tag:"+managedByKey, managedBy),
-		filter("instance-state-name", string(ec2Types.InstanceStateNameRunning)))
+		filter("instance-state-name", string(ec2Types.InstanceStateNameRunning), string(ec2Types.InstanceStateNameStopped)))
 	if err != nil {
-		return nil, refusal("list running machines", err, "", "")
+		return nil, refusal("list metered machines", err, "", "")
 	}
 	machines := make([]*Machine, 0, len(found))
 	for _, inst := range found {
 		m := machineFromInstance(inst, region)
 		if !machineIDPattern.MatchString(m.Id) {
-			logs.Warning("compute metering: running instance %s carries no machine id; not billed", aws.ToString(inst.InstanceId))
+			logs.Warning("compute metering: instance %s carries no machine id; not billed", aws.ToString(inst.InstanceId))
 			continue
 		}
 		machines = append(machines, m)
