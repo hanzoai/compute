@@ -103,6 +103,9 @@ type Fake struct {
 	deny      string
 	// sent is NetworkOut: bytes by instance id and hour ("YYYYMMDDHH").
 	sent map[string]map[string]int64
+	// uncounted is the StatusCode CloudWatch answers for an instance it cannot
+	// count, by instance id.
+	uncounted map[string]string
 }
 
 type image struct {
@@ -202,6 +205,7 @@ func (f *Fake) reset() {
 	f.now = time.Now().UTC().Truncate(time.Second)
 	f.deny = ""
 	f.sent = map[string]map[string]int64{}
+	f.uncounted = map[string]string{}
 }
 
 // Send records that instance id sent bytes out during the hour at falls in, as
@@ -214,6 +218,14 @@ func (f *Fake) Send(id string, at time.Time, bytes int64) {
 		f.sent[id] = map[string]int64{}
 	}
 	f.sent[id][hour] += bytes
+}
+
+// Uncounted makes CloudWatch answer status (InternalError, Forbidden) for
+// instance id's NetworkOut from now until Reset.
+func (f *Fake) Uncounted(id, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uncounted[id] = status
 }
 
 // Deny makes the stand-in egress refuse every call from now until Reset, as
@@ -532,7 +544,9 @@ func (f *Fake) transition(w http.ResponseWriter, form url.Values, response, stat
 }
 
 // metricData is CloudWatch's GetMetricData for NetworkOut: the hourly Sum of
-// each instance asked about, over [StartTime, EndTime), oldest first.
+// each instance asked about, over [StartTime, EndTime), oldest first, at most
+// MaxDatapoints a page — which the caller must set — with the rest behind a
+// NextToken, as CloudWatch pages: a query with more to come is PartialData.
 func (f *Fake) metricData(w http.ResponseWriter, form url.Values) {
 	from, err1 := time.Parse(time.RFC3339, form.Get("StartTime"))
 	to, err2 := time.Parse(time.RFC3339, form.Get("EndTime"))
@@ -540,7 +554,24 @@ func (f *Fake) metricData(w http.ResponseWriter, form url.Values) {
 		ec2Error(w, http.StatusBadRequest, "InvalidParameterValue", "StartTime and EndTime")
 		return
 	}
+	most, err := strconv.Atoi(form.Get("MaxDatapoints"))
+	if err != nil || most <= 0 {
+		ec2Error(w, http.StatusBadRequest, "InvalidParameterValue", "MaxDatapoints must bound the page")
+		return
+	}
+	skip := 0
+	if token := form.Get("NextToken"); token != "" {
+		if skip, err = strconv.Atoi(token); err != nil {
+			ec2Error(w, http.StatusBadRequest, "InvalidNextToken", token)
+			return
+		}
+	}
+	type point struct {
+		at    time.Time
+		bytes int64
+	}
 	var b strings.Builder
+	seen, next := 0, ""
 	for i := 1; ; i++ {
 		p := "MetricDataQueries.member." + strconv.Itoa(i) + "."
 		id, ok := form[p+"Id"]
@@ -553,18 +584,39 @@ func (f *Fake) metricData(w http.ResponseWriter, form url.Values) {
 			return
 		}
 		instance := form.Get(p + "MetricStat.Metric.Dimensions.member.1.Value")
-		var stamps, values strings.Builder
+		if status := f.uncounted[instance]; status != "" {
+			fmt.Fprintf(&b, "<member><Id>%s</Id><Label>NetworkOut</Label><Timestamps/><Values/><StatusCode>%s</StatusCode></member>", xmlText(id[0]), status)
+			continue
+		}
+		var points []point
 		for h := from.UTC().Truncate(time.Hour); h.Before(to); h = h.Add(time.Hour) {
 			if bytes, ok := f.sent[instance][h.Format("2006010215")]; ok {
-				fmt.Fprintf(&stamps, "<member>%s</member>", h.Format(time.RFC3339))
-				fmt.Fprintf(&values, "<member>%d.0</member>", bytes)
+				points = append(points, point{h, bytes})
 			}
 		}
-		fmt.Fprintf(&b, "<member><Id>%s</Id><Label>NetworkOut</Label><Timestamps>%s</Timestamps><Values>%s</Values><StatusCode>Complete</StatusCode></member>",
-			xmlText(id[0]), stamps.String(), values.String())
+		var stamps, values strings.Builder
+		status := "Complete"
+		for _, pt := range points {
+			seen++
+			if seen <= skip {
+				continue
+			}
+			if seen > skip+most {
+				status, next = "PartialData", strconv.Itoa(skip+most)
+				break
+			}
+			fmt.Fprintf(&stamps, "<member>%s</member>", pt.at.Format(time.RFC3339))
+			fmt.Fprintf(&values, "<member>%d.0</member>", pt.bytes)
+		}
+		fmt.Fprintf(&b, "<member><Id>%s</Id><Label>NetworkOut</Label><Timestamps>%s</Timestamps><Values>%s</Values><StatusCode>%s</StatusCode></member>",
+			xmlText(id[0]), stamps.String(), values.String(), status)
+	}
+	token := ""
+	if next != "" {
+		token = "<NextToken>" + next + "</NextToken>"
 	}
 	w.Header().Set("Content-Type", "text/xml")
-	fmt.Fprintf(w, `<GetMetricDataResponse xmlns="http://monitoring.amazonaws.com/doc/2010-08-01/"><GetMetricDataResult><MetricDataResults>%s</MetricDataResults><Messages/></GetMetricDataResult><ResponseMetadata><RequestId>cw-1</RequestId></ResponseMetadata></GetMetricDataResponse>`, b.String())
+	fmt.Fprintf(w, `<GetMetricDataResponse xmlns="http://monitoring.amazonaws.com/doc/2010-08-01/"><GetMetricDataResult><MetricDataResults>%s</MetricDataResults>%s<Messages/></GetMetricDataResult><ResponseMetadata><RequestId>cw-1</RequestId></ResponseMetadata></GetMetricDataResponse>`, b.String(), token)
 }
 
 func instanceXML(in *Instance) string {

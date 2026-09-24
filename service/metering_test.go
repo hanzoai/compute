@@ -645,45 +645,176 @@ func sends(t *testing.T, sent map[string]map[string]int64, fail error) {
 	t.Cleanup(func() { outbound = saved })
 }
 
-// A transfer hour whose debit fails is owed again, with the carry it had, and an
-// unreadable NetworkOut bills nothing and leaves every hour owed.
-func TestTransferThatWasNotChargedIsStillOwed(t *testing.T) {
-	var up bool
-	var ids []string
+// answering is a commerce whose balance answers are set per org as the test goes:
+// a balance, or a status other than 200. Debits land and are recorded.
+func answering(t *testing.T) (set func(org string, cents int64, status int), debits func() []string) {
+	t.Helper()
 	freshLedger(t)
+	var mu sync.Mutex
+	type answer struct {
+		cents  int64
+		status int
+	}
+	answers := map[string]answer{}
+	var ids []string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/billing/usage", func(w http.ResponseWriter, r *http.Request) {
-		u := commercetest.Read(r)
-		if !up {
-			w.WriteHeader(http.StatusServiceUnavailable)
+	mux.HandleFunc("/v1/billing/balance", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		org := r.Header.Get("X-Org-Id")
+		if r.URL.Query().Get("user") != org {
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		ids = append(ids, u.ID+"="+u.Amount.Decimal)
+		a, ok := answers[org]
+		if !ok {
+			a.status = http.StatusServiceUnavailable
+		}
+		if a.status != http.StatusOK {
+			w.WriteHeader(a.status)
+			return
+		}
+		_, _ = io.WriteString(w, `{"available":`+strconv.FormatInt(a.cents, 10)+`,"account":"`+org+`"}`)
+	})
+	mux.HandleFunc("/v1/billing/usage", func(w http.ResponseWriter, r *http.Request) {
+		u := commercetest.Read(r)
+		mu.Lock()
+		defer mu.Unlock()
+		ids = append(ids, u.ID)
+		if a, ok := answers[u.Org]; ok {
+			a.cents -= u.Cents()
+			answers[u.Org] = a
+		}
 		_, _ = io.WriteString(w, `{"id":"`+u.ID+`"}`)
 	})
 	commercetest.Serve(t, mux)
+	return func(org string, cents int64, status int) {
+			mu.Lock()
+			defer mu.Unlock()
+			answers[org] = answer{cents: cents, status: status}
+		}, func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), ids...)
+		}
+}
+
+// A balance that cannot be read keeps an org's machines running for mostUnread
+// sweeps in a row, each hour charged; the next one stops them. A read in between
+// starts the count again.
+func TestAnUnreadableBalanceStopsMachinesAfterSixHours(t *testing.T) {
+	set, debits := answering(t)
+	stopped := stops(t)
 	seedCatalog(t, priced("s", 5))
+	at := func(h int) time.Time { return time.Date(2026, 7, 2, h, 10, 0, 0, time.UTC) }
+	m := []*Machine{{Id: "u1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at(0).Format(time.RFC3339)}}
+	MarkBilled("u1", at(1))
 
-	at := func(h int) time.Time { return time.Date(2026, 7, 2, h, 20, 0, 0, time.UTC) }
-	m := &Machine{Id: "tx", Size: "s", Tag: "hanzo-org:acme", State: "Stopped", CreatedTime: at(10).Format(time.RFC3339), instance: "i-tx"}
-	MarkBilled("tx", at(10))
-	MarkBilled(diskKey("tx"), at(20))
-	sends(t, map[string]map[string]int64{"i-tx": {"2026070210": gbBytes, "2026070211": 2 * gbBytes}}, nil)
-
-	meterMachines(context.Background(), []*Machine{m}, at(12)) // commerce down: 10 and 11 stay owed
-	if mark, _ := billed().Through(transferKey("tx")); mark.Hour != "" {
-		t.Fatalf("a refused transfer debit was recorded: %+v", mark)
+	set("acme", 0, http.StatusBadGateway)
+	for h := 2; h <= 4; h++ {
+		meterMachines(context.Background(), m, at(h))
 	}
+	set("acme", 100_000, http.StatusOK)
+	meterMachines(context.Background(), m, at(5)) // read: the count starts again
+	set("acme", 0, http.StatusBadGateway)
+	for h := 6; h < 6+mostUnread; h++ {
+		meterMachines(context.Background(), m, at(h))
+	}
+	if got := stopped(); len(got) != 0 {
+		t.Fatalf("stopped within %d unreadable hours: %v", mostUnread, got)
+	}
+	meterMachines(context.Background(), m, at(6+mostUnread))
+	if got := stopped(); !slices.Equal(got, []string{"acme/u1"}) {
+		t.Fatalf("after %d unreadable hours in a row, stopped = %v", mostUnread+1, got)
+	}
+	got := debits()
+	if len(got) != 5+mostUnread-1 || got[len(got)-1] != MeterID("u1", at(5+mostUnread)) {
+		t.Fatalf("debits = %v: every hour through %d is charged, the hour it stopped in is not", got, 5+mostUnread)
+	}
+}
+
+// A balance commerce refuses as unpaid stops the org's machines at once; any
+// other refusal is about visor's own request or identity, an outage like any
+// other.
+func TestABalanceRefusedForTheOrgStopsItsMachines(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		stops  bool
+	}{
+		{http.StatusPaymentRequired, true},
+		{http.StatusBadRequest, false},
+		{http.StatusNotFound, false},
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, false},
+		{http.StatusTooManyRequests, false},
+		{http.StatusInternalServerError, false},
+	} {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			set, _ := answering(t)
+			stopped := stops(t)
+			seedCatalog(t, priced("s", 5))
+			at := time.Date(2026, 7, 2, 14, 10, 0, 0, time.UTC)
+			MarkBilled("r1", at.Add(-time.Hour))
+			set("acme", 0, tc.status)
+			meterMachines(context.Background(), []*Machine{
+				{Id: "r1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at.Add(-2 * time.Hour).Format(time.RFC3339)},
+			}, at)
+			if got := len(stopped()) == 1; got != tc.stops {
+				t.Fatalf("a balance answered %d: stopped = %v, want %v", tc.status, got, tc.stops)
+			}
+		})
+	}
+}
+
+// Transfer is never charged. A machine is stopped when its org cannot cover its
+// hour and the transfer it could run up in it, at 12 cents a GiB of the NetworkOut
+// it sent in the last settled hour; a machine that is paid for sets aside that
+// transfer from what the org has left for the next.
+func TestAMachineWhoseTransferItsOrgCannotCoverIsStopped(t *testing.T) {
+	set, debits := answering(t)
+	stopped := stops(t)
+	seedCatalog(t, priced("s", 5))
+	at := time.Date(2026, 7, 2, 14, 10, 0, 0, time.UTC) // hour 12 is the last settled
+	started := at.Add(-5 * time.Hour).Format(time.RFC3339)
+	var m []*Machine
+	for _, id := range []string{"heavy", "light", "mid1", "mid2"} {
+		MarkBilled(id, at.Add(-time.Hour))
+		m = append(m, &Machine{Id: id, Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: started, instance: "i-" + id})
+	}
+	sends(t, map[string]map[string]int64{
+		"i-heavy": {"2026070212": 10 << 30, "2026070213": 1 << 40}, // 120 cents; 13 is not settled
+		"i-mid1":  {"2026070212": 5 << 30},                         // 60 cents
+		"i-mid2":  {"2026070212": 5 << 30},                         // 60 cents
+	}, nil)
+	set("acme", 100, http.StatusOK)
+	meterMachines(context.Background(), m, at)
+
+	// heavy needs 125 of 100: stopped. light needs 5: paid, 95 left. mid1 needs
+	// 65: paid, 30 left. mid2 needs 65 of 30: stopped.
+	if got := stopped(); !slices.Equal(got, []string{"acme/heavy", "acme/mid2"}) {
+		t.Fatalf("stopped = %v", got)
+	}
+	if got := debits(); !slices.Equal(got, []string{"compute-light-2026070214", "compute-mid1-2026070214"}) {
+		t.Fatalf("debits = %v: only running hours are charged", got)
+	}
+}
+
+// A NetworkOut that cannot be read stops nothing and charges nothing.
+func TestAnUnreadableNetworkOutStopsNothing(t *testing.T) {
+	set, debits := answering(t)
+	stopped := stops(t)
+	seedCatalog(t, priced("s", 5))
+	at := time.Date(2026, 7, 2, 14, 10, 0, 0, time.UTC)
+	MarkBilled("n1", at.Add(-time.Hour))
 	sends(t, nil, errors.New("cloudwatch unreachable"))
-	up = true
-	meterMachines(context.Background(), []*Machine{m}, at(13)) // metric unreadable: still owed
-	if len(ids) != 0 {
-		t.Fatalf("an unreadable metric charged %v", ids)
+	set("acme", 5, http.StatusOK)
+	meterMachines(context.Background(), []*Machine{
+		{Id: "n1", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at.Add(-5 * time.Hour).Format(time.RFC3339), instance: "i-n1"},
+	}, at)
+	if got := stopped(); len(got) != 0 {
+		t.Fatalf("stopped = %v", got)
 	}
-	sends(t, map[string]map[string]int64{"i-tx": {"2026070210": gbBytes, "2026070211": 2 * gbBytes}}, nil)
-	meterMachines(context.Background(), []*Machine{m}, at(14))
-	want := []string{"compute-tx-transfer-2026070210=0.12", "compute-tx-transfer-2026070211=0.24"}
-	if !slices.Equal(ids, want) {
-		t.Fatalf("debits = %v, want %v", ids, want)
+	if got := debits(); !slices.Equal(got, []string{"compute-n1-2026070214"}) {
+		t.Fatalf("debits = %v", got)
 	}
 }

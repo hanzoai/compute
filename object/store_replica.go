@@ -197,7 +197,7 @@ func mergeLeaseRows(src, dst *relational.Engine) error {
 				return err
 			}
 		case local.Hour < m.Hour:
-			if _, err := dst.ID(m.Machine).Cols("hour", "updated_time").Update(&m); err != nil {
+			if _, err := dst.ID(m.Machine).Cols("hour", "streak", "updated_time").Update(&m); err != nil {
 				return err
 			}
 		}

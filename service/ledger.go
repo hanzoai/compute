@@ -20,12 +20,12 @@ import (
 )
 
 // Ledger keeps, per hosted machine and per thing it is billed for — its running
-// hours, its stopped disk, its outbound transfer — the last clock hour
-// ("YYYYMMDDHH") billed, and what of a fractional charge is carried to the next
-// hour. The launch, a start and the hourly sweep each move a mark only over
-// hours whose debit landed, so one hour is charged once whichever of them
-// reaches it first, and hours a sweep missed — a restart, an outage, a failed
-// tick — are charged by the next one.
+// hours, its stopped disk — the last clock hour ("YYYYMMDDHH") billed. The
+// launch, a start and the hourly sweep each move a mark only over hours whose
+// debit landed, so one hour is charged once whichever of them reaches it first,
+// and hours a sweep missed — a restart, an outage, a failed tick — are charged
+// by the next one. The sweep also keeps each org's balance reads here
+// (balanceOf).
 //
 // The rows live in the store (object), which service cannot import, so the
 // store registers itself here the way it registers credentials.
@@ -38,11 +38,12 @@ type Ledger interface {
 	Advance(marks map[string]Mark) (map[string]bool, error)
 }
 
-// Mark is how far one key is billed: the last hour charged, and the part of a
-// cent owed beyond it, in the key's own unit (transfer carries cent-bytes).
+// Mark is how far one key has come: the last hour it was billed or asked, and
+// how many hours in a row through that one the key's condition held — for an
+// org's balance, that it could not be read.
 type Mark struct {
-	Hour  string
-	Carry int64
+	Hour   string
+	Streak int64
 }
 
 // book is the registered Ledger.

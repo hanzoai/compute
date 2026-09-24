@@ -22,11 +22,14 @@ package service
 // the GB-month. A STOPPED machine releases the instance and the address and
 // keeps costing the volume. Hanzo sells each at cost plus the platform fee of one
 // third, rounded UP to the whole cent per hour: the ledger debits whole cents and
-// a paid product never under-charges. Outbound transfer is the fourth cost, by
-// the GB rather than the hour: it is metered from the first byte at cost plus
-// the fee, and a part of a cent carries to the next hour instead of rounding, so
-// the total charged is exact. All arithmetic is integer, so the price a quote
-// shows is the price the meter debits, to the cent.
+// a paid product never under-charges. All arithmetic is integer, so the price a
+// quote shows is the price the meter debits, to the cent.
+//
+// Outbound transfer to the internet is the fourth cost, by the GiB. Its price is
+// fixed here, and nothing charges it yet: the one per-instance count EC2 keeps,
+// NetworkOut, is every byte an instance sends, in-region traffic included, which
+// is not the transfer AWS bills. It prices the transfer a machine could run up,
+// which is what the sweep stops a machine for (metering.go).
 const (
 	// feeNum/feeDen is the multiplier over cost: 4/3, list plus one third.
 	feeNum = 4
@@ -44,17 +47,17 @@ const (
 	// ipv4MicrosPerHour is one public IPv4 address in use: $0.005 per hour.
 	ipv4MicrosPerHour = 5_000
 
-	// transferMicrosPerGB is data transferred out of EC2 to the internet in
-	// us-east-1: $0.09 per GB.
-	transferMicrosPerGB = 90_000
+	// transferMicrosPerGiB is data transferred out of EC2 to the internet in
+	// us-east-1: $0.09 per GiB (AWS's "GB" is 2^30 bytes).
+	transferMicrosPerGiB = 90_000
 
-	// gbBytes is the GB transfer is counted in: 2^30 bytes, as AWS bills it.
-	gbBytes = 1 << 30
+	// gibBytes is the unit transfer is priced in: 2^30 bytes.
+	gibBytes = 1 << 30
 )
 
-// TransferCentsPerGB is Hanzo's price for outbound transfer, in whole cents per
-// GB, from the first byte: cost plus the fee, which is exactly 12 cents.
-const TransferCentsPerGB = transferMicrosPerGB * feeNum / (feeDen * microsPerCent)
+// TransferCentsPerGiB is Hanzo's price for outbound transfer, in whole cents per
+// GiB: cost plus the fee, which is exactly 12 cents.
+const TransferCentsPerGiB = transferMicrosPerGiB * feeNum / (feeDen * microsPerCent)
 
 // hourlyCents is Hanzo's price in whole cents per RUNNING hour for an instance
 // listed at listMicros micro-dollars per hour, with its public IPv4 address and a
@@ -84,10 +87,11 @@ func monthCents(monthMicros int64) int64 {
 	return (num + den - 1) / den
 }
 
-// transferCents is what bytes sent out cost, with carry — cent-bytes owed from
-// earlier hours, below one cent — added first: whole cents to debit now, and the
-// part of a cent carried on.
-func transferCents(bytes, carry int64) (cents, left int64) {
-	owed := carry + bytes*TransferCentsPerGB
-	return owed / gbBytes, owed % gbBytes
+// transferCents is what bytes of transfer cost at TransferCentsPerGiB, rounded
+// up to the whole cent.
+func transferCents(bytes int64) int64 {
+	if bytes <= 0 {
+		return 0
+	}
+	return (bytes*TransferCentsPerGiB + gibBytes - 1) / gibBytes
 }

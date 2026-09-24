@@ -21,7 +21,9 @@ package service
 // shape as EC2's — built here rather than through the CloudWatch SDK, whose
 // current protocol (RPC v2 CBOR) needs a header egress does not carry.
 // NetworkOut counts every byte an instance's interfaces send, to the internet
-// and to anything else, so it is what the meter charges for.
+// and to anything else in the region, so it bounds a machine's internet transfer
+// from above and is not a measure of it: the sweep stops on it and charges
+// nothing for it.
 
 import (
 	"context"
@@ -42,6 +44,16 @@ const settle = 15 * time.Minute
 
 // mostQueries is how many instances one GetMetricData asks about.
 const mostQueries = 500
+
+// pageDatapoints is the most datapoints one GetMetricData answer carries
+// (MaxDatapoints); more come on the next page, by NextToken. At about a hundred
+// bytes a datapoint and a few hundred a query, a page stays far inside
+// mostAnswer.
+const pageDatapoints = 2000
+
+// mostAnswer is the most bytes of one GetMetricData answer read. An answer
+// longer than that is refused as an error, never parsed short.
+const mostAnswer = 1 << 20
 
 // outbound returns how many bytes each instance sent out in each whole hour of
 // [from, to), by instance id and hour mark. An hour with no datapoint sent
@@ -90,6 +102,7 @@ type metricAnswer struct {
 		ID         string    `xml:"Id"`
 		Timestamps []string  `xml:"Timestamps>member"`
 		Values     []float64 `xml:"Values>member"`
+		StatusCode string    `xml:"StatusCode"`
 	} `xml:"GetMetricDataResult>MetricDataResults>member"`
 	NextToken string `xml:"GetMetricDataResult>NextToken"`
 	Code      string `xml:"Error>Code"`
@@ -98,11 +111,12 @@ type metricAnswer struct {
 // metricPage is one GetMetricData call for batch.
 func metricPage(ctx context.Context, hc *http.Client, region string, batch []string, from, to time.Time, token string) (map[string]map[string]int64, string, error) {
 	form := url.Values{
-		"Action":    {"GetMetricData"},
-		"Version":   {"2010-08-01"},
-		"StartTime": {from.UTC().Format(time.RFC3339)},
-		"EndTime":   {to.UTC().Format(time.RFC3339)},
-		"ScanBy":    {"TimestampAscending"},
+		"Action":        {"GetMetricData"},
+		"Version":       {"2010-08-01"},
+		"StartTime":     {from.UTC().Format(time.RFC3339)},
+		"EndTime":       {to.UTC().Format(time.RFC3339)},
+		"ScanBy":        {"TimestampAscending"},
+		"MaxDatapoints": {strconv.Itoa(pageDatapoints)},
 	}
 	for i, instance := range batch {
 		p := "MetricDataQueries.member." + strconv.Itoa(i+1) + "."
@@ -127,9 +141,12 @@ func metricPage(ctx context.Context, hc *http.Client, region string, batch []str
 		return nil, "", fmt.Errorf("cloudwatch: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, mostAnswer+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("cloudwatch: %w", err)
+	}
+	if len(body) > mostAnswer {
+		return nil, "", fmt.Errorf("cloudwatch answered more than %d bytes for one page", mostAnswer)
 	}
 	var doc metricAnswer
 	if err := xml.Unmarshal(body, &doc); err != nil {
@@ -145,6 +162,12 @@ func metricPage(ctx context.Context, hc *http.Client, region string, batch []str
 			return nil, "", fmt.Errorf("cloudwatch answered a query it was not asked: %q", r.ID)
 		}
 		instance := batch[i]
+		// Complete is every datapoint; PartialData is this page's, with the rest
+		// on the next. Anything else — InternalError, Forbidden — is a count
+		// CloudWatch could not give, and is not taken as nothing sent.
+		if r.StatusCode != "Complete" && r.StatusCode != "PartialData" {
+			return nil, "", fmt.Errorf("cloudwatch could not count NetworkOut of %s: %q", instance, r.StatusCode)
+		}
 		if out[instance] == nil {
 			out[instance] = map[string]int64{}
 		}

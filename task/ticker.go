@@ -116,7 +116,7 @@ func liveHour() hour {
 		owner:     object.IsBillingOwner,
 		reachable: service.ComputeReachable,
 		claim:     object.ClaimMeterHour,
-		meter: service.MeterRunningMachines,
+		meter:     service.MeterRunningMachines,
 	}
 }
 

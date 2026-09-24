@@ -129,9 +129,8 @@ func TestTheCatalogAsSold(t *testing.T) {
 			t.Errorf("%s = %d cents/h, want %d", o.slug, o.cents(), w.cents)
 		}
 		// A stopped hour is the disk, rounded up per hour as a running hour is.
-		// Outbound transfer is one price for every size, from the first byte.
-		if si := o.info("us-east-1"); si.CentsStopped != w.stopped || si.CentsPerGB != 12 {
-			t.Errorf("%s stopped = %d cents/h, transfer = %d cents/GB; want %d and 12", o.slug, si.CentsStopped, si.CentsPerGB, w.stopped)
+		if si := o.info("us-east-1"); si.CentsStopped != w.stopped {
+			t.Errorf("%s stopped = %d cents/h, want %d", o.slug, si.CentsStopped, w.stopped)
 		}
 		switch {
 		case w.gpus == 0 && o.gpu != nil:
@@ -195,39 +194,26 @@ func TestASizeShowsWhatItDebits(t *testing.T) {
 	}
 }
 
-// Outbound transfer is AWS's $0.09 a GB plus the fee, exactly 12 cents, charged
-// from the first byte: whole cents as they are owed, and the part of a cent
-// carried to the next hour, so a sum of hours is charged exactly what the sum of
-// their bytes costs — never a cent per hour for an idle machine's trickle.
-func TestTransferIsTwelveCentsAGBFromTheFirstByte(t *testing.T) {
-	if (transferMicrosPerGB*feeNum)%(feeDen*microsPerCent) != 0 || TransferCentsPerGB != 12 {
-		t.Fatalf("transfer is %d cents a GB and not exact", TransferCentsPerGB)
+// Outbound transfer is AWS's $0.09 a GiB plus the fee, exactly 12 cents a GiB,
+// and a GiB is 2^30 bytes: what the sweep prices a machine's transfer at.
+func TestTransferIsTwelveCentsAGiB(t *testing.T) {
+	if (transferMicrosPerGiB*feeNum)%(feeDen*microsPerCent) != 0 || TransferCentsPerGiB != 12 {
+		t.Fatalf("transfer is %d cents a GiB and not exact", TransferCentsPerGiB)
 	}
 	for _, tc := range []struct {
-		name         string
-		bytes, carry int64
-		cents, left  int64
+		name  string
+		bytes int64
+		cents int64
 	}{
-		{"one GB", gbBytes, 0, 12, 0},
-		{"ten GB", 10 * gbBytes, 0, 120, 0},
-		{"a twelfth of a GB is a cent", gbBytes / 12, 0, 0, gbBytes / 12 * 12},
-		{"just over a twelfth", gbBytes/12 + 1, 0, 1, gbBytes/12*12 + 12 - gbBytes},
-		{"nothing sent", 0, 0, 0, 0},
-		{"a carry becomes a cent", 1, gbBytes - 12, 1, 0},
+		{"one GiB", 1 << 30, 12},
+		{"ten GiB", 10 << 30, 120},
+		{"a twelfth of a GiB is a cent", (1 << 30) / 12, 1},
+		{"a byte is a cent, rounded up", 1, 1},
+		{"a billion bytes is short of a GiB", 1_000_000_000, 12},
+		{"nothing sent", 0, 0},
 	} {
-		cents, left := transferCents(tc.bytes, tc.carry)
-		if cents != tc.cents || left != tc.left {
-			t.Errorf("%s: transferCents(%d, %d) = %d, %d; want %d, %d", tc.name, tc.bytes, tc.carry, cents, left, tc.cents, tc.left)
+		if got := transferCents(tc.bytes); got != tc.cents {
+			t.Errorf("%s: transferCents(%d) = %d; want %d", tc.name, tc.bytes, got, tc.cents)
 		}
-	}
-	// Bytes sent a twelfth at a time cost what the same bytes sent at once do.
-	var total, carry int64
-	for range 12 {
-		var cents int64
-		cents, carry = transferCents(gbBytes/12, carry)
-		total += cents
-	}
-	if want, _ := transferCents(12*(gbBytes/12), 0); total != want {
-		t.Fatalf("twelve hours of a twelfth of a GB charged %d cents, one hour of the same bytes %d", total, want)
 	}
 }

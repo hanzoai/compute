@@ -37,7 +37,7 @@ func TestTheMeterLedgerMovesForwardOnlyAndIsKept(t *testing.T) {
 	if err != nil || len(moved) != 0 {
 		t.Fatalf("an advance to a billed hour, or backwards, moved %v, %v", moved, err)
 	}
-	moved, _ = l.Advance(map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070217", Carry: 12345}})
+	moved, _ = l.Advance(map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070217", Streak: 3}})
 	if !moved["m-00000000000000000001"] {
 		t.Fatal("a later hour did not move the mark")
 	}
@@ -45,7 +45,7 @@ func TestTheMeterLedgerMovesForwardOnlyAndIsKept(t *testing.T) {
 	// A restart: the same disk, a new store.
 	_ = store.Close()
 	activate(t, newReplicaStore(t, root))
-	for machine, want := range map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070217", Carry: 12345}, "m-00000000000000000002": {Hour: "2026070215"}} {
+	for machine, want := range map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070217", Streak: 3}, "m-00000000000000000002": {Hour: "2026070215"}} {
 		if got, err := l.Through(machine); err != nil || got != want {
 			t.Errorf("after a restart %s is billed through %+v (%v), want %+v", machine, got, err, want)
 		}

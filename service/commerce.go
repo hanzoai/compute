@@ -155,7 +155,7 @@ func call(ctx context.Context, method, path, org string, body, out any) error {
 		return fmt.Errorf("commerce: read %s: %w", path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("commerce %s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+		return &commerceRefusal{method: method, path: path, status: resp.StatusCode, body: strings.TrimSpace(string(raw))}
 	}
 	if out == nil {
 		return nil
@@ -164,6 +164,27 @@ func call(ctx context.Context, method, path, org string, body, out any) error {
 		return fmt.Errorf("commerce %s: decode: %w", path, err)
 	}
 	return nil
+}
+
+// commerceRefusal is a commerce answer outside 2xx.
+type commerceRefusal struct {
+	method, path string
+	status       int
+	body         string
+}
+
+func (e *commerceRefusal) Error() string {
+	return fmt.Sprintf("commerce %s %s: %d %s", e.method, e.path, e.status, e.body)
+}
+
+// refusesOrg reports whether err is commerce refusing org's balance for the org's
+// own sake: 402 Payment Required. Commerce answers an org with no money, or none
+// it knows, as 200 with nothing available, which the balance check reads; every
+// other 4xx on this route — 400, 401, 403, 404 — is about visor's request or its
+// identity, and is an outage of ours rather than an answer about the org.
+func refusesOrg(err error) bool {
+	var r *commerceRefusal
+	return errors.As(err, &r) && r.status == http.StatusPaymentRequired
 }
 
 // available is org's spendable prepaid balance in cents.
@@ -177,7 +198,11 @@ func available(ctx context.Context, org string) (int64, error) {
 		Available int64  `json:"available"`
 		Account   string `json:"account"`
 	}
-	if err := call(ctx, http.MethodGet, "/v1/billing/balance?currency=usd", org, nil, &bal); err != nil {
+	// The balance is the org's pool: commerce reads it by the subject named in
+	// ?user=, which for an org's pool is the org itself, and refuses a read that
+	// names none.
+	q := url.Values{"currency": {"usd"}, "user": {org}}
+	if err := call(ctx, http.MethodGet, "/v1/billing/balance?"+q.Encode(), org, nil, &bal); err != nil {
 		return 0, err
 	}
 	if bal.Account != "" && bal.Account != org && !strings.HasPrefix(bal.Account, org+"/") {

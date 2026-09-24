@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -827,18 +828,18 @@ func TestNoRowIsTheHostedAccount(t *testing.T) {
 	}
 }
 
-// Outbound transfer end to end: the sweep reads each machine's NetworkOut from
-// CloudWatch through egress, and charges each settled hour at 12 cents a GB from
-// the first byte, under the hour's own meter id, carrying a part of a cent.
-func TestTransferIsReadThroughEgressAndCharged(t *testing.T) {
+// NetworkOut end to end: the sweep reads each running machine's last settled
+// hour from CloudWatch through egress, charges nothing for it, and stops a
+// machine whose org cannot cover the transfer that rate could run up in an hour.
+func TestNetworkOutIsReadThroughEgressAndStopsAMachineNeverCharges(t *testing.T) {
 	f := hostedFake(t)
 	var mu sync.Mutex
-	var debits []commercetest.Usage
+	var debits []string
 	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/usage"):
 			mu.Lock()
-			debits = append(debits, commercetest.Read(r))
+			debits = append(debits, commercetest.Read(r).ID)
 			mu.Unlock()
 		case strings.HasSuffix(r.URL.Path, "/balance"):
 			_, _ = w.Write([]byte(`{"available":100000,"currency":"usd"}`))
@@ -846,43 +847,73 @@ func TestTransferIsReadThroughEgressAndCharged(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	now := time.Now().Truncate(time.Hour).Add(5 * time.Minute)
+	now := time.Now().UTC().Truncate(time.Hour).Add(5 * time.Minute)
 	h := func(n int) time.Time { return now.Add(time.Duration(-n) * time.Hour) }
-	inst := f.Add(ec2test.Instance{Type: "t3.medium", State: "running", LaunchTime: h(4),
+	heavy := f.Add(ec2test.Instance{Type: "t3.medium", State: "running", LaunchTime: h(4),
 		Tags: map[string]string{orgTagKey: "acme", machineTagKey: "m-99999999999999999999", managedByKey: managedBy}})
-	MarkBilled("m-99999999999999999999", now) // its running hours are paid
-	f.Send(inst.ID, h(4), 5*gbBytes)          // 60 cents
-	f.Send(inst.ID, h(3), gbBytes/24+1)       // just over half a cent, carried
-	f.Send(inst.ID, h(2), gbBytes/24+1)       // and again: one cent, 8 cent-bytes over
-	f.Send(inst.ID, h(1), 7*gbBytes)          // not settled yet: owed next sweep
+	quiet := f.Add(ec2test.Instance{Type: "t3.medium", State: "running", LaunchTime: h(4),
+		Tags: map[string]string{orgTagKey: "beta", machineTagKey: "m-88888888888888888888", managedByKey: managedBy}})
+	MarkBilled("m-99999999999999999999", h(1))
+	MarkBilled("m-88888888888888888888", h(1))
+	f.Send(heavy.ID, h(3), 1<<30)  // settled, and not the last settled hour
+	f.Send(heavy.ID, h(2), 10<<40) // the last settled hour: 10 TiB, $1,228.80 an hour
+	f.Send(heavy.ID, h(1), 1<<30)  // not settled
+	f.Send(quiet.ID, h(2), 1<<30)  // 12 cents an hour
 	MeterRunningMachines(context.Background(), now)
 
 	mu.Lock()
-	got := map[string]int64{}
-	for _, d := range debits {
-		got[d.ID] = d.Cents()
-	}
+	got := append([]string(nil), debits...)
 	mu.Unlock()
-	want := map[string]int64{
-		TransferMeterID("m-99999999999999999999", h(4)): 60,
-		TransferMeterID("m-99999999999999999999", h(2)): 1,
+	if !slices.Equal(got, []string{MeterID("m-88888888888888888888", now)}) {
+		t.Fatalf("debits = %v: the quiet machine's hour, and no transfer", got)
 	}
-	for id, cents := range want {
-		if got[id] != cents {
-			t.Errorf("%s = %d cents, want %d (all debits %v)", id, got[id], cents, got)
-		}
-	}
-	if len(got) != len(want) {
-		t.Errorf("debits = %v, want only %v", got, want)
+	if stops := f.Calls("StopInstances"); len(stops) != 1 || stops[0].Form.Get("InstanceId.1") != heavy.ID {
+		t.Fatalf("stops = %+v, want the heavy machine alone", stops)
 	}
 	if refused := f.Calls("Refused"); len(refused) != 0 {
 		t.Fatalf("egress refused: %s", refused[0].Refused)
 	}
-	if reads := f.Calls("GetMetricData"); len(reads) != 1 || reads[0].Fetch.Host != ec2test.Monitoring {
+	reads := f.Calls("GetMetricData")
+	if len(reads) != 1 || reads[0].Fetch.Host != ec2test.Monitoring {
 		t.Fatalf("CloudWatch reads = %+v", reads)
 	}
-	mark, _ := billed().Through(transferKey("m-99999999999999999999"))
-	if mark.Hour != hourOf(h(2)) || mark.Carry != 8 {
-		t.Fatalf("transfer is billed through %+v, want %s carrying 8 cent-bytes", mark, hourOf(h(2)))
+	if from, to := reads[0].Form.Get("StartTime"), reads[0].Form.Get("EndTime"); from != h(2).Truncate(time.Hour).Format(time.RFC3339) || to != h(1).Truncate(time.Hour).Format(time.RFC3339) {
+		t.Fatalf("CloudWatch was asked for [%s, %s), want the last settled hour", from, to)
+	}
+}
+
+// A NetworkOut read pages by MaxDatapoints and adds up every page; a query
+// CloudWatch could not count fails the read rather than reading as nothing sent.
+func TestNetworkOutPagesAndRefusesAnUncountedQuery(t *testing.T) {
+	f := hostedFake(t)
+	from := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(24 * 30 * time.Hour)
+	var instances []string
+	for i := 0; i < 7; i++ {
+		inst := f.Add(ec2test.Instance{Type: "t3.medium", State: "running", LaunchTime: from,
+			Tags: map[string]string{orgTagKey: "acme", machineTagKey: fmt.Sprintf("m-%020d", i), managedByKey: managedBy}})
+		instances = append(instances, inst.ID)
+		for h := from; h.Before(to); h = h.Add(time.Hour) {
+			f.Send(inst.ID, h, int64(i+1))
+		}
+	}
+	sent, err := readOutbound(context.Background(), instances, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range instances {
+		if n := len(sent[id]); n != 720 {
+			t.Fatalf("%s: %d hours read, want 720", id, n)
+		}
+		if sent[id][hourOf(to.Add(-time.Hour))] != int64(i+1) {
+			t.Fatalf("%s: the last hour reads %d", id, sent[id][hourOf(to.Add(-time.Hour))])
+		}
+	}
+	if pages := len(f.Calls("GetMetricData")); pages != 3 {
+		t.Fatalf("7 x 720 datapoints came in %d pages, want 3 of at most %d", pages, pageDatapoints)
+	}
+	f.Uncounted(instances[3], "InternalError")
+	if _, err := readOutbound(context.Background(), instances, from, to); err == nil || !strings.Contains(err.Error(), "InternalError") {
+		t.Fatalf("an uncounted query read as %v", err)
 	}
 }

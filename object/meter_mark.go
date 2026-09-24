@@ -22,13 +22,13 @@ import (
 )
 
 // MeterMark is how far one ledger key — a hosted machine's running hours, its
-// stopped disk, its outbound transfer — is billed: service.Ledger, kept on the
+// stopped disk, an org's balance reads — has come: service.Ledger, kept on the
 // shared coord engine beside the hour leases, so it survives a restart and a new
 // owner resumes from it. See service/ledger.go for what reads and moves it.
 type MeterMark struct {
 	Machine     string `xorm:"varchar(100) notnull pk" json:"machine"`
 	Hour        string `xorm:"varchar(12)" json:"hour"` // UTC "YYYYMMDDHH"
-	Carry       int64  `json:"carry"`                   // part of a cent owed past Hour
+	Streak      int64  `json:"streak"`                  // hours in a row through Hour a condition held
 	UpdatedTime string `xorm:"varchar(100)" json:"updatedTime"`
 }
 
@@ -43,7 +43,7 @@ func (meterLedger) Through(key string) (service.Mark, error) {
 	if _, err := Shared().Get(&mark); err != nil {
 		return service.Mark{}, err
 	}
-	return service.Mark{Hour: mark.Hour, Carry: mark.Carry}, nil
+	return service.Mark{Hour: mark.Hour, Streak: mark.Streak}, nil
 }
 
 // Advance writes every mark that moves, then ships the coord DB once, so the
@@ -63,9 +63,9 @@ func (meterLedger) Advance(marks map[string]service.Mark) (map[string]bool, erro
 		if existed && mark.Hour >= to.Hour {
 			continue
 		}
-		mark.Hour, mark.Carry, mark.UpdatedTime = to.Hour, to.Carry, now
+		mark.Hour, mark.Streak, mark.UpdatedTime = to.Hour, to.Streak, now
 		if existed {
-			_, err = Shared().ID(key).Cols("hour", "carry", "updated_time").Update(&mark)
+			_, err = Shared().ID(key).Cols("hour", "streak", "updated_time").Update(&mark)
 		} else {
 			_, err = Shared().Insert(&mark)
 		}

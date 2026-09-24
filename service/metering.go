@@ -152,9 +152,11 @@ func DiskMeterID(machineID string, now time.Time) string {
 // whatever anyone pays, so those are debited whatever the balance: recording
 // what happened is not a decision. The CURRENT running hour has not run yet —
 // it is paid for as it starts — so it is debited only if the org's balance
-// covers it, and a machine whose org cannot pay for it is stopped instead. A
-// balance that cannot be read stops nothing: an outage of ours is not a reason
-// to take a customer's machine away, and the next sweep asks again.
+// covers it and the transfer the machine could run up in it (transferCents at
+// the rate it last sent), and a machine whose org cannot cover both is stopped
+// instead. Each org's current hours are decided under its provisioning hold
+// (holdOrg), so a launch and the sweep never both spend what one balance covers.
+// What the sweep does when a balance cannot be read is balanceOf's.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
 	current, _ := parseHour(hourOf(now))
 	var dues []owed
@@ -202,41 +204,40 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		}
 	}
 
-	// The current running hour, against what each org has left. An org already
-	// in debt has a negative balance, and pays for nothing more.
-	left := map[string]int64{}
-	unread := map[string]bool{}
+	// The current running hour, org by org, against what each org has left. An
+	// org already in debt has a negative balance, and pays for nothing more.
+	var orgs []string
+	starting := map[string][]owed{}
 	for _, d := range dues {
 		if !d.running() || halted[d.key] || !d.hours[len(d.hours)-1].Equal(current) {
 			continue
 		}
-		have, asked := left[d.org]
-		if !asked && !unread[d.org] {
-			var err error
-			if have, err = available(ctx, d.org); err != nil {
-				logs.Warning("compute metering: balance of %s unreadable; its machines keep running this hour: %v", d.org, err)
-				unread[d.org] = true
-			} else {
-				left[d.org] = have
-			}
+		if starting[d.org] == nil {
+			orgs = append(orgs, d.org)
 		}
-		if !unread[d.org] && have < d.cents {
-			if err := suspend(ctx, d.org, d.m.Id); err != nil {
-				logs.Warning("compute metering: machine %s (org %s) cannot be paid for and could not be stopped: %v", d.m.Id, d.org, err)
-				continue
-			}
-			logs.Warning("compute metering: machine %s (org %s) stopped: %d cents left, its hour costs %d", d.m.Id, d.org, have, d.cents)
-			continue
-		}
-		if bill(d, current) && !unread[d.org] {
-			left[d.org] = have - d.cents
-		}
+		starting[d.org] = append(starting[d.org], d)
 	}
-
-	// Outbound transfer already happened too, so it is charged whatever the
-	// balance, for every hour settled since the last one billed.
-	m, s := meterTransfer(ctx, machines, now, marks)
-	metered, skipped = metered+m, skipped+s
+	rate := transferRates(ctx, orgs, starting, now)
+	for _, org := range orgs {
+		func() {
+			defer holdOrg(org)()
+			have, known := balanceOf(ctx, org, current, marks)
+			for _, d := range starting[org] {
+				need := d.cents + rate[d.m.Id]
+				if known && have < need {
+					if err := suspend(ctx, org, d.m.Id); err != nil {
+						logs.Warning("compute metering: machine %s (org %s) cannot be paid for and could not be stopped: %v", d.m.Id, org, err)
+						continue
+					}
+					logs.Warning("compute metering: machine %s (org %s) stopped: %d cents left, its hour costs %d and its transfer could cost %d", d.m.Id, org, have, d.cents, rate[d.m.Id])
+					continue
+				}
+				if bill(d, current) {
+					have -= need
+				}
+			}
+		}()
+	}
 
 	if len(marks) > 0 {
 		if _, err := billed().Advance(marks); err != nil {
@@ -246,90 +247,79 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 	return metered, skipped
 }
 
-// transferKey is the ledger key a machine's outbound transfer is marked under.
-func transferKey(machine string) string { return machine + "/transfer" }
+// mostUnread is how many sweeps in a row an org's machines run while its balance
+// cannot be read. The next one stops them.
+const mostUnread = 6
 
-// TransferMeterID names one hour of a machine's outbound transfer.
-func TransferMeterID(machineID string, hour time.Time) string {
-	return "compute-" + machineID + "-transfer-" + HourStamp(hour)
+// readKey is the ledger key of org's balance reads: Hour is the last hour the
+// sweep asked, and Streak how many hours in a row through it the answer could
+// not be read.
+func readKey(org string) string { return "balance/" + org }
+
+// balanceOf is what org can spend on the hour now starting, and whether that is
+// known. A balance read is known, and ends a run of unreadable hours. A balance
+// commerce refuses for the org itself (refusesOrg) is known to be nothing. A
+// balance that cannot be read is not known, and the org's machines run, for
+// mostUnread hours in a row — an outage of ours is not a reason to take a
+// machine away — and after that it is taken as nothing: a balance nobody can
+// read is not credit.
+func balanceOf(ctx context.Context, org string, current time.Time, marks map[string]Mark) (int64, bool) {
+	have, err := available(ctx, org)
+	if err == nil {
+		marks[readKey(org)] = Mark{Hour: hourOf(current)}
+		return have, true
+	}
+	if refusesOrg(err) {
+		logs.Warning("compute metering: commerce refused the balance of %s; its machines stop: %v", org, err)
+		return 0, true
+	}
+	unread := int64(1)
+	if last, lerr := billed().Through(readKey(org)); lerr != nil {
+		logs.Warning("compute metering: read the balance history of %s: %v", org, lerr)
+	} else if prev, ok := parseHour(last.Hour); ok && last.Streak > 0 && prev.Add(time.Hour).Equal(current) {
+		unread = last.Streak + 1
+	}
+	marks[readKey(org)] = Mark{Hour: hourOf(current), Streak: unread}
+	if unread > mostUnread {
+		logs.Warning("compute metering: balance of %s unreadable for %d hours; its machines stop: %v", org, unread, err)
+		return 0, true
+	}
+	logs.Warning("compute metering: balance of %s unreadable (%d of %d hours); its machines keep running this hour: %v", org, unread, mostUnread, err)
+	return 0, false
 }
 
-// meterTransfer charges each machine's outbound transfer for every settled hour
-// it has not been billed for, at TransferCentsPerGB from the first byte: whole
-// cents as they are owed, under the hour's own meter id, and the part of a cent
-// carried in the machine's transfer mark to the next hour. An hour is settled
-// once its datapoints are complete (settle). A machine with no transfer mark is
-// owed from its last start. NetworkOut that cannot be read bills nothing and
-// leaves every hour owed.
-func meterTransfer(ctx context.Context, machines []*Machine, now time.Time, marks map[string]Mark) (metered, skipped int) {
+// transferRates is, by machine, what the transfer of each machine starting an
+// hour could cost over that hour: its NetworkOut in the last settled hour, priced
+// by transferCents. NetworkOut counts in-region traffic too, so this bounds the
+// cost from above; it is what a machine is stopped on, never what it is charged.
+// A NetworkOut that cannot be read is no rate, and stops nothing.
+func transferRates(ctx context.Context, orgs []string, starting map[string][]owed, now time.Time) map[string]int64 {
 	last := now.UTC().Add(-time.Hour - settle).Truncate(time.Hour)
-	type due struct {
-		m     *Machine
-		org   string
-		mark  Mark
-		hours []time.Time
-	}
-	var dues []due
 	var instances []string
-	from := last
-	for _, m := range machines {
-		org := orgFromTag(m.Tag)
-		if org == "" || m.instance == "" {
-			continue
-		}
-		mark, err := billed().Through(transferKey(m.Id))
-		if err != nil {
-			skipped++
-			logs.Warning("compute metering: machine %s transfer not billed: %v", m.Id, err)
-			continue
-		}
-		start := last
-		if h, ok := parseHour(mark.Hour); ok {
-			start = h.Add(time.Hour)
-		} else if t, err := time.Parse(time.RFC3339, m.CreatedTime); err == nil {
-			start = t.UTC().Truncate(time.Hour)
-		}
-		if earliest := last.Add(-mostCatchUp * time.Hour); start.Before(earliest) {
-			start = earliest
-		}
-		if start.After(last) {
-			continue
-		}
-		d := due{m: m, org: org, mark: mark}
-		for h := start; !h.After(last); h = h.Add(time.Hour) {
-			d.hours = append(d.hours, h)
-		}
-		dues = append(dues, d)
-		instances = append(instances, m.instance)
-		if start.Before(from) {
-			from = start
-		}
-	}
-	if len(dues) == 0 {
-		return 0, 0
-	}
-	sent, err := outbound(ctx, instances, from, last.Add(time.Hour))
-	if err != nil {
-		logs.Warning("compute metering: read outbound transfer: %v — every hour stays owed", err)
-		return 0, len(dues)
-	}
-	for _, d := range dues {
-		carry := d.mark.Carry
-		for _, h := range d.hours {
-			cents, left := transferCents(sent[d.m.instance][hourOf(h)], carry)
-			if cents > 0 {
-				if err := RecordCompute(ctx, d.org, projectFromTag(d.m.Tag), cents, d.m.Size+"/transfer", TransferMeterID(d.m.Id, h)); err != nil {
-					skipped++
-					logs.Warning("compute metering: debit transfer of %s hour %s (org %s): %v", d.m.Id, hourOf(h), d.org, err)
-					break
-				}
-				metered++
+	for _, org := range orgs {
+		for _, d := range starting[org] {
+			if d.m.instance != "" {
+				instances = append(instances, d.m.instance)
 			}
-			carry = left
-			marks[transferKey(d.m.Id)] = Mark{Hour: hourOf(h), Carry: carry}
 		}
 	}
-	return metered, skipped
+	if len(instances) == 0 {
+		return nil
+	}
+	sent, err := outbound(ctx, instances, last, last.Add(time.Hour))
+	if err != nil {
+		logs.Warning("compute metering: read outbound transfer: %v — no machine is stopped for its transfer this hour", err)
+		return nil
+	}
+	rate := map[string]int64{}
+	for _, org := range orgs {
+		for _, d := range starting[org] {
+			if cents := transferCents(sent[d.m.instance][hourOf(last)]); cents > 0 {
+				rate[d.m.Id] = cents
+			}
+		}
+	}
+	return rate
 }
 
 // suspend stops org's hosted machine. It is a variable so the sweep can be run
