@@ -36,3 +36,8 @@ commentsRouter*.go
 /visor
 /casvisor
 .DS_Store
+
+# Local symlinks to LLM.md
+CLAUDE.md
+AGENTS.md
+GEMINI.md
