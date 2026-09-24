@@ -21,7 +21,7 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/uuid v1.6.1-0.20241114170450-2d3c2a9cc518
 	github.com/hanzoai/authz v1.10.14
-	github.com/hanzoai/egress/spend v0.1.6-0.20260924004730-6e88aefdd012
+	github.com/hanzoai/egress/spend v0.1.6-0.20260924005904-084403842021
 	github.com/hanzoai/ha v0.2.0
 	github.com/hanzoai/iamsdk/v2 v2.2.3
 	github.com/hanzoai/money v0.2.5
