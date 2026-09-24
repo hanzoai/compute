@@ -775,3 +775,25 @@ func TestAListAsksForSmallPages(t *testing.T) {
 		}
 	}
 }
+
+// A volume, a VPC and a load balancer are built from the same Credential a
+// machine is, so a tenant's own row is refused before the carrier for each.
+func TestATenantsOwnAccountIsRefusedForEveryResource(t *testing.T) {
+	var asked int
+	RegisterCarrier(func(Credential) (*http.Client, error) { asked++; return &http.Client{}, nil })
+	t.Cleanup(func() { RegisterCarrier(nil) })
+	tenant := Credential{Provider: providerDigitalOcean, Name: "do", Tenant: "mallory", Secret: "dop_mallory", Region: "nyc3"}
+
+	if _, err := NewVolumeClient(tenant); !errors.Is(err, ErrTenantNotCarried) {
+		t.Errorf("volume = %v", err)
+	}
+	if _, err := NewVpcClient(tenant); !errors.Is(err, ErrTenantNotCarried) {
+		t.Errorf("vpc = %v", err)
+	}
+	if _, err := NewLoadBalancerClient(tenant); !errors.Is(err, ErrTenantNotCarried) {
+		t.Errorf("load balancer = %v", err)
+	}
+	if asked != 0 {
+		t.Fatalf("the carrier was asked %d times for a tenant's own account", asked)
+	}
+}

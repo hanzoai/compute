@@ -40,17 +40,19 @@ type VpcClientInterface interface {
 	DeleteVpc(name string) error
 }
 
-func NewVpcClient(providerType string, accessKeyId string, accessKeySecret string, region string) (VpcClientInterface, error) {
+func NewVpcClient(c Credential) (VpcClientInterface, error) {
 	// ONE registry. NewMachineClient is the only place a cloud name is matched;
 	// vpc support is a capability of the client it returns, so a cloud
-	// is never listed twice and the two lists can never disagree.
-	c, err := NewMachineClient(Credential{Provider: providerType, KeyID: accessKeyId, Secret: accessKeySecret, Region: region})
+	// is never listed twice and the two lists can never disagree. The
+	// credential is the caller's whole Credential, Tenant included, so a
+	// tenant's own row is refused by the carrier exactly as a machine is.
+	mc, err := NewMachineClient(c)
 	if err != nil {
 		return nil, err
 	}
-	p, ok := c.(VpcCapable)
+	p, ok := mc.(VpcCapable)
 	if !ok {
-		return nil, fmt.Errorf("vpc support not available for provider type: %s", providerType)
+		return nil, fmt.Errorf("vpc support not available for provider type: %s", c.Provider)
 	}
 	return p.Vpcs(), nil
 }

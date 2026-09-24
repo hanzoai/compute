@@ -46,17 +46,19 @@ type VolumeClientInterface interface {
 	ResizeVolume(volumeName string, sizeGB int) error
 }
 
-func NewVolumeClient(providerType string, accessKeyId string, accessKeySecret string, region string) (VolumeClientInterface, error) {
+func NewVolumeClient(c Credential) (VolumeClientInterface, error) {
 	// ONE registry. NewMachineClient is the only place a cloud name is matched;
 	// volume support is a capability of the client it returns, so a cloud
-	// is never listed twice and the two lists can never disagree.
-	c, err := NewMachineClient(Credential{Provider: providerType, KeyID: accessKeyId, Secret: accessKeySecret, Region: region})
+	// is never listed twice and the two lists can never disagree. The
+	// credential is the caller's whole Credential, Tenant included, so a
+	// tenant's own row is refused by the carrier exactly as a machine is.
+	mc, err := NewMachineClient(c)
 	if err != nil {
 		return nil, err
 	}
-	p, ok := c.(VolumeCapable)
+	p, ok := mc.(VolumeCapable)
 	if !ok {
-		return nil, fmt.Errorf("volume support not available for provider type: %s", providerType)
+		return nil, fmt.Errorf("volume support not available for provider type: %s", c.Provider)
 	}
 	return p.Volumes(), nil
 }

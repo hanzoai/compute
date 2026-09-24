@@ -56,17 +56,19 @@ type LoadBalancerClientInterface interface {
 	DeleteLoadBalancer(name string) error
 }
 
-func NewLoadBalancerClient(providerType string, accessKeyId string, accessKeySecret string, region string) (LoadBalancerClientInterface, error) {
+func NewLoadBalancerClient(c Credential) (LoadBalancerClientInterface, error) {
 	// ONE registry. NewMachineClient is the only place a cloud name is matched;
 	// loadbalancer support is a capability of the client it returns, so a cloud
-	// is never listed twice and the two lists can never disagree.
-	c, err := NewMachineClient(Credential{Provider: providerType, KeyID: accessKeyId, Secret: accessKeySecret, Region: region})
+	// is never listed twice and the two lists can never disagree. The
+	// credential is the caller's whole Credential, Tenant included, so a
+	// tenant's own row is refused by the carrier exactly as a machine is.
+	mc, err := NewMachineClient(c)
 	if err != nil {
 		return nil, err
 	}
-	p, ok := c.(LoadBalancerCapable)
+	p, ok := mc.(LoadBalancerCapable)
 	if !ok {
-		return nil, fmt.Errorf("loadbalancer support not available for provider type: %s", providerType)
+		return nil, fmt.Errorf("loadbalancer support not available for provider type: %s", c.Provider)
 	}
 	return p.LoadBalancers(), nil
 }

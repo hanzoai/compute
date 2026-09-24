@@ -46,7 +46,11 @@ func getVolumeClient(owner string, providerName string) (service.VolumeClientInt
 		return nil, fmt.Errorf("provider %q not found for owner %q", providerName, owner)
 	}
 
-	client, err := service.NewVolumeClient(provider.Type, provider.ClientId, provider.ClientSecret, provider.Region)
+	// The row's own account, built the one way every row credential is — so it
+	// says whose account it is, and a tenant's is never carried as compute's.
+	client, err := service.NewVolumeClient(provider.credential(LaunchCredential{
+		KeyID: provider.ClientId, Secret: provider.ClientSecret, Region: provider.Region,
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create volume client: %w", err)
 	}
