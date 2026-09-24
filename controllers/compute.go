@@ -447,6 +447,7 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 	var machine *service.Machine
 	// A machine has one fixed size and does not grow on its own, so the ceiling
 	// the org is authorized for and the hour it is charged are the same number.
+	at := time.Now()
 	err = service.Provision(ctx, org, project, firstHourCents, firstHourCents, spec.InstanceType, func() (string, error) {
 		m, err := service.LaunchOrgMachine(ctx, org, project, spec)
 		if err != nil {
@@ -456,8 +457,8 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 		// Roll a launched event into the analytics datastore (best-effort; never
 		// blocks or fails the launch) — the analytical mirror of the commerce debit.
 		service.EmitCompute(org, service.ComputeLaunched, m, firstHourCents)
-		return service.LaunchCharge(m.Id, time.Now()), nil
-	})
+		return service.LaunchCharge(m.Id, at), nil
+	}, func() { service.MarkBilled(machine.Id, at) })
 	if err != nil {
 		return nil, err
 	}

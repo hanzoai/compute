@@ -223,7 +223,7 @@ func TestProvisionReleasesTheHoldOnRefusal(t *testing.T) {
 		if err := Provision(context.Background(), "acme", "", 100, 100, "s", func() (string, error) {
 			t.Fatal("a refused provision must not run the provision")
 			return "", nil
-		}); err == nil {
+		}, nil); err == nil {
 			t.Fatal("an unfunded org must be refused")
 		}
 	}
@@ -239,7 +239,7 @@ func TestProvisionWithoutARequestIdDebitsNothing(t *testing.T) {
 
 	if err := Provision(context.Background(), "acme", "", 3178, 3178, "gpu-h100x8-640gb", func() (string, error) {
 		return "", nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("a funded provision must be allowed: %v", err)
 	}
 	if _, debits := l.state("acme"); debits != 0 {
@@ -258,7 +258,7 @@ func TestProvisionAuthorizesTheCeilingAndDebitsTheActual(t *testing.T) {
 		l := ledgerOf(t, map[string]int64{"acme": actual})
 		reached := false
 		err := Provision(context.Background(), "acme", "", ceiling, actual, "gpu-h100x8-640gb",
-			func() (string, error) { reached = true; return "p-1", nil })
+			func() (string, error) { reached = true; return "p-1", nil }, nil)
 		if err == nil {
 			t.Fatal("the balance must cover the ceiling, not the opening charge")
 		}
@@ -273,7 +273,7 @@ func TestProvisionAuthorizesTheCeilingAndDebitsTheActual(t *testing.T) {
 	t.Run("a funded org is charged the actual, never the ceiling", func(t *testing.T) {
 		l := ledgerOf(t, map[string]int64{"acme": 100000000})
 		if err := Provision(context.Background(), "acme", "", ceiling, actual, "gpu-h100x8-640gb",
-			func() (string, error) { return "p-1", nil }); err != nil {
+			func() (string, error) { return "p-1", nil }, nil); err != nil {
 			t.Fatalf("a funded org must be allowed: %v", err)
 		}
 		available, debits := l.state("acme")

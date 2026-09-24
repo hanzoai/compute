@@ -221,12 +221,13 @@ func SetOrgMachineState(ctx context.Context, org, id, state string) (bool, error
 		if err != nil {
 			return false, err
 		}
+		at := time.Now()
 		err = Provision(ctx, org, MachineProject(m), cents, cents, m.Size, func() (string, error) {
 			if err := setState(ctx, api, inst, true); err != nil {
 				return "", err
 			}
-			return startCharge(m.Id, time.Now()), nil
-		})
+			return startCharge(m.Id, at), nil
+		}, func() { MarkBilled(m.Id, at) })
 		return err == nil, err
 	case want == "Stopped" && m.State == "Running":
 		if err := setState(ctx, api, inst, false); err != nil {
@@ -680,7 +681,7 @@ func createClusterMetered(ctx context.Context, client clusterCreator, record rec
 			logs.Warning("compute metering: cluster %s (org %s) provisioned but its seed pool was NOT recorded — it will be billed for its first hour only: %v", c.ID, org, err)
 		}
 		return "cluster-" + c.ID, nil
-	})
+	}, nil)
 	if err != nil {
 		return nil, err
 	}

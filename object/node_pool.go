@@ -494,7 +494,7 @@ func createNodePoolMetered(client cloudNodePoolCreator, rate int64, owner, proje
 			// blocks or fails the create) — kind=nodepool for the Clusters board.
 			service.EmitComputeEvent(pool.computeEvent(service.ComputeLaunched, pool.CostPerHour))
 			return "pool-" + pool.PoolID, nil
-		})
+		}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -621,7 +621,7 @@ func scaleNodePoolMetered(client cloudNodePoolScaler, current *service.NodePool,
 			return nil, fmt.Errorf("%w: size %q has no resale price", service.ErrPriceUnavailable, current.Size)
 		}
 		err = service.Provision(context.Background(), owner, project,
-			rate*int64(added), rate*int64(added), current.Size, scale)
+			rate*int64(added), rate*int64(added), current.Size, scale, nil)
 	} else {
 		_, err = scale()
 	}

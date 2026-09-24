@@ -221,8 +221,10 @@ func holdOrg(org string) func() {
 // A failed provision debits nothing. A failed DEBIT does not un-provision — the
 // resource exists and is drawing upstream cost, and refusing to hand it over
 // would leave the customer paying for something they were told they did not get —
-// but it is loud, because nothing reconciles it.
-func Provision(ctx context.Context, org, project string, authorize, debit int64, model string, provision func() (string, error)) error {
+// but it is loud. debited, when given, runs only after the debit succeeded: it is
+// where a caller records what was charged, so a debit that failed is never
+// recorded as paid and whatever reconciles it still sees it owed.
+func Provision(ctx context.Context, org, project string, authorize, debit int64, model string, provision func() (string, error), debited func()) error {
 	defer holdOrg(org)()
 
 	if err := AuthorizeCompute(ctx, org, project, authorize); err != nil {
@@ -237,6 +239,10 @@ func Provision(ctx context.Context, org, project string, authorize, debit int64,
 	}
 	if err := RecordCompute(ctx, org, project, debit, model, requestID); err != nil {
 		logs.Warning("compute metering: debit %s (org %s, %d cents): %v", requestID, org, debit, err)
+		return nil
+	}
+	if debited != nil {
+		debited()
 	}
 	return nil
 }

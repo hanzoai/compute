@@ -266,6 +266,7 @@ func TestMeterMachines_BillsMissedHoursOnce(t *testing.T) {
 	if id := LaunchCharge("gap", launched); id != "compute-gap-2026070215" {
 		t.Fatalf("launch charge = %q", id)
 	}
+	MarkBilled("gap", launched)                                     // the launch's debit landed
 	meterMachines(context.Background(), m, launched.Add(time.Hour)) // 16:05
 	at := time.Date(2026, 7, 2, 20, 10, 0, 0, time.UTC)
 	if metered, _ := meterMachines(context.Background(), m, at); metered != 4 {
@@ -293,11 +294,12 @@ func TestMeterMachines_OwesNothingForStoppedHours(t *testing.T) {
 	recs, mu := fakeCommerce(t)
 	seedCatalog(t, priced("s", 5))
 
-	LaunchCharge("nap", time.Date(2026, 7, 2, 10, 5, 0, 0, time.UTC))
+	MarkBilled("nap", time.Date(2026, 7, 2, 10, 5, 0, 0, time.UTC)) // the launch's debit landed
 	restarted := time.Date(2026, 7, 2, 14, 20, 0, 0, time.UTC)
 	if id := startCharge("nap", restarted); id != "compute-nap-2026070214" {
 		t.Fatalf("start charge = %q", id)
 	}
+	MarkBilled("nap", restarted) // and the start's
 	m := []*Machine{{Id: "nap", Size: "s", Tag: "hanzo-org:acme", CreatedTime: restarted.Format(time.RFC3339)}}
 	meterMachines(context.Background(), m, time.Date(2026, 7, 2, 15, 1, 0, 0, time.UTC))
 	mu.Lock()
@@ -308,19 +310,31 @@ func TestMeterMachines_OwesNothingForStoppedHours(t *testing.T) {
 }
 
 // A start in an hour the launch already billed charges nothing, and a start in a
-// later hour charges that hour once.
+// later hour charges that hour once — once its debit has landed. A start whose
+// debit did not land leaves its hour owed.
 func TestAStartChargesOnlyAnUnbilledHour(t *testing.T) {
 	fakeCommerce(t)
 	at := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
-	LaunchCharge("twice", at)
+	if id := LaunchCharge("twice", at); id != "compute-twice-2026070215" {
+		t.Fatalf("launch charge = %q", id)
+	}
+	if id := startCharge("twice", at); id == "" {
+		t.Fatal("an hour whose launch debit has not landed reads as billed")
+	}
+	MarkBilled("twice", at)
 	if id := startCharge("twice", at.Add(40*time.Minute)); id != "" {
 		t.Fatalf("a start in the launch hour charges %q", id)
 	}
-	if id := startCharge("twice", at.Add(2*time.Hour)); id != "compute-twice-2026070217" {
+	later := at.Add(2 * time.Hour)
+	if id := startCharge("twice", later); id != "compute-twice-2026070217" {
 		t.Fatalf("a later start charges %q", id)
 	}
-	if id := startCharge("twice", at.Add(2*time.Hour+time.Minute)); id != "" {
-		t.Fatalf("a second start in that hour charges %q", id)
+	if id := startCharge("twice", later.Add(time.Minute)); id != "compute-twice-2026070217" {
+		t.Fatalf("a start whose earlier debit did not land names %q, want the same hour's id again", id)
+	}
+	MarkBilled("twice", later)
+	if id := startCharge("twice", later.Add(time.Minute)); id != "" {
+		t.Fatalf("a second start in a billed hour charges %q", id)
 	}
 }
 
@@ -331,9 +345,11 @@ func TestMeterMachines_SkipsLaunchHour(t *testing.T) {
 	recs, mu := fakeCommerce(t)
 	seedCatalog(t, priced("s", 5))
 
-	// Launched at 15:05; the sweep fires later in the SAME clock hour (15:40).
+	// Launched at 15:05, its launch debit landed; the sweep fires later in the
+	// SAME clock hour (15:40).
 	launched := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
 	m := []*Machine{{Id: "777", Size: "s", Tag: "hanzo-org:acme", CreatedTime: launched.Format(time.RFC3339)}}
+	MarkBilled("777", launched)
 
 	// Same hour as launch -> skipped (launch already billed hour 15).
 	metered, _ := meterMachines(context.Background(), m, launched.Add(35*time.Minute))
@@ -455,5 +471,21 @@ func TestMetering_UnconfiguredIsNoop(t *testing.T) {
 	t.Setenv("clientSecret", "shh")
 	if !MeteringConfigured() {
 		t.Fatal("MeteringConfigured() = false with a full identity, want true")
+	}
+}
+
+// A launch whose debit never landed recorded nothing, so the sweep bills its
+// hour: the ledger holds only hours commerce charged.
+func TestMeterMachines_BillsALaunchHourWhoseDebitFailed(t *testing.T) {
+	recs, mu := fakeCommerce(t)
+	seedCatalog(t, priced("s", 5))
+	launched := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
+	LaunchCharge("lost", launched) // named, never debited
+	m := []*Machine{{Id: "lost", Size: "s", Tag: "hanzo-org:acme", CreatedTime: launched.Format(time.RFC3339)}}
+	meterMachines(context.Background(), m, launched.Add(30*time.Minute))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*recs) != 1 || (*recs)[0].usage.ID != "compute-lost-2026070215" {
+		t.Fatalf("debits = %+v, want the launch hour", *recs)
 	}
 }

@@ -702,6 +702,12 @@ func TestTheHourlySweepBillsEachOrgItsRunningMachines(t *testing.T) {
 	f.Add(ec2test.Instance{Type: "t3.medium", State: "running", LaunchTime: earlier, Tags: tags("beta", "m-55555555555555555555")})
 	f.Add(ec2test.Instance{Type: "t3.medium", State: "running", Tags: tags("beta", "m-66666666666666666666")}) // launched this hour
 	f.Add(ec2test.Instance{Type: "t3.medium", State: "stopped", LaunchTime: earlier, Tags: tags("acme", "m-77777777777777777777")})
+	// Every hour before this one is billed, and the machine launched this hour
+	// had its launch debit land.
+	for _, id := range []string{"m-44444444444444444444", "m-55555555555555555555", "m-77777777777777777777"} {
+		MarkBilled(id, time.Now().Add(-time.Hour))
+	}
+	MarkBilled("m-66666666666666666666", time.Now())
 
 	MeterRunningMachines(context.Background(), time.Now())
 
@@ -731,7 +737,7 @@ func TestAStoppedMachinePaysItsDiskOnce(t *testing.T) {
 	seedCatalog(t, offer{slug: "s", listMicros: 37_500 - ipv4MicrosPerHour, diskGB: 200})
 
 	at := func(h int) time.Time { return time.Date(2026, 7, 2, h, 10, 0, 0, time.UTC) }
-	LaunchCharge("rest", at(10))
+	MarkBilled("rest", at(10)) // the launch's debit landed
 	running := &Machine{Id: "rest", Size: "s", Tag: "hanzo-org:acme", State: "Running", CreatedTime: at(10).Format(time.RFC3339)}
 	meterMachines(context.Background(), []*Machine{running}, at(11)) // running 11
 	stopped := &Machine{Id: "rest", Size: "s", Tag: "hanzo-org:acme", State: "Stopped", CreatedTime: at(10).Format(time.RFC3339)}
@@ -740,6 +746,7 @@ func TestAStoppedMachinePaysItsDiskOnce(t *testing.T) {
 	if id := startCharge("rest", at(15)); id != "compute-rest-2026070215" {
 		t.Fatalf("the start charges %q", id)
 	}
+	MarkBilled("rest", at(15)) // and the start's
 	running.CreatedTime = at(15).Format(time.RFC3339)
 	meterMachines(context.Background(), []*Machine{running}, at(16)) // running 16
 

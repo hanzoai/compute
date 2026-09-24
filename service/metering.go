@@ -22,6 +22,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/hanzoai/compute/logs"
@@ -86,10 +87,13 @@ const mostCatchUp = 7 * 24
 // enforcement/suspend on a depleted balance is a separate control. A per-machine
 // error is logged and does not abort the sweep.
 //
-// EXACTLY-ONCE PER HOUR is the Ledger: the sweep advances each machine's mark
-// before it debits and debits only the hours the mark moved over, the launch and
-// a start advance the same mark, and the ticker's per-hour single-flight lease
-// (object.ClaimMeterHour) keeps other replicas from sweeping at all.
+// EXACTLY-ONCE PER HOUR is the Ledger and the meter id together. The sweep
+// debits each owed hour under its own MeterID and moves the machine's mark only
+// over the hours whose debit landed, the launch and a start record their hour
+// the same way, and the ticker's per-hour single-flight lease
+// (object.ClaimMeterHour) keeps other replicas from sweeping at all. A debit
+// that fails leaves its hour owed for the next sweep; a mark that fails to write
+// after its debit landed re-sends that hour's id, which commerce debits once.
 //
 // No-op when metering is unconfigured or when the hosted account is unconfigured
 // — nothing to enumerate, nothing to debit.
@@ -135,75 +139,29 @@ func DiskMeterID(machineID string, now time.Time) string {
 // meterMachines is the pure sweep over a machine set at a fixed wall-clock `now`
 // (injected so the idempotency bucket is deterministic under test). It resolves
 // each machine's org from its tag, prices it from the catalog, finds the hours it
-// owes, advances every mark at once, and debits each owed hour under its own
-// MeterID. Returns (metered hours, skipped). A per-machine failure is logged and
-// skipped — one bad machine never aborts the sweep.
+// owes, and debits them in order under their own meter ids; each ledger key's
+// mark moves over the hours whose debit landed, and the marks are written once,
+// after every debit. Returns (metered hours, skipped). A per-machine failure is
+// logged and skipped — one bad machine never aborts the sweep.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
 	current, _ := parseHour(hourOf(now))
-	var due []owed
 	marks := map[string]string{}
 	for _, m := range machines {
-		org := orgFromTag(m.Tag)
-		if org == "" {
-			skipped++
-			logs.Warning("compute metering: machine %s has no %s tag; skipping (unattributable)", m.Id, orgTagKey)
-			continue
-		}
-		// ONE price resolver, shared with the provision gate. An unresolvable
-		// price is a LOUD skip, never a silent $0 debit — a machine we cannot
-		// price is lost revenue, and the log line is how anyone learns.
-		d := owed{m: m, org: org, key: m.Id, model: m.Size,
-			id: func(h time.Time) string { return MeterID(m.Id, h) }}
-		var err error
-		if m.State == "Stopped" {
-			d.key, d.model = diskKey(m.Id), m.Size+"/stopped"
-			d.id = func(h time.Time) string { return DiskMeterID(m.Id, h) }
-			d.cents, err = StoppedCents(m.Size)
-			if err == nil {
-				d.hours, err = stoppedHours(m, current)
-			}
-		} else {
-			d.cents, err = HourlyCents(m.Size)
-			if err == nil {
-				d.hours, err = unbilled(m, current)
-			}
-		}
+		d, err := owe(m, current)
 		if err != nil {
 			skipped++
 			logs.Warning("compute metering: machine %s not billed: %v", m.Id, err)
 			continue
 		}
-		if len(d.hours) == 0 {
-			continue
-		}
-		// Project is the second attribution dimension recovered from the
-		// machine's own tag (empty == the org's default project). It never changes
-		// the debit destination (always the org), only the metering Actor.
-		d.project = projectFromTag(m.Tag)
-		due = append(due, d)
-		marks[d.key] = hourOf(current)
-	}
-	if len(marks) == 0 {
-		return metered, skipped
-	}
-	// The marks move BEFORE any money does, so a debit that fails under-bills
-	// its hour rather than a retried sweep charging it twice. A write that fails
-	// part-way bills the machines it moved and leaves the rest owed.
-	moved, err := billed().Advance(marks)
-	if err != nil {
-		logs.Warning("compute metering: record billed hours: %v — machines not recorded stay owed", err)
-	}
-	for _, d := range due {
-		if !moved[d.key] {
-			continue
-		}
 		for _, h := range d.hours {
 			if err := RecordCompute(ctx, d.org, d.project, d.cents, d.model, d.id(h)); err != nil {
+				// The hours from here on stay owed, in order, for the next sweep.
 				skipped++
 				logs.Warning("compute metering: debit %s hour %s (org %s): %v", d.key, hourOf(h), d.org, err)
-				continue
+				break
 			}
 			metered++
+			marks[d.key] = hourOf(h)
 			// Roll a running event into the analytics datastore alongside a
 			// running hour's debit (best-effort; never blocks or affects the sweep).
 			if d.key == d.m.Id {
@@ -211,7 +169,38 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			}
 		}
 	}
+	if len(marks) > 0 {
+		if _, err := billed().Advance(marks); err != nil {
+			logs.Warning("compute metering: record billed hours: %v — the next sweep re-sends them under the same ids", err)
+		}
+	}
 	return metered, skipped
+}
+
+// owe is what machine m owes through current: its unbilled hours, what each
+// costs, and the ledger key and meter id they are billed under. An error is a
+// machine that cannot be billed at all — no org, no price, no ledger.
+func owe(m *Machine, current time.Time) (owed, error) {
+	org := orgFromTag(m.Tag)
+	if org == "" {
+		return owed{}, fmt.Errorf("no %s tag (unattributable)", orgTagKey)
+	}
+	// ONE price resolver, shared with the provision gate. An unresolvable price
+	// is a LOUD skip, never a silent $0 debit — a machine we cannot price is
+	// lost revenue, and the log line is how anyone learns.
+	d := owed{m: m, org: org, project: projectFromTag(m.Tag), key: m.Id, model: m.Size,
+		id: func(h time.Time) string { return MeterID(m.Id, h) }}
+	var err error
+	if m.State == "Stopped" {
+		d.key, d.model = diskKey(m.Id), m.Size+"/stopped"
+		d.id = func(h time.Time) string { return DiskMeterID(m.Id, h) }
+		if d.cents, err = StoppedCents(m.Size); err == nil {
+			d.hours, err = stoppedHours(m, current)
+		}
+	} else if d.cents, err = HourlyCents(m.Size); err == nil {
+		d.hours, err = unbilled(m, current)
+	}
+	return d, err
 }
 
 // stoppedHours is every whole clock hour a stopped machine owes for its disk,
@@ -248,9 +237,9 @@ func stoppedHours(m *Machine, current time.Time) ([]time.Time, error) {
 // m.CreatedTime is EC2's LaunchTime, the machine's LAST start, and the machine
 // has run without a stop since, so no hour before it is owed. A machine with a
 // mark owes every hour after the mark from its last start on. A machine with no
-// mark was billed before the ledger held it (its launch or start hour under its
-// own id), so it owes the current hour only, and not even that in the hour it
-// started.
+// mark owes every hour from its last start: a launch or start whose debit failed
+// recorded nothing, so the sweep is what bills that hour. One whose start is
+// unknown owes the current hour.
 func unbilled(m *Machine, current time.Time) ([]time.Time, error) {
 	mark, err := billed().Through(m.Id)
 	if err != nil {
@@ -260,17 +249,14 @@ func unbilled(m *Machine, current time.Time) ([]time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, m.CreatedTime); err == nil {
 		started, known = t.UTC().Truncate(time.Hour), true
 	}
-	var from time.Time
+	from := current
 	if last, ok := parseHour(mark); ok {
 		from = last.Add(time.Hour)
 		if known && started.After(from) {
 			from = started
 		}
-	} else {
-		if known && !started.Before(current) {
-			return nil, nil
-		}
-		from = current
+	} else if known {
+		from = started
 	}
 	if earliest := current.Add(-mostCatchUp * time.Hour); from.Before(earliest) {
 		logs.Warning("compute metering: machine %s owes hours from %s; billing the last %d", m.Id, hourOf(from), mostCatchUp)
@@ -284,29 +270,34 @@ func unbilled(m *Machine, current time.Time) ([]time.Time, error) {
 }
 
 // LaunchCharge names a launch's debit: its first hour, under the id the sweep
-// and a start use for that hour, recorded in the ledger so neither charges it
-// again. The launch hour is owed whatever the ledger says, so a ledger that
-// cannot be written still debits it, and the sweep then owes nothing for the
-// hour the machine started in.
+// and a start use for that hour. It records nothing; MarkBilled does, once the
+// debit has landed.
 func LaunchCharge(machine string, now time.Time) string {
-	if _, err := billed().Advance(map[string]string{machine: hourOf(now)}); err != nil {
-		logs.Warning("compute metering: record launch hour of %s: %v", machine, err)
-	}
 	return MeterID(machine, now)
 }
 
 // startCharge names a start's debit, or "" when its hour is already billed: a
 // machine launched, stopped and started in one clock hour pays for that hour
-// once. A ledger that cannot be written charges nothing here, and the sweep
-// bills the hour from the machine's start.
+// once. A ledger that cannot be read charges nothing here, and the sweep bills
+// the hour from the machine's start.
 func startCharge(machine string, now time.Time) string {
-	moved, err := billed().Advance(map[string]string{machine: hourOf(now)})
+	mark, err := billed().Through(machine)
 	if err != nil {
-		logs.Warning("compute metering: record start hour of %s: %v", machine, err)
+		logs.Warning("compute metering: read billed hours of %s: %v", machine, err)
 		return ""
 	}
-	if !moved[machine] {
+	if mark >= hourOf(now) {
 		return ""
 	}
 	return MeterID(machine, now)
+}
+
+// MarkBilled records machine billed through the hour at falls in. It is called
+// only once that hour's debit has landed, so an hour the ledger holds is an hour
+// commerce charged. A mark that fails to write leaves the hour looking owed, and
+// the next sweep re-sends its id, which commerce debits once.
+func MarkBilled(machine string, at time.Time) {
+	if _, err := billed().Advance(map[string]string{machine: hourOf(at)}); err != nil {
+		logs.Warning("compute metering: record billed hour %s of %s: %v", hourOf(at), machine, err)
+	}
 }
