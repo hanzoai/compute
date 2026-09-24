@@ -357,7 +357,8 @@ func TestACloudThatCannotBeCarriedIsRefused(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "credential directly") {
 		t.Errorf("refusal does not say why: %v", err)
 	}
-	// DigitalOcean, Hetzner and AWS take our transport, so they are carried.
+	// DigitalOcean, Hetzner and AWS take our transport, so the platform's are
+	// carried.
 	for _, p := range []string{providerDigitalOcean, "Hetzner", "AWS"} {
 		if _, err := NewMachineClient(Credential{Provider: p}); err != nil {
 			t.Errorf("%s should be carried, got: %v", p, err)

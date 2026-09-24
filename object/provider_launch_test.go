@@ -209,3 +209,22 @@ func TestCredentialLabelSelectsAccount(t *testing.T) {
 		t.Errorf("two accounts share label %q — a carried launch would collapse them to one KMS key", labels[""])
 	}
 }
+
+// A provider row is its owner's account unless the platform owns it: a tenant's
+// row says whose it is, so the carrier can refuse to spend it as compute, and the
+// platform owner's rows are the platform's accounts.
+func TestACredentialSaysWhoseAccountItIs(t *testing.T) {
+	t.Setenv("platformOwner", "hanzo")
+	tenant := (&Provider{Owner: "mallory", Type: "AWS", Name: "hanzo-compute"}).credential(LaunchCredential{})
+	if tenant.Tenant != "mallory" {
+		t.Errorf("mallory's row reads as tenant %q", tenant.Tenant)
+	}
+	platform := (&Provider{Owner: "hanzo", Type: "DigitalOcean", Name: "do-prod"}).credential(LaunchCredential{})
+	if platform.Tenant != "" {
+		t.Errorf("the platform owner's row reads as tenant %q", platform.Tenant)
+	}
+	t.Setenv("platformOwner", "")
+	if c := (&Provider{Owner: "hanzo", Type: "AWS", Name: "x"}).credential(LaunchCredential{}); c.Tenant != "hanzo" {
+		t.Errorf("with no platform owner every row is a tenant's; hanzo's reads as %q", c.Tenant)
+	}
+}

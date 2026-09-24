@@ -16,11 +16,13 @@ package object
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
-	"github.com/hanzoai/orm/relational/schemas"
+	"github.com/hanzoai/compute/conf"
 	"github.com/hanzoai/compute/service"
 	"github.com/hanzoai/compute/util"
+	"github.com/hanzoai/orm/relational/schemas"
 )
 
 type Provider struct {
@@ -415,10 +417,17 @@ func (p *Provider) launchCredentialNamed(account string) (LaunchCredential, bool
 // (unchanged from the single-account past); an additional key uses its own name.
 // KeyID/Secret are consulted only on the carrier-less path, where visor holds
 // the token itself; under the carrier they are empty and egress attaches the key.
+//
+// A row the platform owner does not own is a tenant's own account, and says so
+// (Tenant), so it is never carried under compute's identity.
 func (p *Provider) credential(c LaunchCredential) service.Credential {
 	label := c.KeyName
 	if label == "" {
 		label = p.Name
+	}
+	tenant := p.Owner
+	if owner := strings.TrimSpace(conf.GetConfigString("platformOwner")); owner != "" && owner == p.Owner {
+		tenant = ""
 	}
 	return service.Credential{
 		Provider: p.Type,
@@ -426,5 +435,6 @@ func (p *Provider) credential(c LaunchCredential) service.Credential {
 		KeyID:    c.KeyID,
 		Secret:   c.Secret,
 		Region:   c.Region,
+		Tenant:   tenant,
 	}
 }

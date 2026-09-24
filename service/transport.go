@@ -15,6 +15,8 @@
 package service
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -60,13 +62,27 @@ func carrierRegistered() bool {
 	return carrier != nil
 }
 
+// ErrTenantNotCarried is a tenant's own cloud account asked of the carrier.
+var ErrTenantNotCarried = errors.New("a tenant's own cloud account is not carried through egress")
+
 // httpFor returns the client for one account. It is the only caller of the
 // registered carrier, so "how does visor reach a cloud" has one answer.
+//
+// The carrier spends as THIS service: egress resolves the account label under
+// compute's own identity, whose org is the platform's. A tenant's provider row
+// names its own label, and carried like that it would reach whatever compute
+// may spend under that name — the platform's own account, if the tenant names
+// its row after one. So a tenant's own account is never carried: egress has no
+// custody that is the tenant's under compute's identity, and borrowing compute's
+// is the one thing that must not happen.
 func httpFor(p Credential) (*http.Client, error) {
 	carrierMu.RLock()
 	c := carrier
 	carrierMu.RUnlock()
 	if c != nil {
+		if p.Tenant != "" {
+			return nil, fmt.Errorf("%w: %s's %s account %q", ErrTenantNotCarried, p.Tenant, p.Provider, p.Name)
+		}
 		return c(p)
 	}
 	return directHTTP(), nil

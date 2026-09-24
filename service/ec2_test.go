@@ -641,20 +641,33 @@ func TestAnEgressRefusalIsSaidAndReadAsUnreachable(t *testing.T) {
 	}
 }
 
-// A customer's own AWS account goes through egress too, under a carrier: the
-// SDK gets anonymous credentials and the Provider row's key is not used.
-func TestABYOAWSAccountIsCarried(t *testing.T) {
-	hostedFake(t)
-	client, err := NewMachineClient(Credential{Provider: "AWS", Name: "theirs", KeyID: "AKIAROWKEY", Secret: "row-secret", Region: "us-east-1"})
+// A tenant's own account is never carried under compute's identity: the
+// carrier spends as compute, whose org is the platform's, so a row named after a
+// platform account would spend the platform's. The carrier is not even asked,
+// for any cloud. The platform's own accounts are carried, AWS anonymous.
+func TestATenantsOwnAccountIsNeverCarried(t *testing.T) {
+	var asked int
+	RegisterCarrier(func(Credential) (*http.Client, error) { asked++; return &http.Client{}, nil })
+	t.Cleanup(func() { RegisterCarrier(nil) })
+
+	for _, provider := range []string{"AWS", providerDigitalOcean, "Hetzner"} {
+		_, err := NewMachineClient(Credential{Provider: provider, Name: "hanzo-compute", Tenant: "mallory",
+			KeyID: "AKIAROWKEY", Secret: "row-secret", Region: "us-east-1"})
+		if !errors.Is(err, ErrTenantNotCarried) {
+			t.Errorf("mallory's %s row under a carrier = %v, want ErrTenantNotCarried", provider, err)
+		}
+	}
+	if asked != 0 {
+		t.Fatalf("the carrier was asked %d times for a tenant's own account", asked)
+	}
+
+	client, err := NewMachineClient(Credential{Provider: "AWS", Name: "platform-aws", Region: "us-east-1"})
 	if err != nil {
-		t.Fatalf("a carried AWS account was refused: %v", err)
+		t.Fatalf("a platform AWS account was refused: %v", err)
 	}
 	carried, ok := client.(MachineAwsClient)
-	if !ok {
-		t.Fatalf("client is %T", client)
-	}
-	if carried.Client.Options().Credentials != nil {
-		t.Fatalf("a carried AWS client holds %T", carried.Client.Options().Credentials)
+	if !ok || carried.Client.Options().Credentials != nil {
+		t.Fatalf("a carried AWS client is %T and holds credentials", client)
 	}
 }
 

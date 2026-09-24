@@ -43,10 +43,11 @@ func NewMachineClient(c Credential) (MachineClientInterface, error) {
 	id, secret, region := c.KeyID, c.Secret, c.Region
 
 	switch c.Provider {
-	// Clouds whose SDK takes our http.Client, so the call can be carried by
-	// egress and this process need never hold the key. An AWS call is signed
-	// rather than carrying its key, so under a carrier its SDK is handed
-	// anonymous credentials and egress signs.
+	// Clouds whose SDK takes our http.Client, so the platform's accounts can be
+	// carried by egress and this process need never hold the key. An AWS call is
+	// signed rather than carrying its key, so under a carrier its SDK is handed
+	// anonymous credentials and egress signs. A tenant's own account is refused
+	// by httpFor above before any of this.
 	case "DigitalOcean":
 		return newMachineDigitalOceanClient(secret, id, region, hc)
 	case "Hetzner":

@@ -28,10 +28,11 @@ import (
 // carry sends every cloud call through hanzoai/egress, so this process holds no
 // cloud credential.
 //
-// Configured, the credentials are egress's: reading this pod's environment,
-// config or memory yields nothing that spends, and AWS — Hanzo's hosted account
-// and a customer's own — is signed there too. Unconfigured, hosted compute
-// refuses, and a bring-your-own Provider row is called directly with the key on
+// Configured, the platform's cloud accounts are egress's: reading this pod's
+// environment, config or memory yields nothing that spends, and Hanzo's hosted
+// AWS account is signed there. A tenant's own Provider row is refused rather
+// than carried, because the carrier spends as compute. Unconfigured, hosted
+// compute refuses, and a bring-your-own row is called directly with the key on
 // the row, which is what a local or single-binary run wants.
 //
 // What visor still holds is its OWN token, and that is the trade rather than an

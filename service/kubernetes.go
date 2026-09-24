@@ -108,6 +108,10 @@ type Credential struct {
 	KeyID    string
 	Secret   string
 	Region   string
+	// Tenant is the org whose OWN account this is — a bring-your-own provider
+	// row — and empty for the platform's. It decides whether the account may
+	// be carried: see httpFor.
+	Tenant string
 }
 
 var (
