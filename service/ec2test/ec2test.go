@@ -12,70 +12,65 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ec2test fakes the hosted EC2 account for tests of visor's hosted
-// compute, and the two services its credentials come from: Hanzo IAM, which
-// mints the `hanzo-compute` app's client_credentials token, and STS, which
-// exchanges that token for the `hanzo-compute` role. One httptest server answers
-// all three; the SDK is pointed at it through its own endpoint variables and IAM
-// through computeIamEndpoint.
+// Package ec2test fakes the hosted EC2 account as compute reaches it: through
+// hanzoai/egress. It is a stand-in egress on a real ZAP listener answering
+// POST /v1/fetch, with EC2's Query API behind it.
 //
-// Each service checks what the real one would. IAM checks the client credential,
-// form-encoded under Basic as RFC 6749 says. STS checks that the web identity is
-// a token IAM minted and that it has not expired, and that the role is the
-// configured one. EC2 accepts only calls signed with a key STS issued and that
-// has not expired. The environment also carries a static AWS key, the way the
-// visor pod carries one for its object store; a call signed with it is refused
-// as AuthFailure, so a client that took it fails every test that reaches EC2.
-// The instance metadata service is not served: a request for it is recorded as
-// an "IMDS" call, which no test expects to see.
+// It checks each fetch the way egress would before signing it: the caller's own
+// bearer, the AWS account hanzo-compute, the endpoint ec2.<region>.amazonaws.com,
+// a form POST to "/". And it checks what egress could not: that the request
+// compute described carries no signature of its own — no Authorization, no
+// X-Amz-* query or form parameter — so nothing in compute signed it. A fetch
+// that fails a check is refused as egress refuses, which the SDK sees as
+// spend.ErrRefused, and is recorded as a "Refused" call.
 package ec2test
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hanzoai/egress/spend"
+	"github.com/zap-proto/zip"
 )
 
-// The configured hosted account.
+// The configured hosted account: Hanzo's, in us-east-1.
 const (
 	Region        = "us-east-1"
-	Subnet        = "subnet-0hosted"
-	SecurityGroup = "sg-0hosted"
-	Image         = "ami-0cpu"
-	GPUImage      = "ami-0gpu"
-)
-
-// The role and the IAM app it trusts. ClientSecret carries characters that
-// only survive the token request if the credential is form-encoded.
-const (
-	RoleARN      = "arn:aws:iam::000000000000:role/hanzo-compute"
-	ClientID     = "hanzo-compute"
-	ClientSecret = "s3cr+t%/compute"
-	// StaticKeyID sits in the environment and must never sign anything.
+	Subnet        = "subnet-0984e347d9bb3e01b"
+	SecurityGroup = "sg-00478a75c50869398"
+	Image         = "ami-0045d7fc2ad003464"
+	GPUImage      = "ami-0c20dc14952c0c073"
+	// Endpoint is the host every hosted EC2 call must be addressed to.
+	Endpoint = "ec2." + Region + ".amazonaws.com"
+	// Account is the label of the account's descriptor in egress's custody.
+	Account = "hanzo-compute"
+	// Token is compute's own IAM token, the only thing it shows egress.
+	Token = "compute-own-iam-token"
+	// StaticKeyID sits in the environment, as the pod's object-store key does,
+	// and must never sign anything.
 	StaticKeyID = "AKIASTORAGEKEY"
-	// RoleKeyPrefix starts every access key STS issues for the role.
-	RoleKeyPrefix = "ASIAHANZOCOMPUTE"
 )
 
-// Call is one request the fake answered: an EC2 action, AssumeRoleWithWebIdentity,
-// "IAMToken" for a token mint, or "IMDS".
+// Call is one fetch the fake answered: the EC2 action it carried, or "Refused"
+// with the reason egress would have given.
 type Call struct {
-	Action string
-	Form   url.Values
-	// KeyID is the access key the request was signed with; empty when unsigned.
-	KeyID string
-	// Client is the IAM client a token mint authenticated as.
-	Client string
+	Action  string
+	Form    url.Values
+	Fetch   spend.Fetch
+	Bearer  string
+	Refused string
 }
 
 // Instance is one instance in the fake account.
@@ -90,9 +85,11 @@ type Instance struct {
 	UserData    string
 }
 
-// Fake is the fake account. Its methods are safe for concurrent use.
+// Fake is the fake account and the egress in front of it. Its methods are safe
+// for concurrent use.
 type Fake struct {
-	URL string
+	// Address is where the stand-in egress listens, host:port over ZAP.
+	Address string
 
 	mu        sync.Mutex
 	calls     []Call
@@ -101,13 +98,7 @@ type Fake struct {
 	images    map[string]image
 	next      int
 	now       time.Time
-
-	// tokens are the IAM tokens minted and keys the role keys issued, each with
-	// its expiry; tokenLife and keyLife are how long the next ones last.
-	tokens    map[string]time.Time
-	keys      map[string]time.Time
-	tokenLife time.Duration
-	keyLife   time.Duration
+	deny      string
 }
 
 type image struct {
@@ -116,19 +107,35 @@ type image struct {
 	snapshotGB int
 }
 
-// New starts a fake account and returns it; Close stops it.
+// New starts a fake account behind a stand-in egress and returns it; the func
+// stops it.
 func New() (*Fake, func()) {
-	f := &Fake{tokens: map[string]time.Time{}, keys: map[string]time.Time{}}
+	f := &Fake{}
 	f.reset()
-	srv := httptest.NewServer(http.HandlerFunc(f.serve))
-	f.URL = srv.URL
-	return f, srv.Close
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	f.Address = l.Addr().String()
+	_ = l.Close()
+
+	app := zip.New(zip.Config{AppName: "egress"})
+	app.Post("/v1/fetch", f.fetch)
+	go func() { _ = app.Listen(f.Address) }()
+	for range 500 {
+		if c, err := net.DialTimeout("tcp", f.Address, time.Second); err == nil {
+			_ = c.Close()
+			return f, func() { _ = app.Shutdown() }
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	panic("ec2test: the stand-in egress never bound " + f.Address)
 }
 
-// Serve starts a fake account for one test and points the hosted account at it
-// through the environment, the way a deployment configures it: the compute* keys
-// (role, IAM client and IAM endpoint among them), the SDK's EC2 and STS endpoint
-// variables, and a static key that must be ignored.
+// Serve starts a fake account for one test and configures the hosted account
+// through the environment the way a deployment does. The caller registers the
+// carrier (Client) — this package cannot, as it sits below the service that
+// owns it.
 func Serve(t testing.TB) *Fake {
 	t.Helper()
 	f, stop := New()
@@ -139,40 +146,40 @@ func Serve(t testing.TB) *Fake {
 	return f
 }
 
-// Env is the environment that points the hosted account at the fake.
+// Client is the carrier's http.Client for one account, as compute's carry()
+// builds it: spend.Client to this egress, presenting Token.
+func (f *Fake) Client(provider, account string) *http.Client {
+	return spend.Client(spend.Config{
+		Network: "tcp", Address: f.Address, Token: Token,
+		Provider: provider, Account: account,
+	})
+}
+
+// Env is the environment that configures the hosted account, and what a pod
+// also carries that must change nothing: an object-store key, and endpoint and
+// credential settings the AWS SDK would read if it were allowed to.
 func (f *Fake) Env() map[string]string {
 	return map[string]string{
-		"computeRegion":          Region,
-		"computeSubnet":          Subnet,
-		"computeSecurityGroup":   SecurityGroup,
-		"computeImage":           Image,
-		"computeGpuImage":        GPUImage,
-		"computeRoleArn":         RoleARN,
-		"computeIamClientId":     ClientID,
-		"computeIamClientSecret": ClientSecret,
-		"computeIamEndpoint":     f.URL,
+		"computeRegion":        Region,
+		"computeSubnet":        Subnet,
+		"computeSecurityGroup": SecurityGroup,
+		"computeImage":         Image,
+		"computeGpuImage":      GPUImage,
 
-		"AWS_ENDPOINT_URL_EC2": f.URL,
-		"AWS_ENDPOINT_URL_STS": f.URL,
-		// Were anything to ask the instance metadata service, it would ask here.
-		"AWS_EC2_METADATA_SERVICE_ENDPOINT": f.URL,
-
-		// The pod's object-store key. It is in the environment and must sign nothing.
-		"AWS_ACCESS_KEY_ID":     StaticKeyID,
-		"AWS_SECRET_ACCESS_KEY": "storage-secret",
-
-		// Nothing from a developer's own AWS setup reaches the test.
+		"AWS_ACCESS_KEY_ID":           StaticKeyID,
+		"AWS_SECRET_ACCESS_KEY":       "storage-secret",
+		"AWS_SESSION_TOKEN":           "storage-session",
+		"AWS_REGION":                  "eu-west-1",
+		"AWS_ENDPOINT_URL":            "https://aws.elsewhere.example",
+		"AWS_ENDPOINT_URL_EC2":        "https://ec2.elsewhere.example",
+		"AWS_ROLE_ARN":                "arn:aws:iam::000000000000:role/somebody-else",
 		"AWS_PROFILE":                 "",
 		"AWS_CONFIG_FILE":             os.DevNull,
 		"AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
-		"AWS_ROLE_ARN":                "",
-		"AWS_WEB_IDENTITY_TOKEN_FILE": "",
 	}
 }
 
-// Reset empties the account and clears every recorded call and refusal. Tokens
-// and role keys already issued stay valid, as a real session outlives what the
-// account holds.
+// Reset empties the account and clears every recorded call and refusal.
 func (f *Fake) Reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -189,24 +196,15 @@ func (f *Fake) reset() {
 	}
 	f.next = 0
 	f.now = time.Now().UTC().Truncate(time.Second)
-	f.tokenLife = time.Hour
-	f.keyLife = time.Hour
+	f.deny = ""
 }
 
-// Lifetimes sets how long the IAM tokens and the role keys minted from now on
-// last.
-func (f *Fake) Lifetimes(token, key time.Duration) {
+// Deny makes the stand-in egress refuse every call from now until Reset, as
+// egress does when the account's role cannot be assumed.
+func (f *Fake) Deny(reason string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.tokenLife, f.keyLife = token, key
-}
-
-// IsRoleKey reports whether id is an access key STS issued for the role.
-func (f *Fake) IsRoleKey(id string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	_, ok := f.keys[id]
-	return ok
+	f.deny = reason
 }
 
 // Refuse answers the next call of action with an EC2 error of code.
@@ -276,43 +274,71 @@ func (f *Fake) Instances() []Instance {
 	return out
 }
 
-// ---- the server ----
+// ---- the stand-in egress ----
 
-var credentialRE = regexp.MustCompile(`Credential=([^/]+)/`)
-
-func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/latest/") {
-		f.mu.Lock()
-		f.calls = append(f.calls, Call{Action: "IMDS"})
-		f.mu.Unlock()
-		http.NotFound(w, r)
-		return
+// fetch is POST /v1/fetch: one described request, checked, answered by the
+// account behind it, and returned the way egress returns an answer that is not
+// JSON — AWS's own bytes and Content-Type.
+func (f *Fake) fetch(c *zip.Ctx) error {
+	var in spend.Fetch
+	if err := json.Unmarshal(c.Body(), &in); err != nil {
+		return zip.ErrBadRequest("not a fetch")
 	}
-	if r.URL.Path == "/v1/iam/oauth/token" {
-		f.mintToken(w, r)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	call := Call{Action: r.PostForm.Get("Action"), Form: r.PostForm}
-	if m := credentialRE.FindStringSubmatch(r.Header.Get("Authorization")); m != nil {
-		call.KeyID = m[1]
-	}
+	form, _ := url.ParseQuery(string(in.Raw))
+	call := Call{Action: form.Get("Action"), Form: form, Fetch: in, Bearer: c.Header("Authorization")}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if why := f.check(in, call.Bearer, form); why != "" {
+		call.Action, call.Refused = "Refused", why
+		f.calls = append(f.calls, call)
+		return zip.Errorf(http.StatusForbidden, "%s", why)
+	}
 	f.calls = append(f.calls, call)
 
-	if call.Action == "AssumeRoleWithWebIdentity" {
-		f.assumeRole(w, call)
-		return
+	rec := httptest.NewRecorder()
+	f.answer(rec, call)
+	return c.JSON(http.StatusOK, spend.Fetched{
+		Status: rec.Code,
+		Raw:    rec.Body.Bytes(),
+		Type:   rec.Header().Get("Content-Type"),
+		Scope:  "org",
+	})
+}
+
+// check is what egress requires of a hosted EC2 fetch, and that the request
+// arrived unsigned.
+func (f *Fake) check(in spend.Fetch, bearer string, form url.Values) string {
+	switch {
+	case f.deny != "":
+		return f.deny
+	case bearer != "Bearer "+Token:
+		return "the caller is not compute: " + bearer
+	case !strings.EqualFold(in.Provider, "aws"):
+		return "provider " + in.Provider
+	case in.Label != Account:
+		return "account " + in.Label
+	case in.Host != Endpoint:
+		return "endpoint " + in.Host
+	case in.Method != http.MethodPost || in.Path != "/":
+		return "not a Query API call: " + in.Method + " " + in.Path
+	case !strings.HasPrefix(in.Type, "application/x-www-form-urlencoded") || (len(in.Body) > 0 && string(in.Body) != "null"):
+		return "not a form: " + in.Type
 	}
-	if until, ok := f.keys[call.KeyID]; !ok || !time.Now().Before(until) {
-		ec2Error(w, http.StatusUnauthorized, "AuthFailure", "request signed with "+strconv.Quote(call.KeyID))
-		return
+	for k := range form {
+		if strings.HasPrefix(strings.ToLower(k), "x-amz-") || strings.EqualFold(k, "Signature") ||
+			strings.EqualFold(k, "AWSAccessKeyId") {
+			return "the request was signed by the caller: " + k
+		}
 	}
+	if u, err := url.Parse(in.Path); err != nil || u.RawQuery != "" {
+		return "a query was sent: " + in.Path
+	}
+	return ""
+}
+
+// answer is the account's answer to one EC2 call.
+func (f *Fake) answer(w http.ResponseWriter, call Call) {
 	if code, ok := f.refuse[call.Action]; ok {
 		delete(f.refuse, call.Action)
 		ec2Error(w, http.StatusBadRequest, code, "refused by the test")
@@ -334,60 +360,6 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		ec2Error(w, http.StatusBadRequest, "InvalidAction", call.Action)
 	}
-}
-
-// mintToken is IAM's client_credentials grant: the client credential arrives
-// form-encoded under Basic, and is decoded before it is compared.
-func (f *Fake) mintToken(w http.ResponseWriter, r *http.Request) {
-	user, pass, ok := r.BasicAuth()
-	id, _ := url.QueryUnescape(user)
-	secret, _ := url.QueryUnescape(pass)
-	_ = r.ParseForm()
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, Call{Action: "IAMToken", Form: r.PostForm, Client: id})
-	w.Header().Set("Content-Type", "application/json")
-	if !ok || id != ClientID || secret != ClientSecret || r.PostForm.Get("grant_type") != "client_credentials" {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"error":"invalid_client","error_description":"client authentication failed"}`)
-		return
-	}
-	f.next++
-	token := fmt.Sprintf("iam-token-%d", f.next)
-	f.tokens[token] = time.Now().Add(f.tokenLife)
-	fmt.Fprintf(w, `{"access_token":%q,"token_type":"Bearer","expires_in":%d}`, token, int(f.tokenLife/time.Second))
-}
-
-// assumeRole is STS's AssumeRoleWithWebIdentity: the web identity must be a live
-// token IAM minted, and the role the configured one.
-func (f *Fake) assumeRole(w http.ResponseWriter, call Call) {
-	until, minted := f.tokens[call.Form.Get("WebIdentityToken")]
-	switch {
-	case !minted:
-		stsError(w, "InvalidIdentityToken", "the web identity was not issued by the trusted provider")
-		return
-	case !time.Now().Before(until):
-		stsError(w, "ExpiredTokenException", "the web identity has expired")
-		return
-	case call.Form.Get("RoleArn") != RoleARN:
-		stsError(w, "AccessDenied", "not authorized to assume "+call.Form.Get("RoleArn"))
-		return
-	}
-	f.next++
-	key := fmt.Sprintf("%s%04d", RoleKeyPrefix, f.next)
-	expires := time.Now().Add(f.keyLife)
-	f.keys[key] = expires
-	w.Header().Set("Content-Type", "text/xml")
-	fmt.Fprintf(w, `<AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
-<AssumeRoleWithWebIdentityResult>
-<Credentials><AccessKeyId>%s</AccessKeyId><SecretAccessKey>role-secret</SecretAccessKey><SessionToken>role-session</SessionToken><Expiration>%s</Expiration></Credentials>
-<SubjectFromWebIdentityToken>%s</SubjectFromWebIdentityToken>
-<AssumedRoleUser><Arn>%s/%s</Arn><AssumedRoleId>AROA:%s</AssumedRoleId></AssumedRoleUser>
-</AssumeRoleWithWebIdentityResult>
-<ResponseMetadata><RequestId>sts-1</RequestId></ResponseMetadata>
-</AssumeRoleWithWebIdentityResponse>`, key, expires.UTC().Format(time.RFC3339), ClientID, xmlText(RoleARN),
-		xmlText(call.Form.Get("RoleSessionName")), xmlText(call.Form.Get("RoleSessionName")))
 }
 
 // indexed collects "prefix.N" form values in N order.
@@ -558,12 +530,6 @@ func ec2Error(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "text/xml")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `<Response><Errors><Error><Code>%s</Code><Message>%s</Message></Error></Errors><RequestID>err-1</RequestID></Response>`, code, xmlText(msg))
-}
-
-func stsError(w http.ResponseWriter, code, msg string) {
-	w.Header().Set("Content-Type", "text/xml")
-	w.WriteHeader(http.StatusBadRequest)
-	fmt.Fprintf(w, `<ErrorResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><Error><Type>Sender</Type><Code>%s</Code><Message>%s</Message></Error><RequestId>sts-err</RequestId></ErrorResponse>`, code, xmlText(msg))
 }
 
 func xmlText(s string) string {

@@ -17,7 +17,8 @@ services:
       IAM_CLIENT_ID: "${IAM_CLIENT_ID:-}"
       IAM_CLIENT_SECRET: "${IAM_CLIENT_SECRET:-}"
       COMMERCE_URL: "${COMMERCE_URL:-}"
-      COMMERCE_TOKEN: "${COMMERCE_TOKEN:-}"
+      EGRESS_ADDRESS: "${EGRESS_ADDRESS:-}"
+      EGRESS_AUDIENCE: "${EGRESS_AUDIENCE:-hanzo-egress}"
     volumes:
       - ./conf:/conf/
   db:

@@ -196,8 +196,8 @@ github.com/hanzoai/csqlite v0.1.2 h1:4DzdgUfKADhzEP66Y30/HwepuBLrwt7NsemJMfrPGl4
 github.com/hanzoai/csqlite v0.1.2/go.mod h1:H31a/O6VXuklR9UBkgY++bmAK5uzVfXPqU0F6P9Wsos=
 github.com/hanzoai/decimal v0.1.2 h1:QUprOn6BSxQCZfj9YwISV+ouPoN0S9p6LZYk7O7JIYA=
 github.com/hanzoai/decimal v0.1.2/go.mod h1:jTNufaSe93avQTuXYP3ns2THBtRPR2SbaC0EdODLAFI=
-github.com/hanzoai/egress/spend v0.1.0 h1:A74tNThhAZaZxLVHWgh8stDY65++sS5iX5h4YDuRrrQ=
-github.com/hanzoai/egress/spend v0.1.0/go.mod h1:30IhO926/EhcGC2kIwPmpzIeswAipUv9pi2ni25LZ4A=
+github.com/hanzoai/egress/spend v0.1.6-0.20260924004730-6e88aefdd012 h1:RNzy4BkAcIutY59rE6q4e05FPIaMdr8Pi8gnXoW656k=
+github.com/hanzoai/egress/spend v0.1.6-0.20260924004730-6e88aefdd012/go.mod h1:SvD9gbgr98eevIJzoIDyqdf++8huHjt2u90LheFltA8=
 github.com/hanzoai/ha v0.2.0 h1:zgIbr3mjeuFfF26lkIKf/47ZM5kYBubWIPjEA24Yu7g=
 github.com/hanzoai/ha v0.2.0/go.mod h1:7G+gwkCWNpVsioNpKpK+x6ECoUYY2N/m/rlgPbxCqrA=
 github.com/hanzoai/iamsdk/v2 v2.2.3 h1:RfxD5if/ZHImderZ65yHGWOT/C5AU5NneE+jKZYAscI=
@@ -393,8 +393,8 @@ github.com/zap-proto/fiber/v3 v3.2.1 h1:k45oKyTwySPtGt8sPz2Ao8OUHc7pDEhai8Np2Ym6
 github.com/zap-proto/fiber/v3 v3.2.1/go.mod h1:eDm2z+ufJrkuE4MeX0Mea4oc/p7/HpXiZjVB+BXCKOA=
 github.com/zap-proto/go v1.3.0 h1:S3rMoawwhH/BbSZ4G8zG05hJoQnMSMDPzIq75diCTqE=
 github.com/zap-proto/go v1.3.0/go.mod h1:914SNGTH6Rv3Yu1MweWJBPEN8FZlo5C39QyhaB0C7Q0=
-github.com/zap-proto/http v0.3.5 h1:ezSuUbF05jxFGpfmScBnzIVTeH1ZGhcDSm7d5yL8Byc=
-github.com/zap-proto/http v0.3.5/go.mod h1:UYfGhDDCetgxs65XSev8Lpf65COg5vKQK+cWwZGh4zQ=
+github.com/zap-proto/http v0.3.11 h1:LdaTSQtxcHRooQMwz0bZGjw+7IuONEwCG3QtLH/fHr0=
+github.com/zap-proto/http v0.3.11/go.mod h1:Gw4Kn/PpF1P+CHJyBQQ3aoFDI3P4p0wsjURFwjPnHzE=
 github.com/zap-proto/mcp v1.0.5 h1:1Hi0KNi4YlWW2zkQUMDK9n3jP3wZaRJ1rseMW9p9F0c=
 github.com/zap-proto/mcp v1.0.5/go.mod h1:cYOsq+33NyW4X8nUVtIs/qtezVovYazw1s0V7mrQBYA=
 github.com/zap-proto/zip v1.34.2 h1:YGL05/p/XJJzv9UVBuQrukA3xDW4zhFTQqt29JikFvk=

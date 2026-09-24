@@ -25,13 +25,14 @@ import (
 	"github.com/hanzoai/compute/service"
 )
 
-// carry sends every cloud call through hanzoai/egress, so this process stops
-// holding cloud credentials.
+// carry sends every cloud call through hanzoai/egress, so this process holds no
+// cloud credential.
 //
-// Unconfigured it does nothing and visor calls clouds directly with the tokens
-// on its Provider rows, which is what it has always done and what a local or
-// single-binary run wants. Configured, the tokens are egress's: reading this
-// pod's environment, config or memory yields nothing that spends.
+// Configured, the credentials are egress's: reading this pod's environment,
+// config or memory yields nothing that spends, and AWS — Hanzo's hosted account
+// and a customer's own — is signed there too. Unconfigured, hosted compute
+// refuses, and a bring-your-own Provider row is called directly with the key on
+// the row, which is what a local or single-binary run wants.
 //
 // What visor still holds is its OWN token, and that is the trade rather than an
 // oversight. A stolen caller token buys metered calls through our meter — rate

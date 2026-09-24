@@ -32,6 +32,7 @@ import (
 
 	"github.com/zap-proto/zip"
 
+	"github.com/hanzoai/compute/service"
 	"github.com/hanzoai/compute/service/commercetest"
 	"github.com/hanzoai/compute/service/ec2test"
 )
@@ -39,15 +40,20 @@ import (
 // hosted is the fake EC2 account for the whole test binary.
 var hosted *ec2test.Fake
 
-// startHosted points the hosted account at a fake for the whole binary and
-// returns its stop.
+// startHosted points the hosted account at a fake for the whole binary, carries
+// every cloud call through the stand-in egress in front of it, and returns its
+// stop.
 func startHosted() func() {
 	f, stop := ec2test.New()
 	for k, v := range f.Env() {
 		_ = os.Setenv(k, v)
 	}
+	service.RegisterCarrier(func(c service.Credential) (*http.Client, error) { return f.Client(c.Provider, c.Name), nil })
 	hosted = f
-	return stop
+	return func() {
+		service.RegisterCarrier(nil)
+		stop()
+	}
 }
 
 // hostedWire stands the hosted machine routes up as routers.Route registers them.
@@ -332,15 +338,15 @@ func TestALaunchTheAccountCannotMakeChargesNothing(t *testing.T) {
 	}
 	t.Setenv("computeSubnet", ec2test.Subnet)
 
-	t.Setenv("computeRoleArn", "")
+	service.RegisterCarrier(nil)
 	env = call(t, app, http.MethodPost, "/v1/machines?owner=acme", cloudLaunch{Name: "web-1", Size: "t3.medium"})
-	if env.Status != "error" || !strings.Contains(env.Msg, "computeRoleArn (COMPUTE_ROLE_ARN)") {
-		t.Fatalf("launch with no role = %+v", env)
+	service.RegisterCarrier(func(c service.Credential) (*http.Client, error) { return hosted.Client(c.Provider, c.Name), nil })
+	if env.Status != "error" || !strings.Contains(env.Msg, "hosted compute needs egress") {
+		t.Fatalf("launch with no egress = %+v", env)
 	}
 	if money.reads != 0 || len(hosted.Calls("")) != 0 {
-		t.Fatal("a launch with no role asked commerce, IAM, STS or EC2")
+		t.Fatal("a launch with no egress asked commerce or the cloud")
 	}
-	t.Setenv("computeRoleArn", ec2test.RoleARN)
 
 	env = call(t, app, http.MethodPost, "/v1/machines?owner=acme", cloudLaunch{Name: "web-1", Size: "t3.medium", Region: "sfo3"})
 	if env.Status != "error" || !strings.Contains(env.Msg, "region sfo3 is not offered") {

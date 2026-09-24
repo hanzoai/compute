@@ -36,8 +36,13 @@ stringData:
     showGithubCorner = false
     defaultColorPrimary = "#fd4444"
     logConfig = {"adapter":"console"}
-    commerceUrl = ${COMMERCE_URL}
-    commerceToken = ${COMMERCE_TOKEN}
+    computeRegion = us-east-1
+    computeSubnet = subnet-0984e347d9bb3e01b
+    computeSecurityGroup = sg-00478a75c50869398
+    computeImage = ami-0045d7fc2ad003464
+    computeGpuImage = ami-0c20dc14952c0c073
+    egressAddress = egress.hanzo.svc:9653
+    egressAudience = hanzo-egress
 ---
 # Credentials should be provisioned via Hanzo KMS or external-secrets operator.
 # Example ExternalSecret (if using external-secrets):
@@ -67,6 +72,3 @@ stringData:
 #     - secretKey: COMMERCE_URL
 #       remoteRef:
 #         key: visor/commerce-url
-#     - secretKey: COMMERCE_TOKEN
-#       remoteRef:
-#         key: visor/commerce-token

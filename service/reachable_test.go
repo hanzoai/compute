@@ -23,8 +23,8 @@ import (
 )
 
 // Presence cannot see a revocation: a configured region reads as configured
-// whether or not the role still works. ComputeReachable spends a real, signed
-// round trip, so a role EC2 refuses is an unreachable account.
+// whether or not the account still answers. ComputeReachable spends a real
+// round trip through egress, so an account EC2 refuses is an unreachable one.
 func TestPresenceCannotSeeARevocation(t *testing.T) {
 	f := hostedFake(t)
 

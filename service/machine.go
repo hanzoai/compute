@@ -44,11 +44,17 @@ func NewMachineClient(c Credential) (MachineClientInterface, error) {
 
 	switch c.Provider {
 	// Clouds whose SDK takes our http.Client, so the call can be carried by
-	// egress and this process need never hold the key.
+	// egress and this process need never hold the key. An AWS call is signed
+	// rather than carrying its key, so under a carrier its SDK is handed
+	// anonymous credentials and egress signs.
 	case "DigitalOcean":
 		return newMachineDigitalOceanClient(secret, id, region, hc)
 	case "Hetzner":
 		return newMachineHetznerClient(secret, id, region, hc)
+	case "AWS":
+		if carrierRegistered() {
+			return MachineAwsClient{Client: carriedEC2(hc, region), region: region}, nil
+		}
 	}
 
 	// Every other cloud builds its own transport, so it would authenticate from

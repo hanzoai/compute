@@ -14,9 +14,10 @@
 
 package service
 
-// These tests drive the hosted account through the real EC2 SDK client, against
-// ec2test's fake account: every call is serialized, signed and sent exactly as it
-// would be to AWS, and the assertions read what arrived.
+// These tests drive the hosted account through the real EC2 SDK client and the
+// real spend carrier, against ec2test's stand-in egress and the fake account
+// behind it: every call is serialized exactly as it would be for AWS, described
+// to egress over ZAP, and the assertions read what arrived.
 
 import (
 	"context"
@@ -32,29 +33,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/hanzoai/egress/spend"
 	"github.com/hanzoai/iamsdk/v2/iamsdk"
 
 	"github.com/hanzoai/compute/service/commercetest"
 	"github.com/hanzoai/compute/service/ec2test"
 )
 
-// hostedFake points the hosted account at a fresh fake account for one test.
+// hostedFake points the hosted account at a fresh fake account for one test and
+// carries every cloud call through the stand-in egress in front of it.
 func hostedFake(t *testing.T) *ec2test.Fake {
 	t.Helper()
 	f := ec2test.Serve(t)
-	forgetHostedClient()
-	t.Cleanup(forgetHostedClient)
+	RegisterCarrier(func(c Credential) (*http.Client, error) { return f.Client(c.Provider, c.Name), nil })
+	t.Cleanup(func() { RegisterCarrier(nil) })
 	return f
-}
-
-// forgetHostedClient drops the cached client, which is bound to the endpoint it
-// was built against.
-func forgetHostedClient() {
-	hosted.Lock()
-	defer hosted.Unlock()
-	hosted.client, hosted.signer = nil, signer{}
 }
 
 // botRegistries answers the IAM user and playground node registrations a bot
@@ -551,17 +544,18 @@ func TestARetriedLaunchStartsOneInstance(t *testing.T) {
 	}
 }
 
-// ---- credentials ----
+// ---- egress ----
 
-// The whole chain, as it runs: the IAM app's client credential, form-encoded
-// under Basic, buys a Hanzo IAM token; the token is the web identity STS takes,
-// unsigned, for the configured role; and every EC2 call is signed with the key
-// that exchange issued. The static key in the environment signs nothing, and
-// nothing asks the instance metadata service.
-func TestEC2IsSignedWithTheAssumedRole(t *testing.T) {
+// The whole path, as it runs: every EC2 call the SDK makes for a launch and a
+// list is described to egress as an unsigned form POST for the account
+// hanzo-compute at ec2.us-east-1.amazonaws.com, under compute's own token, and
+// answered with AWS's XML. The pod's environment carries an AWS key, a session
+// token, a role and endpoint overrides; none of them signs, moves or reaches
+// anything.
+func TestHostedEC2GoesThroughEgressUnsigned(t *testing.T) {
 	f := hostedFake(t)
-	if os.Getenv("AWS_ACCESS_KEY_ID") != ec2test.StaticKeyID {
-		t.Fatal("the test must run with a static key in the environment")
+	if os.Getenv("AWS_ACCESS_KEY_ID") != ec2test.StaticKeyID || os.Getenv("AWS_ENDPOINT_URL_EC2") == "" {
+		t.Fatal("the test must run with a key and an endpoint override in the environment")
 	}
 	if _, err := LaunchOrgMachine(context.Background(), "acme", "", &CreateMachineSpec{Name: "box", InstanceType: "t3.medium"}); err != nil {
 		t.Fatalf("launch: %v", err)
@@ -569,161 +563,98 @@ func TestEC2IsSignedWithTheAssumedRole(t *testing.T) {
 	if _, err := ListOrgMachines("acme", ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-
-	mints := f.Calls("IAMToken")
-	if len(mints) != 1 || mints[0].Client != ec2test.ClientID || mints[0].Form.Get("grant_type") != "client_credentials" {
-		t.Fatalf("IAM token requests = %+v, want one client_credentials grant for %s", mints, ec2test.ClientID)
+	calls := f.Calls("")
+	if refused := f.Calls("Refused"); len(refused) != 0 {
+		t.Fatalf("egress refused %d calls: %s", len(refused), refused[0].Refused)
 	}
-	assumed := f.Calls("AssumeRoleWithWebIdentity")
-	if len(assumed) != 1 || assumed[0].KeyID != "" {
-		t.Fatalf("role exchanges = %+v, want one, unsigned", assumed)
+	if len(calls) < 3 {
+		t.Fatalf("only %d calls reached egress", len(calls))
 	}
-	if got := assumed[0].Form.Get("RoleArn"); got != ec2test.RoleARN {
-		t.Fatalf("assumed %q, want %q", got, ec2test.RoleARN)
-	}
-	if got := assumed[0].Form.Get("WebIdentityToken"); !strings.HasPrefix(got, "iam-token-") {
-		t.Fatalf("the web identity was %q, not the IAM token", got)
-	}
-	if got := assumed[0].Form.Get("RoleSessionName"); got != managedBy {
-		t.Fatalf("session name %q, want %q", got, managedBy)
-	}
-
-	var ec2Calls int
-	for _, c := range f.Calls("") {
-		switch c.Action {
-		case "IAMToken", "AssumeRoleWithWebIdentity":
-		case "IMDS":
-			t.Fatal("the instance metadata service was asked for credentials")
-		default:
-			ec2Calls++
-			if !strings.HasPrefix(c.KeyID, ec2test.RoleKeyPrefix) || !f.IsRoleKey(c.KeyID) {
-				t.Fatalf("%s was signed with %q, not the assumed role's key", c.Action, c.KeyID)
-			}
+	for _, c := range calls {
+		if c.Fetch.Host != ec2test.Endpoint || c.Fetch.Label != ec2test.Account || c.Bearer != "Bearer "+ec2test.Token {
+			t.Fatalf("%s went to %q as %q under %q", c.Action, c.Fetch.Host, c.Fetch.Label, c.Bearer)
 		}
-	}
-	if ec2Calls < 3 {
-		t.Fatalf("only %d EC2 calls: the launch and the list did not both reach the account", ec2Calls)
+		if strings.Contains(string(c.Fetch.Raw), ec2test.StaticKeyID) || strings.Contains(string(c.Fetch.Raw), "storage-") {
+			t.Fatalf("%s carried the pod's key: %s", c.Action, c.Fetch.Raw)
+		}
 	}
 }
 
-// The role's credentials are replaced before they expire, and so is the IAM
-// token they are bought with: a key that expires inside the refresh window is
-// never used again, and a token IAM says is about to lapse is minted anew. With
-// long lifetimes, nothing is fetched twice.
-func TestTheRoleIsRefreshedBeforeItExpires(t *testing.T) {
+// With no egress, hosted compute refuses by name. There is no direct call to
+// fall back to: nothing here can sign one.
+func TestHostedComputeRefusesWithoutEgress(t *testing.T) {
 	f := hostedFake(t)
-	for range 3 {
-		if _, err := ListOrgMachines("acme", ""); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if m, a := len(f.Calls("IAMToken")), len(f.Calls("AssumeRoleWithWebIdentity")); m != 1 || a != 1 {
-		t.Fatalf("long-lived credentials fetched %d tokens and %d roles for three calls, want 1 and 1", m, a)
-	}
+	RegisterCarrier(nil)
 
-	f.Reset()
-	forgetHostedClient()
-	// The role key lives two minutes, inside the five-minute refresh window; the
-	// token lives thirty seconds, inside Identity's one-minute margin.
-	f.Lifetimes(30*time.Second, 2*time.Minute)
-	for range 3 {
-		if _, err := ListOrgMachines("acme", ""); err != nil {
-			t.Fatal(err)
-		}
+	_, err := LaunchOrgMachine(context.Background(), "acme", "", &CreateMachineSpec{Name: "box", InstanceType: "t3.medium"})
+	if !errors.Is(err, errNoEgress) || !strings.Contains(err.Error(), "hosted compute needs egress") {
+		t.Fatalf("launch without egress = %v", err)
 	}
-	assumed := f.Calls("AssumeRoleWithWebIdentity")
-	if len(assumed) != 3 || len(f.Calls("IAMToken")) != 3 {
-		t.Fatalf("short-lived credentials: %d role exchanges and %d token mints for three calls, want 3 and 3",
-			len(assumed), len(f.Calls("IAMToken")))
+	if _, err := ListOrgMachines("acme", ""); !errors.Is(err, errNoEgress) {
+		t.Fatalf("list without egress = %v", err)
 	}
-	seen := map[string]bool{}
-	for _, a := range assumed {
-		tok := a.Form.Get("WebIdentityToken")
-		if seen[tok] {
-			t.Fatalf("a token about to lapse was presented twice: %s", tok)
-		}
-		seen[tok] = true
+	if err := ComputeReachable(context.Background()); !errors.Is(err, errNoEgress) {
+		t.Fatalf("reachable without egress = %v — the sweep would claim an hour it cannot read", err)
 	}
-	keys := map[string]bool{}
-	for _, c := range f.Calls("DescribeInstances") {
-		keys[c.KeyID] = true
-	}
-	if len(keys) != 3 {
-		t.Fatalf("three calls were signed with %d keys, want a fresh key each", len(keys))
+	if n := len(f.Calls("")); n != 0 {
+		t.Fatalf("a refused call reached egress %d times", n)
 	}
 }
 
-// A missing role, client id or client secret refuses every call by name,
-// before anything is asked of IAM, STS or EC2 — and the hourly sweep reads it as
-// an account it cannot reach, so it claims no hour.
-func TestAMissingRoleOrClientRefuses(t *testing.T) {
-	for _, key := range []string{keyRoleARN, keyIAMClientID, keyIAMClientSecret} {
-		t.Run(key, func(t *testing.T) {
-			f := hostedFake(t)
-			t.Setenv(key, "")
-			name := key + " (" + envOf[key] + ")"
-
-			_, err := LaunchOrgMachine(context.Background(), "acme", "", &CreateMachineSpec{Name: "box", InstanceType: "t3.medium"})
-			if err == nil || !strings.Contains(err.Error(), name) {
-				t.Fatalf("launch = %v, want a refusal naming %s", err, name)
-			}
-			if _, err := ListOrgMachines("acme", ""); err == nil || !strings.Contains(err.Error(), name) {
-				t.Fatalf("list = %v, want a refusal naming %s", err, name)
-			}
-			if err := ComputeReachable(context.Background()); err == nil || !strings.Contains(err.Error(), name) {
-				t.Fatalf("reachable = %v, want a refusal naming %s", err, name)
-			}
-			if n := len(f.Calls("")); n != 0 {
-				t.Fatalf("a refused call reached the fake %d times", n)
-			}
-		})
-	}
-}
-
-// A client credential IAM refuses buys no role, and nothing reaches EC2. The
-// caller is told the role could not be assumed, not that the cloud is down.
-func TestARefusedClientAssumesNothing(t *testing.T) {
-	f := hostedFake(t)
-	t.Setenv(keyIAMClientSecret, "stale")
-
-	_, err := ListOrgMachines("acme", "")
-	if err == nil || !errors.Is(err, errRole) {
-		t.Fatalf("list with a refused client = %v, want the role refusal", err)
-	}
-	if len(f.Calls("AssumeRoleWithWebIdentity")) != 0 || len(f.Calls("DescribeInstances")) != 0 {
-		t.Fatal("a refused client reached STS or EC2")
-	}
-	if err := ComputeReachable(context.Background()); err == nil {
-		t.Fatal("an account whose role cannot be assumed read as reachable")
-	}
-}
-
-// The chain holds no key and takes none from the environment: whatever
-// AWS_ACCESS_KEY_ID, AWS_ROLE_ARN or AWS_WEB_IDENTITY_TOKEN_FILE say, the only
-// provider is the web-identity exchange for the configured role.
-func TestTheRoleChainHasNoOtherStep(t *testing.T) {
-	t.Setenv("AWS_ACCESS_KEY_ID", ec2test.StaticKeyID)
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "storage-secret")
-	t.Setenv("AWS_ROLE_ARN", "arn:aws:iam::000000000000:role/somebody-else")
-	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/token")
-	cfg, err := awsConfig(context.Background(), signer{Region: ec2test.Region, RoleARN: ec2test.RoleARN,
-		ClientID: ec2test.ClientID, ClientSecret: ec2test.ClientSecret, IAM: hanzoIAM})
+// Nothing this process builds for EC2 can sign: the client's only credential is
+// anonymous, whatever the environment offers.
+func TestNothingInComputeCanSignAnAWSRequest(t *testing.T) {
+	hostedFake(t)
+	api, region, err := hostedEC2(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache, ok := cfg.Credentials.(*aws.CredentialsCache)
+	if region != ec2test.Region {
+		t.Fatalf("region = %q — the environment's AWS_REGION moved it", region)
+	}
+	// The SDK records anonymous credentials as no provider at all, and a client
+	// with none signs nothing.
+	if api.Options().Credentials != nil {
+		t.Fatalf("the EC2 client holds credentials: %T", api.Options().Credentials)
+	}
+	if api.Options().BaseEndpoint != nil {
+		t.Fatalf("the EC2 client was pointed at %q", *api.Options().BaseEndpoint)
+	}
+}
+
+// Egress refusing — a role it cannot assume, an account with no descriptor —
+// is what the caller hears as such, and the account reads as unreachable, so
+// the hourly sweep claims no hour.
+func TestAnEgressRefusalIsSaidAndReadAsUnreachable(t *testing.T) {
+	f := hostedFake(t)
+	f.Deny("egress: aws: the account's role was not assumed (AccessDenied)")
+
+	_, err := ListOrgMachines("acme", "")
+	if err == nil || !errors.Is(err, spend.ErrRefused) {
+		t.Fatalf("list refused by egress = %v, want spend.ErrRefused", err)
+	}
+	if err := ComputeReachable(context.Background()); err == nil {
+		t.Fatal("an account egress refuses read as reachable")
+	}
+	if n := len(f.Calls("Refused")); n != 2 {
+		t.Fatalf("egress was asked %d times for two operations — a refusal was retried", n)
+	}
+}
+
+// A customer's own AWS account goes through egress too, under a carrier: the
+// SDK gets anonymous credentials and the Provider row's key is not used.
+func TestABYOAWSAccountIsCarried(t *testing.T) {
+	hostedFake(t)
+	client, err := NewMachineClient(Credential{Provider: "AWS", Name: "theirs", KeyID: "AKIAROWKEY", Secret: "row-secret", Region: "us-east-1"})
+	if err != nil {
+		t.Fatalf("a carried AWS account was refused: %v", err)
+	}
+	carried, ok := client.(MachineAwsClient)
 	if !ok {
-		t.Fatalf("credentials are %T, want the SDK cache", cfg.Credentials)
+		t.Fatalf("client is %T", client)
 	}
-	if !cache.IsCredentialsProvider(assumed{}) {
-		t.Fatal("the cache does not hold the role provider")
-	}
-	role, ok := roleCredentials(cfg, hostedConfig().signer).(assumed)
-	if !ok {
-		t.Fatal("the role chain is not the assumed role")
-	}
-	if _, ok := role.CredentialsProvider.(*stscreds.WebIdentityRoleProvider); !ok {
-		t.Fatalf("the role provider is %T, want the web-identity exchange", role.CredentialsProvider)
+	if carried.Client.Options().Credentials != nil {
+		t.Fatalf("a carried AWS client holds %T", carried.Client.Options().Credentials)
 	}
 }
 

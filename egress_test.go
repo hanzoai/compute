@@ -15,9 +15,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,6 +29,7 @@ import (
 	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/compute/service/ec2test"
 )
 
 // stub is a stand-in for egress on the ZAP address visor dials. It records what
@@ -159,10 +162,10 @@ func TestCarry(t *testing.T) {
 		if err := carry(); err != nil {
 			t.Fatalf("an unconfigured visor must start: %v", err)
 		}
-		// AWS builds its own transport, so it is refused ONLY under a carrier.
-		// Building here is what proves none was registered.
+		// Lightsail builds its own transport, so it is refused ONLY under a
+		// carrier. Building here is what proves none was registered.
 		if _, err := service.NewMachineClient(service.Credential{
-			Provider: "AWS", KeyID: "k", Secret: "s", Region: "us-east-1",
+			Provider: "AWS Lightsail", KeyID: "k", Secret: "s", Region: "us-east-1",
 		}); err != nil {
 			t.Errorf("a carrier was registered when none was configured: %v", err)
 		}
@@ -198,9 +201,67 @@ func TestCarry(t *testing.T) {
 		// Under a carrier, a cloud that cannot use one is refused rather than
 		// falling back to holding a key.
 		if _, err := service.NewMachineClient(service.Credential{
-			Provider: "AWS", KeyID: "k", Secret: "s", Region: "us-east-1",
+			Provider: "AWS Lightsail", KeyID: "k", Secret: "s", Region: "us-east-1",
 		}); err == nil {
-			t.Error("AWS was built under a carrier it cannot use — the token would be held here")
+			t.Error("Lightsail was built under a carrier it cannot use — the token would be held here")
 		}
 	})
+}
+
+// Hosted compute as the binary runs it: carry() mints this process's own IAM
+// token with its client credential, scoped to egress, and every EC2 call of a
+// launch, a list, a stop and a terminate goes to egress under that token for the
+// account hanzo-compute. Nothing else is configured and nothing else is held.
+func TestHostedComputeRunsThroughCarry(t *testing.T) {
+	f := ec2test.Serve(t)
+	var mints atomic.Int32
+	iam := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		id, secret, _ := r.BasicAuth()
+		if r.URL.Path != "/v1/iam/oauth/token" || id != "hanzo-visor" || secret != "shh" ||
+			r.PostForm.Get("grant_type") != "client_credentials" || r.PostForm.Get("resource") != "hanzo-egress" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+			return
+		}
+		mints.Add(1)
+		_, _ = w.Write([]byte(`{"access_token":"` + ec2test.Token + `","expires_in":3600}`))
+	}))
+	t.Cleanup(iam.Close)
+	t.Setenv("egressAddress", "tcp://"+f.Address)
+	t.Setenv("egressAudience", "hanzo-egress")
+	t.Setenv("clientId", "hanzo-visor")
+	t.Setenv("clientSecret", "shh")
+	t.Setenv("iamEndpoint", iam.URL)
+	t.Cleanup(func() { service.RegisterCarrier(nil) })
+	if err := carry(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	m, err := service.LaunchOrgMachine(ctx, "acme", "", &service.CreateMachineSpec{Name: "box", InstanceType: "t3.medium"})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if list, err := service.ListOrgMachines("acme", ""); err != nil || len(list) != 1 || list[0].Id != m.Id {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	f.SetState(f.Instances()[0].ID, "running")
+	if changed, err := service.SetOrgMachineState(ctx, "acme", m.Id, "Stopped"); err != nil || !changed {
+		t.Fatalf("stop = %v, %v", changed, err)
+	}
+	if err := service.DeleteOrgMachine("acme", m.Id); err != nil {
+		t.Fatalf("terminate: %v", err)
+	}
+	for _, action := range []string{"RunInstances", "DescribeInstances", "StopInstances", "TerminateInstances"} {
+		if len(f.Calls(action)) == 0 {
+			t.Errorf("%s never reached egress", action)
+		}
+	}
+	if refused := f.Calls("Refused"); len(refused) != 0 {
+		t.Fatalf("egress refused: %s", refused[0].Refused)
+	}
+	if mints.Load() != 1 {
+		t.Errorf("compute minted %d tokens for one session, want 1", mints.Load())
+	}
 }
