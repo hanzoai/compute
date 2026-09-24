@@ -179,9 +179,7 @@ func splitOwnerName(id string) (string, string) {
 //   - the trusted service/app subject (Basic clientId/clientSecret, already
 //     authenticated by ApiFilter as subOwner=="app"; user==nil) → allow — it is
 //     the operator, and its org is the ?owner it supplied;
-//   - a SuperAdmin (service.IsSuperAdmin: acting in the reserved admin org) →
-//     allow; an org admin (IsAdmin) is self-service within its own org and is
-//     not platform-privileged;
+//   - a SuperAdmin (service.IsSuperAdmin) → allow; an org admin is not one;
 //   - a signed-in user whose org owns the machine (user.Owner == objOwner) →
 //     allow (structurally guaranteed, since machine builds objOwner FROM that
 //     same Owner — the mismatch branch is belt-and-suspenders); anyone else /

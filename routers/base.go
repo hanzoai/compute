@@ -82,9 +82,7 @@ func basicAuth(c *zip.Ctx) (id, secret string, ok bool) {
 }
 
 func getUsernameByClientIdSecret(c *zip.Ctx) (string, error) {
-	// The service caller authenticates by Basic only. A client secret in the
-	// query string would be written into every access log and audit record the
-	// request passes through.
+	// Basic only: a secret in the query string lands in logs and audit records.
 	clientId, clientSecret, ok := basicAuth(c)
 	if !ok || clientId == "" || clientSecret == "" {
 		return "", nil

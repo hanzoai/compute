@@ -103,8 +103,7 @@ type Fake struct {
 	deny      string
 	// sent is NetworkOut: bytes by instance id and hour ("YYYYMMDDHH").
 	sent map[string]map[string]int64
-	// uncounted is the StatusCode CloudWatch answers for an instance it cannot
-	// count, by instance id.
+	// uncounted is the StatusCode answered per instance id instead of datapoints.
 	uncounted map[string]string
 }
 
@@ -220,8 +219,7 @@ func (f *Fake) Send(id string, at time.Time, bytes int64) {
 	f.sent[id][hour] += bytes
 }
 
-// Uncounted makes CloudWatch answer status (InternalError, Forbidden) for
-// instance id's NetworkOut from now until Reset.
+// Uncounted makes CloudWatch answer status for instance id until Reset.
 func (f *Fake) Uncounted(id, status string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -543,10 +541,8 @@ func (f *Fake) transition(w http.ResponseWriter, form url.Values, response, stat
 	fmt.Fprintf(w, `<%s xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>state-1</requestId><instancesSet>%s</instancesSet></%s>`, response, b.String(), response)
 }
 
-// metricData is CloudWatch's GetMetricData for NetworkOut: the hourly Sum of
-// each instance asked about, over [StartTime, EndTime), oldest first, at most
-// MaxDatapoints a page — which the caller must set — with the rest behind a
-// NextToken, as CloudWatch pages: a query with more to come is PartialData.
+// metricData is GetMetricData for hourly NetworkOut Sums over [StartTime,
+// EndTime), paged by a required MaxDatapoints and NextToken, as CloudWatch does.
 func (f *Fake) metricData(w http.ResponseWriter, form url.Values) {
 	from, err1 := time.Parse(time.RFC3339, form.Get("StartTime"))
 	to, err2 := time.Parse(time.RFC3339, form.Get("EndTime"))

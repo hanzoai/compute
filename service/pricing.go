@@ -25,11 +25,8 @@ package service
 // a paid product never under-charges. All arithmetic is integer, so the price a
 // quote shows is the price the meter debits, to the cent.
 //
-// Outbound transfer to the internet is the fourth cost, by the GiB. Its price is
-// fixed here, and nothing charges it yet: the one per-instance count EC2 keeps,
-// NetworkOut, is every byte an instance sends, in-region traffic included, which
-// is not the transfer AWS bills. It prices the transfer a machine could run up,
-// which is what the sweep stops a machine for (metering.go).
+// Transfer out is priced per GiB and not charged: NetworkOut, the one count per
+// instance, includes in-region traffic. The sweep stops machines on it.
 const (
 	// feeNum/feeDen is the multiplier over cost: 4/3, list plus one third.
 	feeNum = 4

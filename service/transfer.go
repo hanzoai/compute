@@ -14,16 +14,10 @@
 
 package service
 
-// transfer.go reads what hosted machines sent out: EC2's NetworkOut metric from
-// CloudWatch, through egress like every other call to the hosted account.
-//
-// The request is CloudWatch's Query API — a form POST answered in XML, the same
-// shape as EC2's — built here rather than through the CloudWatch SDK, whose
-// current protocol (RPC v2 CBOR) needs a header egress does not carry.
-// NetworkOut counts every byte an instance's interfaces send, to the internet
-// and to anything else in the region, so it bounds a machine's internet transfer
-// from above and is not a measure of it: the sweep stops on it and charges
-// nothing for it.
+// transfer.go reads EC2's NetworkOut from CloudWatch through egress, with
+// CloudWatch's Query API (form POST, XML answer): the SDK's RPC v2 CBOR protocol
+// needs a header egress does not carry. NetworkOut counts every byte sent,
+// in-region included, so the sweep stops on it and charges nothing for it.
 
 import (
 	"context"
@@ -45,14 +39,10 @@ const settle = 15 * time.Minute
 // mostQueries is how many instances one GetMetricData asks about.
 const mostQueries = 500
 
-// pageDatapoints is the most datapoints one GetMetricData answer carries
-// (MaxDatapoints); more come on the next page, by NextToken. At about a hundred
-// bytes a datapoint and a few hundred a query, a page stays far inside
-// mostAnswer.
+// pageDatapoints is MaxDatapoints: a page of it stays far inside mostAnswer.
 const pageDatapoints = 2000
 
-// mostAnswer is the most bytes of one GetMetricData answer read. An answer
-// longer than that is refused as an error, never parsed short.
+// mostAnswer is the most bytes of one answer read; a longer one is an error.
 const mostAnswer = 1 << 20
 
 // outbound returns how many bytes each instance sent out in each whole hour of
@@ -162,9 +152,7 @@ func metricPage(ctx context.Context, hc *http.Client, region string, batch []str
 			return nil, "", fmt.Errorf("cloudwatch answered a query it was not asked: %q", r.ID)
 		}
 		instance := batch[i]
-		// Complete is every datapoint; PartialData is this page's, with the rest
-		// on the next. Anything else — InternalError, Forbidden — is a count
-		// CloudWatch could not give, and is not taken as nothing sent.
+		// PartialData continues on the next page; any other status is an error.
 		if r.StatusCode != "Complete" && r.StatusCode != "PartialData" {
 			return nil, "", fmt.Errorf("cloudwatch could not count NetworkOut of %s: %q", instance, r.StatusCode)
 		}

@@ -97,9 +97,7 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 		return true
 	}
 
-	// A SuperAdmin — a subject acting in the reserved admin org, which for a
-	// person is a signed member of it — is admitted to every object. The
-	// handlers still write only in the org the subject acts in.
+	// A SuperAdmin (a signed member acting in the admin org) reaches every object.
 	if service.IsSuperAdmin(subOwner) && user != nil && !user.IsDeleted {
 		return true
 	}

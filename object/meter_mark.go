@@ -28,7 +28,7 @@ import (
 type MeterMark struct {
 	Machine     string `xorm:"varchar(100) notnull pk" json:"machine"`
 	Hour        string `xorm:"varchar(12)" json:"hour"` // UTC "YYYYMMDDHH"
-	Streak      int64  `json:"streak"`                  // hours in a row through Hour a condition held
+	Streak      int64  `json:"streak"`                  // length of a run ending at Hour
 	UpdatedTime string `xorm:"varchar(100)" json:"updatedTime"`
 }
 

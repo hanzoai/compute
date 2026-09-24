@@ -38,9 +38,7 @@ type Ledger interface {
 	Advance(marks map[string]Mark) (map[string]bool, error)
 }
 
-// Mark is how far one key has come: the last hour it was billed or asked, and
-// how many hours in a row through that one the key's condition held — for an
-// org's balance, that it could not be read.
+// Mark is a key's last hour, and for an org's balance run (readKey) its length.
 type Mark struct {
 	Hour   string
 	Streak int64

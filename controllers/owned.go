@@ -20,23 +20,14 @@ import (
 	"strings"
 )
 
-// owned is the (owner, name) a write to an org-owned row acts on.
+// owned is the (owner, name) of an org-owned row.
 type owned struct {
 	Owner string
 	Name  string
 }
 
-// ownedWrite is the one rule for which row a write touches. The owner is the org
-// the caller acts in, resolved as every org-scoped route resolves it (principal: a
-// bearer's signed membership of the org it names, or the service caller's named
-// org), and the name is the one the address gives. The requested org is the
-// address's owner, else the body's; a bearer that is not a member of it is
-// refused, so a row of the reserved admin org is written only by a member of
-// admin (IsSuperAdmin). A body naming another owner is refused: the body is what
-// the handler writes, and the address is what authorization was asked about. A
-// body's name is used only by a create, whose address names no row.
-//
-// It returns the target, or a refusal to answer with.
+// ownedWrite returns the row a write acts on: the caller's resolved org and the
+// address's name (the body's, for a create). A body naming another org is refused.
 func (c *ApiController) ownedWrite(body []byte) (owned, string) {
 	target, refusal := c.ownedTarget(body)
 	if refusal == "" && target.Name == "" {
@@ -45,8 +36,7 @@ func (c *ApiController) ownedWrite(body []byte) (owned, string) {
 	return target, refusal
 }
 
-// ownedTarget is ownedWrite for a row whose name the caller may leave to the
-// handler: the name is "" when neither the address nor the body gives one.
+// ownedTarget is ownedWrite with the name left "" when nothing gives one.
 func (c *ApiController) ownedTarget(body []byte) (owned, string) {
 	var claimed owned
 	if err := json.Unmarshal(bodyOrEmpty(body), &claimed); err != nil {
@@ -71,8 +61,7 @@ func (c *ApiController) ownedTarget(body []byte) (owned, string) {
 	return owned{Owner: org, Name: name}, ""
 }
 
-// bodyOrEmpty is a request body as JSON, with no body read as an empty object: a
-// DELETE addressed by its path need send none.
+// bodyOrEmpty reads an empty body as {}.
 func bodyOrEmpty(body []byte) []byte {
 	if len(strings.TrimSpace(string(body))) == 0 {
 		return []byte("{}")

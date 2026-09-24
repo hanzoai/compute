@@ -147,16 +147,10 @@ func DiskMeterID(machineID string, now time.Time) string {
 // after every debit. Returns (metered hours, skipped). A per-machine failure is
 // logged and skipped — one bad machine never aborts the sweep.
 //
-// TWO KINDS OF HOUR, and the difference is who has had the machine. An hour
-// before the current one already ran, and a stopped machine's disk exists
-// whatever anyone pays, so those are debited whatever the balance: recording
-// what happened is not a decision. The CURRENT running hour has not run yet —
-// it is paid for as it starts — so it is debited only if the org's balance
-// covers it and the transfer the machine could run up in it (transferCents at
-// the rate it last sent), and a machine whose org cannot cover both is stopped
-// instead. Each org's current hours are decided under its provisioning hold
-// (holdOrg), so a launch and the sweep never both spend what one balance covers.
-// What the sweep does when a balance cannot be read is balanceOf's.
+// Past hours and a stopped machine's disk are debited whatever the balance. The
+// current running hour is debited only if the org's balance covers it plus the
+// transfer the machine could run up in it (transferRates); otherwise the machine
+// is stopped. Each org's current hours are decided under holdOrg.
 func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (metered, skipped int) {
 	current, _ := parseHour(hourOf(now))
 	var dues []owed
@@ -204,8 +198,7 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		}
 	}
 
-	// The current running hour, org by org, against what each org has left. An
-	// org already in debt has a negative balance, and pays for nothing more.
+	// The current running hour, org by org, against what each org has left.
 	var orgs []string
 	starting := map[string][]owed{}
 	for _, d := range dues {
@@ -247,23 +240,17 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 	return metered, skipped
 }
 
-// mostUnread is how many sweeps in a row an org's machines run while its balance
-// cannot be read. The next one stops them.
+// mostUnread is how many consecutive hours an org's machines run while its
+// balance cannot be read.
 const mostUnread = 6
 
-// readKey is the ledger key of org's unreadable balances: Hour is the last hour
-// the sweep could not read it, and Streak how many hours in a row through that
-// one it could not. A run is consecutive hours; an hour read, or an hour no sweep
-// asked, ends it.
+// readKey is the ledger key of org's run of unreadable balances: Hour is the
+// last such hour, Streak the run's length through it.
 func readKey(org string) string { return "balance/" + org }
 
-// balanceOf is what org can spend on the hour now starting, and whether that is
-// known. A balance read is known, and ends a run of unreadable hours. A balance
-// commerce refuses for the org itself (refusesOrg) is known to be nothing. A
-// balance that cannot be read is not known, and the org's machines run, for
-// mostUnread hours in a row — an outage of ours is not a reason to take a
-// machine away — and after that it is taken as nothing: a balance nobody can
-// read is not credit.
+// balanceOf is what org can spend on the current hour, and whether that is known.
+// A 402 is known to be nothing. Any other failure is unknown, and the machines
+// run, until the run passes mostUnread consecutive hours; then it is nothing.
 func balanceOf(ctx context.Context, org string, current time.Time, marks map[string]Mark) (int64, bool) {
 	have, err := available(ctx, org)
 	if err == nil {
@@ -288,11 +275,9 @@ func balanceOf(ctx context.Context, org string, current time.Time, marks map[str
 	return 0, false
 }
 
-// transferRates is, by machine, what the transfer of each machine starting an
-// hour could cost over that hour: its NetworkOut in the last settled hour, priced
-// by transferCents. NetworkOut counts in-region traffic too, so this bounds the
-// cost from above; it is what a machine is stopped on, never what it is charged.
-// A NetworkOut that cannot be read is no rate, and stops nothing.
+// transferRates is, by machine, transferCents of the NetworkOut it sent in the
+// last settled hour. NetworkOut includes in-region traffic, so this is an upper
+// bound used to stop machines, never to charge. An unreadable NetworkOut is no rate.
 func transferRates(ctx context.Context, orgs []string, starting map[string][]owed, now time.Time) map[string]int64 {
 	last := now.UTC().Add(-time.Hour - settle).Truncate(time.Hour)
 	var instances []string
