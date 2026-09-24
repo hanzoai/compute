@@ -797,3 +797,28 @@ func TestATenantsOwnAccountIsRefusedForEveryResource(t *testing.T) {
 		t.Fatalf("the carrier was asked %d times for a tenant's own account", asked)
 	}
 }
+
+// No provider row reaches the hosted compute account, the SuperAdmin org's
+// included: AWS under hostedLabel is hosted compute's alone, reached through
+// carried. The platform's other rows are carried.
+func TestNoRowIsTheHostedAccount(t *testing.T) {
+	f := hostedFake(t)
+	if _, err := NewMachineClient(Credential{Provider: "AWS", Name: hostedLabel, Region: ec2test.Region}); !errors.Is(err, ErrHostedNotARow) {
+		t.Fatalf("a platform row named %s = %v, want ErrHostedNotARow", hostedLabel, err)
+	}
+	if _, err := NewVolumeClient(Credential{Provider: "AWS", Name: hostedLabel, Region: ec2test.Region}); !errors.Is(err, ErrHostedNotARow) {
+		t.Fatalf("a platform volume row named %s = %v", hostedLabel, err)
+	}
+	if n := len(f.Calls("")); n != 0 {
+		t.Fatalf("a row reached the hosted account %d times", n)
+	}
+	if _, err := ListOrgMachines("acme", ""); err != nil {
+		t.Fatalf("hosted compute itself was refused: %v", err)
+	}
+	if _, err := NewMachineClient(Credential{Provider: "AWS", Name: "platform-aws", Region: ec2test.Region}); err != nil {
+		t.Fatalf("another platform AWS row was refused: %v", err)
+	}
+	if !IsSuperAdmin("admin") || IsSuperAdmin("hanzo") || IsSuperAdmin("") || IsSuperAdmin("Admin") {
+		t.Fatal("IsSuperAdmin is not exactly owner == \"admin\"")
+	}
+}

@@ -65,6 +65,18 @@ func carrierRegistered() bool {
 // ErrTenantNotCarried is a tenant's own cloud account asked of the carrier.
 var ErrTenantNotCarried = errors.New("a tenant's own cloud account is not carried through egress")
 
+// ErrHostedNotARow is a provider row naming the hosted compute account.
+var ErrHostedNotARow = errors.New("the hosted compute account is reached by hosted compute alone, never by a provider row")
+
+// SuperAdminOrg is the reserved org whose membership is platform SuperAdmin,
+// and the one org whose provider rows are the platform's own accounts.
+const SuperAdminOrg = "admin"
+
+// IsSuperAdmin is the one SuperAdmin predicate: owner is the reserved admin org.
+// An org's own administrator is not SuperAdmin, and no other org's rows are the
+// platform's, however that org is named or who is in it.
+func IsSuperAdmin(owner string) bool { return owner == SuperAdminOrg }
+
 // httpFor returns the client for one account. It is the only caller of the
 // registered carrier, so "how does visor reach a cloud" has one answer.
 //
@@ -75,17 +87,35 @@ var ErrTenantNotCarried = errors.New("a tenant's own cloud account is not carrie
 // its row after one. So a tenant's own account is never carried: egress has no
 // custody that is the tenant's under compute's identity, and borrowing compute's
 // is the one thing that must not happen.
+//
+// And no row reaches the hosted compute account: it is AWS under hostedLabel,
+// the one account egress lets compute spend for its hosted machines, and a row
+// of that name would drive it through the bring-your-own path — listing every
+// tenant's instance into the row's org and stopping them. Hosted compute reaches
+// it through carried, and nothing else does.
 func httpFor(p Credential) (*http.Client, error) {
+	if !carrierRegistered() {
+		return directHTTP(), nil
+	}
+	if p.Tenant != "" {
+		return nil, fmt.Errorf("%w: %s's %s account %q", ErrTenantNotCarried, p.Tenant, p.Provider, p.Name)
+	}
+	if p.Provider == "AWS" && p.Name == hostedLabel {
+		return nil, ErrHostedNotARow
+	}
+	return carried(p)
+}
+
+// carried is the registered carrier's client for p, which the caller has already
+// decided may be carried: httpFor for a row, hostedEC2 for the hosted account.
+func carried(p Credential) (*http.Client, error) {
 	carrierMu.RLock()
 	c := carrier
 	carrierMu.RUnlock()
-	if c != nil {
-		if p.Tenant != "" {
-			return nil, fmt.Errorf("%w: %s's %s account %q", ErrTenantNotCarried, p.Tenant, p.Provider, p.Name)
-		}
-		return c(p)
+	if c == nil {
+		return nil, errNoEgress
 	}
-	return directHTTP(), nil
+	return c(p)
 }
 
 // directHTTP is the carrier-less client: visor's own transport, bounded, with no

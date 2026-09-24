@@ -20,17 +20,14 @@ import (
 )
 
 // RegisterCloudCredentials teaches service which cloud accounts this deployment
-// may spend on: the active cloud Providers owned by owner.
+// may spend on: the active cloud Providers of the reserved SuperAdmin org, the
+// one org whose rows are the platform's own accounts.
 //
 // It is the reader half of service.RegisterCredentials. The rows live here and
 // service cannot import object (object imports service), so the source is handed
 // inward — the same direction, and for the same reason, as RegisterMembership.
-//
-// An empty owner registers nothing: the deployment has no platform accounts.
-func RegisterCloudCredentials(owner string) {
-	if owner == "" {
-		return
-	}
+func RegisterCloudCredentials() {
+	owner := service.SuperAdminOrg
 	service.RegisterCredentials(func() ([]service.Credential, error) {
 		providers, err := getActiveCloudProviders(owner)
 		if err != nil {

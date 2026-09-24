@@ -16,10 +16,8 @@ package object
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 
-	"github.com/hanzoai/compute/conf"
 	"github.com/hanzoai/compute/service"
 	"github.com/hanzoai/compute/util"
 	"github.com/hanzoai/orm/relational/schemas"
@@ -418,15 +416,17 @@ func (p *Provider) launchCredentialNamed(account string) (LaunchCredential, bool
 // KeyID/Secret are consulted only on the carrier-less path, where visor holds
 // the token itself; under the carrier they are empty and egress attaches the key.
 //
-// A row the platform owner does not own is a tenant's own account, and says so
-// (Tenant), so it is never carried under compute's identity.
+// A row the SuperAdmin org does not own is a tenant's own account, and says so
+// (Tenant), so it is never carried under compute's identity. Only the reserved
+// admin org's rows are the platform's: any member of any other org may write a
+// row in it, so no other org's rows can stand for the platform.
 func (p *Provider) credential(c LaunchCredential) service.Credential {
 	label := c.KeyName
 	if label == "" {
 		label = p.Name
 	}
 	tenant := p.Owner
-	if owner := strings.TrimSpace(conf.GetConfigString("platformOwner")); owner != "" && owner == p.Owner {
+	if service.IsSuperAdmin(p.Owner) {
 		tenant = ""
 	}
 	return service.Credential{

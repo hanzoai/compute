@@ -171,7 +171,7 @@ func hostedEC2(ctx context.Context) (*ec2.Client, string, error) {
 	if !carrierRegistered() {
 		return nil, "", errNoEgress
 	}
-	hc, err := httpFor(Credential{Provider: "AWS", Name: hostedLabel, Region: region})
+	hc, err := carried(Credential{Provider: "AWS", Name: hostedLabel, Region: region})
 	if err != nil {
 		return nil, "", fmt.Errorf("hosted compute: %w", err)
 	}

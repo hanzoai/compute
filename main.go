@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/hanzoai/ha"
@@ -108,10 +107,10 @@ func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	object.RegisterMembership(ha.Static(object.SelfID()))
 
 	// Which platform Kubernetes accounts this deployment may spend on: the
-	// active cloud Providers owned by platformOwner. Unset registers none. Hosted
-	// machines do not come from here: they run in the EC2 account configured by
-	// the compute* keys (service/ec2.go).
-	object.RegisterCloudCredentials(strings.TrimSpace(conf.GetConfigString("platformOwner")))
+	// active cloud Providers of the reserved SuperAdmin org. Hosted machines do
+	// not come from here: they run in the EC2 account egress holds as
+	// hanzo-compute (service/ec2.go).
+	object.RegisterCloudCredentials()
 
 	// Where each hosted machine's billed hours are kept: the shared store, so a
 	// restart resumes billing from the last hour charged instead of forgetting it.

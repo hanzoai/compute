@@ -210,21 +210,20 @@ func TestCredentialLabelSelectsAccount(t *testing.T) {
 	}
 }
 
-// A provider row is its owner's account unless the platform owns it: a tenant's
-// row says whose it is, so the carrier can refuse to spend it as compute, and the
-// platform owner's rows are the platform's accounts.
+// A provider row is its owner's account unless the reserved SuperAdmin org owns
+// it: a tenant's row says whose it is, so the carrier can refuse to spend it as
+// compute, and only admin's rows are the platform's accounts — not hanzo's, whose
+// members are every Hanzo user, and not any org named in configuration.
 func TestACredentialSaysWhoseAccountItIs(t *testing.T) {
 	t.Setenv("platformOwner", "hanzo")
-	tenant := (&Provider{Owner: "mallory", Type: "AWS", Name: "hanzo-compute"}).credential(LaunchCredential{})
-	if tenant.Tenant != "mallory" {
-		t.Errorf("mallory's row reads as tenant %q", tenant.Tenant)
+	for _, owner := range []string{"mallory", "hanzo", "Admin", "admin-org"} {
+		c := (&Provider{Owner: owner, Type: "AWS", Name: "hanzo-compute"}).credential(LaunchCredential{})
+		if c.Tenant != owner {
+			t.Errorf("%s's row reads as tenant %q", owner, c.Tenant)
+		}
 	}
-	platform := (&Provider{Owner: "hanzo", Type: "DigitalOcean", Name: "do-prod"}).credential(LaunchCredential{})
+	platform := (&Provider{Owner: "admin", Type: "DigitalOcean", Name: "do-prod"}).credential(LaunchCredential{})
 	if platform.Tenant != "" {
-		t.Errorf("the platform owner's row reads as tenant %q", platform.Tenant)
-	}
-	t.Setenv("platformOwner", "")
-	if c := (&Provider{Owner: "hanzo", Type: "AWS", Name: "x"}).credential(LaunchCredential{}); c.Tenant != "hanzo" {
-		t.Errorf("with no platform owner every row is a tenant's; hanzo's reads as %q", c.Tenant)
+		t.Errorf("the SuperAdmin org's row reads as tenant %q", platform.Tenant)
 	}
 }
