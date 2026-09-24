@@ -15,6 +15,7 @@
 package routers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -179,5 +180,40 @@ func TestAWriteLandsOnTheCallersOwnRow(t *testing.T) {
 				t.Errorf("a member of admin could not create admin/platform")
 			}
 		})
+	}
+}
+
+// The service caller authenticates by Basic with this service's own client id
+// and secret. The same pair in the query string, or the secret under another
+// client id, is no subject at all.
+func TestTheServiceCallerIsBasicWithItsOwnId(t *testing.T) {
+	t.Setenv("clientId", "hanzo-visor")
+	t.Setenv("clientSecret", "s3cret")
+	t.Setenv("iamApplication", "visor")
+	app := zip.New(zip.Config{})
+	var got string
+	app.Get("/v1/x", func(c *zip.Ctx) error {
+		got, _ = getUsernameByClientIdSecret(c)
+		return nil
+	})
+	for _, tc := range []struct {
+		name, query, basic, want string
+	}{
+		{"Basic with its own pair", "", "hanzo-visor:s3cret", "app/visor"},
+		{"the pair in the query", "?clientId=hanzo-visor&clientSecret=s3cret", "", ""},
+		{"the secret under another id", "", "other-app:s3cret", ""},
+		{"a wrong secret", "", "hanzo-visor:guess", ""},
+	} {
+		req := httptest.NewRequest("GET", "/v1/x"+tc.query, nil)
+		if tc.basic != "" {
+			req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(tc.basic)))
+		}
+		got = "unset"
+		if _, err := app.Test(req); err != nil {
+			t.Fatal(err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: subject %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

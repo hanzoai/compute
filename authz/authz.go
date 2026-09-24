@@ -20,8 +20,9 @@ import (
 	authz "github.com/hanzoai/authz"
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
-	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/service"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 )
 
 var Enforcer *authz.Enforcer
@@ -63,7 +64,6 @@ m = (r.subOwner == p.subOwner || p.subOwner == "*") && (r.subName == p.subName |
 
 	if true {
 		ruleText := `
-p, built-in, *, *, *, *, *
 p, app, *, *, *, *, *
 p, *, *, POST, /v1/signin, *, *
 p, *, *, POST, /v1/signout, *, *
@@ -94,6 +94,13 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 	}
 
 	if subOwner == "app" {
+		return true
+	}
+
+	// A SuperAdmin — a subject acting in the reserved admin org, which for a
+	// person is a signed member of it — is admitted to every object. The
+	// handlers still write only in the org the subject acts in.
+	if service.IsSuperAdmin(subOwner) && user != nil && !user.IsDeleted {
 		return true
 	}
 

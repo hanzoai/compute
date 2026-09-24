@@ -23,6 +23,7 @@ import (
 	"github.com/zap-proto/zip"
 
 	"github.com/hanzoai/compute/object"
+	"github.com/hanzoai/compute/service"
 	"github.com/hanzoai/compute/util"
 )
 
@@ -178,7 +179,9 @@ func splitOwnerName(id string) (string, string) {
 //   - the trusted service/app subject (Basic clientId/clientSecret, already
 //     authenticated by ApiFilter as subOwner=="app"; user==nil) → allow — it is
 //     the operator, and its org is the ?owner it supplied;
-//   - a signed-in global admin (`built-in` owner or IsAdmin) → allow;
+//   - a SuperAdmin (service.IsSuperAdmin: acting in the reserved admin org) →
+//     allow; an org admin (IsAdmin) is self-service within its own org and is
+//     not platform-privileged;
 //   - a signed-in user whose org owns the machine (user.Owner == objOwner) →
 //     allow (structurally guaranteed, since machine builds objOwner FROM that
 //     same Owner — the mismatch branch is belt-and-suspenders); anyone else /
@@ -197,8 +200,7 @@ func authorize(user *iamsdk.User, machineId string) error {
 	if user.IsForbidden || user.IsDeleted {
 		return zip.ErrForbidden("Unauthorized operation")
 	}
-	// Global admin: the `built-in` org or an explicit admin flag.
-	if user.Owner == "built-in" || user.IsAdmin {
+	if service.IsSuperAdmin(user.Owner) {
 		return nil
 	}
 	if user.Owner == objOwner {

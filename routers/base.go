@@ -15,6 +15,7 @@
 package routers
 
 import (
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -81,19 +82,20 @@ func basicAuth(c *zip.Ctx) (id, secret string, ok bool) {
 }
 
 func getUsernameByClientIdSecret(c *zip.Ctx) (string, error) {
+	// The service caller authenticates by Basic only. A client secret in the
+	// query string would be written into every access log and audit record the
+	// request passes through.
 	clientId, clientSecret, ok := basicAuth(c)
-	if !ok {
-		clientId = c.Query("clientId")
-		clientSecret = c.Query("clientSecret")
-	}
-
-	if clientId == "" || clientSecret == "" {
+	if !ok || clientId == "" || clientSecret == "" {
 		return "", nil
 	}
 
 	applicationName := conf.GetConfigString("iamApplication")
-	if clientSecret != conf.GetConfigString("clientSecret") {
-		return "", fmt.Errorf("Incorrect client secret for application: %s", applicationName)
+	wantId, wantSecret := conf.GetConfigString("clientId"), conf.GetConfigString("clientSecret")
+	if wantId == "" || wantSecret == "" ||
+		subtle.ConstantTimeCompare([]byte(clientId), []byte(wantId)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(clientSecret), []byte(wantSecret)) != 1 {
+		return "", fmt.Errorf("incorrect client credentials for application: %s", applicationName)
 	}
 
 	return fmt.Sprintf("app/%s", applicationName), nil
