@@ -196,8 +196,8 @@ github.com/hanzoai/csqlite v0.1.2 h1:4DzdgUfKADhzEP66Y30/HwepuBLrwt7NsemJMfrPGl4
 github.com/hanzoai/csqlite v0.1.2/go.mod h1:H31a/O6VXuklR9UBkgY++bmAK5uzVfXPqU0F6P9Wsos=
 github.com/hanzoai/decimal v0.1.2 h1:QUprOn6BSxQCZfj9YwISV+ouPoN0S9p6LZYk7O7JIYA=
 github.com/hanzoai/decimal v0.1.2/go.mod h1:jTNufaSe93avQTuXYP3ns2THBtRPR2SbaC0EdODLAFI=
-github.com/hanzoai/egress/spend v0.1.6-0.20260924005904-084403842021 h1:L9DwYerw7I2sGn4v5t39F7+JM73LjjLCOAyLCI+02yo=
-github.com/hanzoai/egress/spend v0.1.6-0.20260924005904-084403842021/go.mod h1:SvD9gbgr98eevIJzoIDyqdf++8huHjt2u90LheFltA8=
+github.com/hanzoai/egress/spend v0.1.6-0.20260924031008-3a53b7cfa057 h1:rWP+/JeC+UE28KYYE7nXd5aMRWFD/3Mx2IyJJRtPlpo=
+github.com/hanzoai/egress/spend v0.1.6-0.20260924031008-3a53b7cfa057/go.mod h1:SvD9gbgr98eevIJzoIDyqdf++8huHjt2u90LheFltA8=
 github.com/hanzoai/ha v0.2.0 h1:zgIbr3mjeuFfF26lkIKf/47ZM5kYBubWIPjEA24Yu7g=
 github.com/hanzoai/ha v0.2.0/go.mod h1:7G+gwkCWNpVsioNpKpK+x6ECoUYY2N/m/rlgPbxCqrA=
 github.com/hanzoai/iamsdk/v2 v2.2.3 h1:RfxD5if/ZHImderZ65yHGWOT/C5AU5NneE+jKZYAscI=
