@@ -1,59 +1,46 @@
 # Hanzo Compute
 
-**The multi-cloud compute plane for Hanzo Cloud — machines, GPUs, and clusters across AWS, GCP, Azure, DigitalOcean, and bare metal.**
+**Machines and GPUs for Hanzo Cloud, launched in Hanzo's own AWS account and billed by the hour.**
 
-![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8) ![Compute](https://img.shields.io/badge/compute-AWS%20%C2%B7%20GCP%20%C2%B7%20Azure%20%C2%B7%20DO-informational) ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8) ![Compute](https://img.shields.io/badge/compute-AWS%20%C2%B7%20Hetzner-informational) ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-Hanzo Visor manages physical, virtual, and containerized compute across multiple cloud providers. It allows tenants to launch, resize, and terminate machines, configure GPU accelerators, attach block storage, and connect BYO Kubernetes clusters under one unified API (`api.hanzo.ai/v1/visor/*`) and console interface.
+Compute launches, starts, stops and terminates machines for an org, prices every size from one catalog, and debits the org's prepaid balance through Hanzo Commerce. It holds no cloud credential: every call to a cloud goes through [hanzoai/egress](https://github.com/hanzoai/egress), which keeps the account's credential in KMS, signs the request in memory and returns only the answer.
 
 ## Features
 
-- **Multi-Cloud Compute Passthrough** — Native drivers for AWS EC2, Google Compute Engine, Azure Virtual Machines, DigitalOcean Droplets, and Hetzner.
-- **BYO Kubernetes Clusters** — Attach external clusters via KMS-sealed kubeconfig credentials into the unified fleet.
-- **Unified Identity & Access** — Tenant isolation and user authentication powered by [Hanzo IAM](https://github.com/hanzoai/iam) (`hanzo.id`).
-- **Integrated Metering & Spend Caps** — Real-time compute usage attribution (`hanzo.compute_usage`) and billing gates integrated with Hanzo Commerce.
-- **Block Storage Orchestration** — Dynamic provisioning, resizing, snapshotting, and attaching of cloud block volumes.
+- **Hosted machines** — EC2 in Hanzo's account, x86_64 CPU and GPU sizes, one encrypted gp3 root volume each, IMDSv2 only.
+- **No key in compute** — AWS is reached through egress, which assumes the `hanzo-compute` role with its own IAM identity. A provider row stores a label and a region, never a key, and a write carrying one is refused.
+- **Per-org identity** — Hanzo IAM (`hanzo.id`) bearer tokens, scoped by the org a caller is a signed member of. The one platform privilege is acting in the `admin` org.
+- **Metering** — the first hour is authorized and debited before a launch; every later running hour, and a stopped machine's disk, is debited hourly. A machine its org cannot pay for is stopped.
 
 ## Architecture
 
-Visor acts as the compute engine behind the unified Hanzo Cloud binary:
+```
+  console.hanzo.ai / api.hanzo.ai
+                │
+                ▼
+        Hanzo Compute ──── balance, debits ───▶ Hanzo Commerce
+                │
+                │ ZAP, its own IAM token
+                ▼
+          hanzoai/egress ── KMS: cloud/aws/hanzo-compute/credential
+                │
+                │ SigV4, signed in memory
+                ▼
+       EC2 · CloudWatch (us-east-1)
+```
 
-```
-                  ┌──────────────────────┐
-                  │    console.hanzo.ai  │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │     Hanzo Cloud      │
-                  │  (/v1/visor/clusters)│
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │     Hanzo Visor      │
-                  │    (Compute Plane)   │
-                  └──────────┬───────────┘
-         ┌────────────┬──────┴───────┬────────────┐
-         ▼            ▼              ▼            ▼
-     ┌───────┐   ┌─────────┐   ┌───────────┐  ┌───────┐
-     │  AWS  │   │   GCP   │   │   Azure   │  │  DO   │
-     │ (EC2) │   │  (GCE)  │   │   (VMs)   │  │(DOKS) │
-     └───────┘   └─────────┘   └───────────┘  └───────┘
-```
+The role egress assumes, and what it may do, is in egress's [`deploy/aws`](https://github.com/hanzoai/egress/tree/main/deploy/aws).
 
 ## API Surface
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/v1/visor/clusters` | `GET` | List managed and attached BYO clusters |
-| `/v1/visor/clusters` | `POST` | Attach a BYO cluster with sealed kubeconfig |
-| `/v1/visor/clusters/:id` | `DELETE` | Detach a BYO cluster from the fleet |
-| `/v1/visor/machines` | `GET` | List active virtual machines and instances |
-| `/v1/visor/machines` | `POST` | Launch an instance in a selected cloud and region |
-| `/v1/visor/machines/:id` | `DELETE` | Terminate an instance |
-| `/v1/visor/volumes` | `GET` | List block storage volumes |
-| `/v1/visor/volumes` | `POST` | Create or attach a storage volume |
+| `/v1/regions`, `/v1/sizes`, `/v1/gpus` | `GET` | The catalog, with Hanzo's price per running and stopped hour |
+| `/v1/machines` | `GET` | The caller org's machines |
+| `/v1/machines` | `POST` | Quote (`dryRun`) or launch a machine |
+| `/v1/machines/:owner/:name` | `GET`, `PUT`, `DELETE` | Read, start or stop, or terminate one machine |
+| `/v1/machines/:owner/:name/agent` | `GET`, `PUT`, `DELETE` | A machine's bound agent |
 
 ## License
 

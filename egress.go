@@ -31,9 +31,8 @@ import (
 // Configured, the platform's cloud accounts are egress's: reading this pod's
 // environment, config or memory yields nothing that spends, and Hanzo's hosted
 // AWS account is signed there. A tenant's own Provider row is refused rather
-// than carried, because the carrier spends as compute. Unconfigured, hosted
-// compute refuses, and a bring-your-own row is called directly with the key on
-// the row, which is what a local or single-binary run wants.
+// than carried, because the carrier spends as compute. Unconfigured, compute
+// calls no cloud at all: there is no key here to call one with.
 //
 // What visor still holds is its OWN token, and that is the trade rather than an
 // oversight. A stolen caller token buys metered calls through our meter — rate
