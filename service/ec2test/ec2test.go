@@ -17,8 +17,8 @@
 // POST /v1/fetch, with EC2's Query API behind it.
 //
 // It checks each fetch the way egress would before signing it: the caller's own
-// bearer, the AWS account hanzo-compute, the endpoint ec2.<region>.amazonaws.com,
-// a form POST to "/". And it checks what egress could not: that the request
+// bearer, the AWS account hanzo-compute, the endpoint ec2.<region>.amazonaws.com
+// (or CloudWatch's, for GetMetricData), a form POST to "/". And it checks what egress could not: that the request
 // compute described carries no signature of its own — no Authorization, no
 // X-Amz-* query or form parameter — so nothing in compute signed it. A fetch
 // that fails a check is refused as egress refuses, which the SDK sees as
@@ -54,6 +54,8 @@ const (
 	GPUImage      = "ami-0c20dc14952c0c073"
 	// Endpoint is the host every hosted EC2 call must be addressed to.
 	Endpoint = "ec2." + Region + ".amazonaws.com"
+	// Monitoring is CloudWatch's host, where the meter reads NetworkOut.
+	Monitoring = "monitoring." + Region + ".amazonaws.com"
 	// Account is the label of the account's descriptor in egress's custody.
 	Account = "hanzo-compute"
 	// Token is compute's own IAM token, the only thing it shows egress.
@@ -99,6 +101,8 @@ type Fake struct {
 	next      int
 	now       time.Time
 	deny      string
+	// sent is NetworkOut: bytes by instance id and hour ("YYYYMMDDHH").
+	sent map[string]map[string]int64
 }
 
 type image struct {
@@ -197,6 +201,19 @@ func (f *Fake) reset() {
 	f.next = 0
 	f.now = time.Now().UTC().Truncate(time.Second)
 	f.deny = ""
+	f.sent = map[string]map[string]int64{}
+}
+
+// Send records that instance id sent bytes out during the hour at falls in, as
+// CloudWatch's NetworkOut would.
+func (f *Fake) Send(id string, at time.Time, bytes int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	hour := at.UTC().Format("2006010215")
+	if f.sent[id] == nil {
+		f.sent[id] = map[string]int64{}
+	}
+	f.sent[id][hour] += bytes
 }
 
 // Deny makes the stand-in egress refuse every call from now until Reset, as
@@ -318,7 +335,7 @@ func (f *Fake) check(in spend.Fetch, bearer string, form url.Values) string {
 		return "provider " + in.Provider
 	case in.Label != Account:
 		return "account " + in.Label
-	case in.Host != Endpoint:
+	case in.Host != Endpoint && !(in.Host == Monitoring && form.Get("Action") == "GetMetricData"):
 		return "endpoint " + in.Host
 	case in.Method != http.MethodPost || in.Path != "/":
 		return "not a Query API call: " + in.Method + " " + in.Path
@@ -357,6 +374,8 @@ func (f *Fake) answer(w http.ResponseWriter, call Call) {
 		f.transition(w, call.Form, "StopInstancesResponse", "stopped")
 	case "TerminateInstances":
 		f.transition(w, call.Form, "TerminateInstancesResponse", "shutting-down")
+	case "GetMetricData":
+		f.metricData(w, call.Form)
 	default:
 		ec2Error(w, http.StatusBadRequest, "InvalidAction", call.Action)
 	}
@@ -510,6 +529,42 @@ func (f *Fake) transition(w http.ResponseWriter, form url.Values, response, stat
 	}
 	w.Header().Set("Content-Type", "text/xml")
 	fmt.Fprintf(w, `<%s xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>state-1</requestId><instancesSet>%s</instancesSet></%s>`, response, b.String(), response)
+}
+
+// metricData is CloudWatch's GetMetricData for NetworkOut: the hourly Sum of
+// each instance asked about, over [StartTime, EndTime), oldest first.
+func (f *Fake) metricData(w http.ResponseWriter, form url.Values) {
+	from, err1 := time.Parse(time.RFC3339, form.Get("StartTime"))
+	to, err2 := time.Parse(time.RFC3339, form.Get("EndTime"))
+	if err1 != nil || err2 != nil {
+		ec2Error(w, http.StatusBadRequest, "InvalidParameterValue", "StartTime and EndTime")
+		return
+	}
+	var b strings.Builder
+	for i := 1; ; i++ {
+		p := "MetricDataQueries.member." + strconv.Itoa(i) + "."
+		id, ok := form[p+"Id"]
+		if !ok {
+			break
+		}
+		if form.Get(p+"MetricStat.Metric.MetricName") != "NetworkOut" || form.Get(p+"MetricStat.Stat") != "Sum" ||
+			form.Get(p+"MetricStat.Period") != "3600" || form.Get(p+"MetricStat.Metric.Dimensions.member.1.Name") != "InstanceId" {
+			ec2Error(w, http.StatusBadRequest, "InvalidParameterCombination", "not an hourly NetworkOut Sum")
+			return
+		}
+		instance := form.Get(p + "MetricStat.Metric.Dimensions.member.1.Value")
+		var stamps, values strings.Builder
+		for h := from.UTC().Truncate(time.Hour); h.Before(to); h = h.Add(time.Hour) {
+			if bytes, ok := f.sent[instance][h.Format("2006010215")]; ok {
+				fmt.Fprintf(&stamps, "<member>%s</member>", h.Format(time.RFC3339))
+				fmt.Fprintf(&values, "<member>%d.0</member>", bytes)
+			}
+		}
+		fmt.Fprintf(&b, "<member><Id>%s</Id><Label>NetworkOut</Label><Timestamps>%s</Timestamps><Values>%s</Values><StatusCode>Complete</StatusCode></member>",
+			xmlText(id[0]), stamps.String(), values.String())
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	fmt.Fprintf(w, `<GetMetricDataResponse xmlns="http://monitoring.amazonaws.com/doc/2010-08-01/"><GetMetricDataResult><MetricDataResults>%s</MetricDataResults><Messages/></GetMetricDataResult><ResponseMetadata><RequestId>cw-1</RequestId></ResponseMetadata></GetMetricDataResponse>`, b.String())
 }
 
 func instanceXML(in *Instance) string {

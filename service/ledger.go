@@ -19,21 +19,30 @@ import (
 	"time"
 )
 
-// Ledger keeps, per hosted machine, the last clock hour ("YYYYMMDDHH") its
-// running time has been billed through. The launch, a start and the hourly sweep
-// each advance it before they debit, and debit only the hours it moved over, so
-// one hour is charged once whichever of them reaches it first, and hours a sweep
-// missed — a restart, an outage, a failed tick — are charged by the next one.
+// Ledger keeps, per hosted machine and per thing it is billed for — its running
+// hours, its stopped disk, its outbound transfer — the last clock hour
+// ("YYYYMMDDHH") billed, and what of a fractional charge is carried to the next
+// hour. The launch, a start and the hourly sweep each move a mark only over
+// hours whose debit landed, so one hour is charged once whichever of them
+// reaches it first, and hours a sweep missed — a restart, an outage, a failed
+// tick — are charged by the next one.
 //
 // The rows live in the store (object), which service cannot import, so the
 // store registers itself here the way it registers credentials.
 type Ledger interface {
-	// Through returns the hour machine is billed through, "" when it never was.
-	Through(machine string) (string, error)
-	// Advance moves each machine's mark forward to its hour, durably, and
-	// reports which moved. A mark at or past its hour does not move: that hour
-	// is already billed.
-	Advance(marks map[string]string) (map[string]bool, error)
+	// Through returns key's mark; the zero Mark when it was never billed.
+	Through(key string) (Mark, error)
+	// Advance moves each key's mark forward to the one given, durably, and
+	// reports which moved. A mark at or past the hour given does not move: that
+	// hour is already billed.
+	Advance(marks map[string]Mark) (map[string]bool, error)
+}
+
+// Mark is how far one key is billed: the last hour charged, and the part of a
+// cent owed beyond it, in the key's own unit (transfer carries cent-bytes).
+type Mark struct {
+	Hour  string
+	Carry int64
 }
 
 // book is the registered Ledger.
@@ -60,27 +69,27 @@ func billed() Ledger {
 // memoryLedger is a Ledger held in this process.
 type memoryLedger struct {
 	mu    sync.Mutex
-	marks map[string]string
+	marks map[string]Mark
 }
 
-func newMemoryLedger() *memoryLedger { return &memoryLedger{marks: map[string]string{}} }
+func newMemoryLedger() *memoryLedger { return &memoryLedger{marks: map[string]Mark{}} }
 
-func (l *memoryLedger) Through(machine string) (string, error) {
+func (l *memoryLedger) Through(key string) (Mark, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.marks[machine], nil
+	return l.marks[key], nil
 }
 
-func (l *memoryLedger) Advance(marks map[string]string) (map[string]bool, error) {
+func (l *memoryLedger) Advance(marks map[string]Mark) (map[string]bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	moved := map[string]bool{}
-	for machine, hour := range marks {
-		if l.marks[machine] >= hour {
+	for key, m := range marks {
+		if l.marks[key].Hour >= m.Hour {
 			continue
 		}
-		l.marks[machine] = hour
-		moved[machine] = true
+		l.marks[key] = m
+		moved[key] = true
 	}
 	return moved, nil
 }

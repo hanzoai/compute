@@ -833,3 +833,63 @@ func TestNoRowIsTheHostedAccount(t *testing.T) {
 		t.Fatal("IsSuperAdmin is not exactly owner == \"admin\"")
 	}
 }
+
+// Outbound transfer end to end: the sweep reads each machine's NetworkOut from
+// CloudWatch through egress, and charges each settled hour at 12 cents a GB from
+// the first byte, under the hour's own meter id, carrying a part of a cent.
+func TestTransferIsReadThroughEgressAndCharged(t *testing.T) {
+	f := hostedFake(t)
+	var mu sync.Mutex
+	var debits []commercetest.Usage
+	commercetest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/usage"):
+			mu.Lock()
+			debits = append(debits, commercetest.Read(r))
+			mu.Unlock()
+		case strings.HasSuffix(r.URL.Path, "/balance"):
+			_, _ = w.Write([]byte(`{"available":100000,"currency":"usd"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	now := time.Now()
+	h := func(n int) time.Time { return now.Add(time.Duration(-n) * time.Hour) }
+	inst := f.Add(ec2test.Instance{Type: "t3.medium", State: "running", LaunchTime: h(4),
+		Tags: map[string]string{orgTagKey: "acme", machineTagKey: "m-99999999999999999999", managedByKey: managedBy}})
+	MarkBilled("m-99999999999999999999", now) // its running hours are paid
+	f.Send(inst.ID, h(4), 5*gbBytes)          // 60 cents
+	f.Send(inst.ID, h(3), gbBytes/24+1)       // just over half a cent, carried
+	f.Send(inst.ID, h(2), gbBytes/24+1)       // and again: one cent, 8 cent-bytes over
+	f.Send(inst.ID, h(1), 7*gbBytes)          // not settled yet: owed next sweep
+	MeterRunningMachines(context.Background(), now)
+
+	mu.Lock()
+	got := map[string]int64{}
+	for _, d := range debits {
+		got[d.ID] = d.Cents()
+	}
+	mu.Unlock()
+	want := map[string]int64{
+		TransferMeterID("m-99999999999999999999", h(4)): 60,
+		TransferMeterID("m-99999999999999999999", h(2)): 1,
+	}
+	for id, cents := range want {
+		if got[id] != cents {
+			t.Errorf("%s = %d cents, want %d (all debits %v)", id, got[id], cents, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("debits = %v, want only %v", got, want)
+	}
+	if refused := f.Calls("Refused"); len(refused) != 0 {
+		t.Fatalf("egress refused: %s", refused[0].Refused)
+	}
+	if reads := f.Calls("GetMetricData"); len(reads) != 1 || reads[0].Fetch.Host != ec2test.Monitoring {
+		t.Fatalf("CloudWatch reads = %+v", reads)
+	}
+	mark, _ := billed().Through(transferKey("m-99999999999999999999"))
+	if mark.Hour != hourOf(h(2)) || mark.Carry != 8 {
+		t.Fatalf("transfer is billed through %+v, want %s carrying 8 cent-bytes", mark, hourOf(h(2)))
+	}
+}

@@ -91,24 +91,25 @@ func TestEverySizeIsPricedAtCostPlusTheFee(t *testing.T) {
 // change to this table and nowhere else.
 func TestTheCatalogAsSold(t *testing.T) {
 	want := map[string]struct {
-		cents int64
-		gpus  int
-		model string
+		cents   int64
+		gpus    int
+		model   string
+		stopped int64
 	}{
-		"t3.medium":    {7, 0, ""},
-		"m7i.large":    {15, 0, ""},
-		"m7i.xlarge":   {29, 0, ""},
-		"m7i.2xlarge":  {56, 0, ""},
-		"c7i.xlarge":   {26, 0, ""},
-		"r7i.xlarge":   {37, 0, ""},
-		"g6.xlarge":    {111, 1, "L4"},
-		"g6.12xlarge":  {622, 4, "L4"},
-		"g5.xlarge":    {138, 1, "A10G"},
-		"g5.12xlarge":  {765, 4, "A10G"},
-		"g5.48xlarge":  {2188, 8, "A10G"},
-		"g6e.xlarge":   {252, 1, "L40S"},
-		"p4d.24xlarge": {2943, 8, "A100"},
-		"p5.48xlarge":  {7354, 8, "H100"},
+		"t3.medium":    {7, 0, "", 1},
+		"m7i.large":    {15, 0, "", 1},
+		"m7i.xlarge":   {29, 0, "", 1},
+		"m7i.2xlarge":  {56, 0, "", 1},
+		"c7i.xlarge":   {26, 0, "", 1},
+		"r7i.xlarge":   {37, 0, "", 1},
+		"g6.xlarge":    {111, 1, "L4", 3},
+		"g6.12xlarge":  {622, 4, "L4", 8},
+		"g5.xlarge":    {138, 1, "A10G", 3},
+		"g5.12xlarge":  {765, 4, "A10G", 8},
+		"g5.48xlarge":  {2188, 8, "A10G", 15},
+		"g6e.xlarge":   {252, 1, "L40S", 3},
+		"p4d.24xlarge": {2943, 8, "A100", 15},
+		"p5.48xlarge":  {7354, 8, "H100", 15},
 	}
 	if len(offers) != len(want) {
 		t.Fatalf("the catalog has %d sizes, want %d", len(offers), len(want))
@@ -126,6 +127,11 @@ func TestTheCatalogAsSold(t *testing.T) {
 		seen[o.slug] = true
 		if o.cents() != w.cents {
 			t.Errorf("%s = %d cents/h, want %d", o.slug, o.cents(), w.cents)
+		}
+		// A stopped hour is the disk, rounded up per hour as a running hour is.
+		// Outbound transfer is one price for every size, from the first byte.
+		if si := o.info("us-east-1"); si.CentsStopped != w.stopped || si.CentsPerGB != 12 {
+			t.Errorf("%s stopped = %d cents/h, transfer = %d cents/GB; want %d and 12", o.slug, si.CentsStopped, si.CentsPerGB, w.stopped)
 		}
 		switch {
 		case w.gpus == 0 && o.gpu != nil:
@@ -186,5 +192,42 @@ func TestASizeShowsWhatItDebits(t *testing.T) {
 	}
 	if SizeBySlug("s-2vcpu-4gb") != nil {
 		t.Fatal("a size that is not for sale resolved")
+	}
+}
+
+// Outbound transfer is AWS's $0.09 a GB plus the fee, exactly 12 cents, charged
+// from the first byte: whole cents as they are owed, and the part of a cent
+// carried to the next hour, so a sum of hours is charged exactly what the sum of
+// their bytes costs — never a cent per hour for an idle machine's trickle.
+func TestTransferIsTwelveCentsAGBFromTheFirstByte(t *testing.T) {
+	if (transferMicrosPerGB*feeNum)%(feeDen*microsPerCent) != 0 || TransferCentsPerGB != 12 {
+		t.Fatalf("transfer is %d cents a GB and not exact", TransferCentsPerGB)
+	}
+	for _, tc := range []struct {
+		name         string
+		bytes, carry int64
+		cents, left  int64
+	}{
+		{"one GB", gbBytes, 0, 12, 0},
+		{"ten GB", 10 * gbBytes, 0, 120, 0},
+		{"a twelfth of a GB is a cent", gbBytes / 12, 0, 0, gbBytes / 12 * 12},
+		{"just over a twelfth", gbBytes/12 + 1, 0, 1, gbBytes/12*12 + 12 - gbBytes},
+		{"nothing sent", 0, 0, 0, 0},
+		{"a carry becomes a cent", 1, gbBytes - 12, 1, 0},
+	} {
+		cents, left := transferCents(tc.bytes, tc.carry)
+		if cents != tc.cents || left != tc.left {
+			t.Errorf("%s: transferCents(%d, %d) = %d, %d; want %d, %d", tc.name, tc.bytes, tc.carry, cents, left, tc.cents, tc.left)
+		}
+	}
+	// Bytes sent a twelfth at a time cost what the same bytes sent at once do.
+	var total, carry int64
+	for range 12 {
+		var cents int64
+		cents, carry = transferCents(gbBytes/12, carry)
+		total += cents
+	}
+	if want, _ := transferCents(12*(gbBytes/12), 0); total != want {
+		t.Fatalf("twelve hours of a twelfth of a GB charged %d cents, one hour of the same bytes %d", total, want)
 	}
 }

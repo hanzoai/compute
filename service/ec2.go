@@ -350,6 +350,7 @@ func machineFromInstance(inst ec2Types.Instance, region string) *Machine {
 		Os:          "linux",
 		PublicIp:    aws.ToString(inst.PublicIpAddress),
 		PrivateIp:   aws.ToString(inst.PrivateIpAddress),
+		instance:    aws.ToString(inst.InstanceId),
 	}
 	if inst.Placement != nil {
 		m.Zone = aws.ToString(inst.Placement.AvailabilityZone)

@@ -170,7 +170,7 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		}
 	}
 
-	marks := map[string]string{}
+	marks := map[string]Mark{}
 	bill := func(d owed, h time.Time) bool {
 		if err := RecordCompute(ctx, d.org, d.project, d.cents, d.model, d.id(h)); err != nil {
 			skipped++
@@ -178,7 +178,7 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 			return false
 		}
 		metered++
-		marks[d.key] = hourOf(h)
+		marks[d.key] = Mark{Hour: hourOf(h)}
 		// Roll a running event into the analytics datastore alongside a running
 		// hour's debit (best-effort; never blocks or affects the sweep).
 		if d.running() {
@@ -233,9 +233,100 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		}
 	}
 
+	// Outbound transfer already happened too, so it is charged whatever the
+	// balance, for every hour settled since the last one billed.
+	m, s := meterTransfer(ctx, machines, now, marks)
+	metered, skipped = metered+m, skipped+s
+
 	if len(marks) > 0 {
 		if _, err := billed().Advance(marks); err != nil {
 			logs.Warning("compute metering: record billed hours: %v — the next sweep re-sends them under the same ids", err)
+		}
+	}
+	return metered, skipped
+}
+
+// transferKey is the ledger key a machine's outbound transfer is marked under.
+func transferKey(machine string) string { return machine + "/transfer" }
+
+// TransferMeterID names one hour of a machine's outbound transfer.
+func TransferMeterID(machineID string, hour time.Time) string {
+	return "compute-" + machineID + "-transfer-" + HourStamp(hour)
+}
+
+// meterTransfer charges each machine's outbound transfer for every settled hour
+// it has not been billed for, at TransferCentsPerGB from the first byte: whole
+// cents as they are owed, under the hour's own meter id, and the part of a cent
+// carried in the machine's transfer mark to the next hour. An hour is settled
+// once its datapoints are complete (settle). A machine with no transfer mark is
+// owed from its last start. NetworkOut that cannot be read bills nothing and
+// leaves every hour owed.
+func meterTransfer(ctx context.Context, machines []*Machine, now time.Time, marks map[string]Mark) (metered, skipped int) {
+	last := now.UTC().Add(-time.Hour - settle).Truncate(time.Hour)
+	type due struct {
+		m     *Machine
+		org   string
+		mark  Mark
+		hours []time.Time
+	}
+	var dues []due
+	var instances []string
+	from := last
+	for _, m := range machines {
+		org := orgFromTag(m.Tag)
+		if org == "" || m.instance == "" {
+			continue
+		}
+		mark, err := billed().Through(transferKey(m.Id))
+		if err != nil {
+			skipped++
+			logs.Warning("compute metering: machine %s transfer not billed: %v", m.Id, err)
+			continue
+		}
+		start := last
+		if h, ok := parseHour(mark.Hour); ok {
+			start = h.Add(time.Hour)
+		} else if t, err := time.Parse(time.RFC3339, m.CreatedTime); err == nil {
+			start = t.UTC().Truncate(time.Hour)
+		}
+		if earliest := last.Add(-mostCatchUp * time.Hour); start.Before(earliest) {
+			start = earliest
+		}
+		if start.After(last) {
+			continue
+		}
+		d := due{m: m, org: org, mark: mark}
+		for h := start; !h.After(last); h = h.Add(time.Hour) {
+			d.hours = append(d.hours, h)
+		}
+		dues = append(dues, d)
+		instances = append(instances, m.instance)
+		if start.Before(from) {
+			from = start
+		}
+	}
+	if len(dues) == 0 {
+		return 0, 0
+	}
+	sent, err := outbound(ctx, instances, from, last.Add(time.Hour))
+	if err != nil {
+		logs.Warning("compute metering: read outbound transfer: %v — every hour stays owed", err)
+		return 0, len(dues)
+	}
+	for _, d := range dues {
+		carry := d.mark.Carry
+		for _, h := range d.hours {
+			cents, left := transferCents(sent[d.m.instance][hourOf(h)], carry)
+			if cents > 0 {
+				if err := RecordCompute(ctx, d.org, projectFromTag(d.m.Tag), cents, d.m.Size+"/transfer", TransferMeterID(d.m.Id, h)); err != nil {
+					skipped++
+					logs.Warning("compute metering: debit transfer of %s hour %s (org %s): %v", d.m.Id, hourOf(h), d.org, err)
+					break
+				}
+				metered++
+			}
+			carry = left
+			marks[transferKey(d.m.Id)] = Mark{Hour: hourOf(h), Carry: carry}
 		}
 	}
 	return metered, skipped
@@ -300,7 +391,7 @@ func stoppedHours(m *Machine, current time.Time) ([]time.Time, error) {
 		return nil, err
 	}
 	from := current
-	if last, ok := parseHour(max(run, disk)); ok {
+	if last, ok := parseHour(max(run.Hour, disk.Hour)); ok {
 		from = last.Add(time.Hour)
 	}
 	if earliest := current.Add(-mostCatchUp * time.Hour); from.Before(earliest) {
@@ -333,7 +424,7 @@ func unbilled(m *Machine, current time.Time) ([]time.Time, error) {
 		started, known = t.UTC().Truncate(time.Hour), true
 	}
 	from := current
-	if last, ok := parseHour(mark); ok {
+	if last, ok := parseHour(mark.Hour); ok {
 		from = last.Add(time.Hour)
 		if known && started.After(from) {
 			from = started
@@ -369,7 +460,7 @@ func startCharge(machine string, now time.Time) string {
 		logs.Warning("compute metering: read billed hours of %s: %v", machine, err)
 		return ""
 	}
-	if mark >= hourOf(now) {
+	if mark.Hour >= hourOf(now) {
 		return ""
 	}
 	return MeterID(machine, now)
@@ -380,7 +471,7 @@ func startCharge(machine string, now time.Time) string {
 // commerce charged. A mark that fails to write leaves the hour looking owed, and
 // the next sweep re-sends its id, which commerce debits once.
 func MarkBilled(machine string, at time.Time) {
-	if _, err := billed().Advance(map[string]string{machine: hourOf(at)}); err != nil {
+	if _, err := billed().Advance(map[string]Mark{machine: {Hour: hourOf(at)}}); err != nil {
 		logs.Warning("compute metering: record billed hour %s of %s: %v", hourOf(at), machine, err)
 	}
 }

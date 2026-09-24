@@ -14,7 +14,11 @@
 
 package object
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hanzoai/compute/service"
+)
 
 // Billed hours are kept on the shared store: a mark moves forward only, reports
 // which moved, and survives the pod restarting on the same disk.
@@ -22,18 +26,18 @@ func TestTheMeterLedgerMovesForwardOnlyAndIsKept(t *testing.T) {
 	root := t.TempDir()
 	activate(t, newReplicaStore(t, root))
 	l := meterLedger{}
-	if got, err := l.Through("m-00000000000000000001"); err != nil || got != "" {
-		t.Fatalf("an unbilled machine reads %q, %v", got, err)
+	if got, err := l.Through("m-00000000000000000001"); err != nil || got.Hour != "" {
+		t.Fatalf("an unbilled machine reads %+v, %v", got, err)
 	}
-	moved, err := l.Advance(map[string]string{"m-00000000000000000001": "2026070215", "m-00000000000000000002": "2026070215"})
+	moved, err := l.Advance(map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070215"}, "m-00000000000000000002": {Hour: "2026070215"}})
 	if err != nil || !moved["m-00000000000000000001"] || !moved["m-00000000000000000002"] {
 		t.Fatalf("first advance moved %v, %v", moved, err)
 	}
-	moved, err = l.Advance(map[string]string{"m-00000000000000000001": "2026070215", "m-00000000000000000002": "2026070214"})
+	moved, err = l.Advance(map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070215"}, "m-00000000000000000002": {Hour: "2026070214"}})
 	if err != nil || len(moved) != 0 {
 		t.Fatalf("an advance to a billed hour, or backwards, moved %v, %v", moved, err)
 	}
-	moved, _ = l.Advance(map[string]string{"m-00000000000000000001": "2026070217"})
+	moved, _ = l.Advance(map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070217", Carry: 12345}})
 	if !moved["m-00000000000000000001"] {
 		t.Fatal("a later hour did not move the mark")
 	}
@@ -41,12 +45,12 @@ func TestTheMeterLedgerMovesForwardOnlyAndIsKept(t *testing.T) {
 	// A restart: the same disk, a new store.
 	_ = store.Close()
 	activate(t, newReplicaStore(t, root))
-	for machine, want := range map[string]string{"m-00000000000000000001": "2026070217", "m-00000000000000000002": "2026070215"} {
+	for machine, want := range map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070217", Carry: 12345}, "m-00000000000000000002": {Hour: "2026070215"}} {
 		if got, err := l.Through(machine); err != nil || got != want {
-			t.Errorf("after a restart %s is billed through %q (%v), want %q", machine, got, err, want)
+			t.Errorf("after a restart %s is billed through %+v (%v), want %+v", machine, got, err, want)
 		}
 	}
-	if moved, _ := l.Advance(map[string]string{"m-00000000000000000001": "2026070217"}); len(moved) != 0 {
+	if moved, _ := l.Advance(map[string]service.Mark{"m-00000000000000000001": {Hour: "2026070217"}}); len(moved) != 0 {
 		t.Fatal("a restart forgot an hour already billed")
 	}
 }

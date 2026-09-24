@@ -21,13 +21,14 @@ import (
 	"github.com/hanzoai/compute/service"
 )
 
-// MeterMark is the last clock hour a hosted machine's running time is billed
-// through: service.Ledger, kept on the shared coord engine beside the hour
-// leases, so it survives a restart and a new owner resumes from it. See
-// service/ledger.go for what reads and moves it.
+// MeterMark is how far one ledger key — a hosted machine's running hours, its
+// stopped disk, its outbound transfer — is billed: service.Ledger, kept on the
+// shared coord engine beside the hour leases, so it survives a restart and a new
+// owner resumes from it. See service/ledger.go for what reads and moves it.
 type MeterMark struct {
 	Machine     string `xorm:"varchar(100) notnull pk" json:"machine"`
 	Hour        string `xorm:"varchar(12)" json:"hour"` // UTC "YYYYMMDDHH"
+	Carry       int64  `json:"carry"`                   // part of a cent owed past Hour
 	UpdatedTime string `xorm:"varchar(100)" json:"updatedTime"`
 }
 
@@ -37,12 +38,12 @@ type meterLedger struct{}
 // RegisterMeterLedger makes the shared store where billed hours are kept.
 func RegisterMeterLedger() { service.RegisterLedger(meterLedger{}) }
 
-func (meterLedger) Through(machine string) (string, error) {
-	mark := MeterMark{Machine: machine}
+func (meterLedger) Through(key string) (service.Mark, error) {
+	mark := MeterMark{Machine: key}
 	if _, err := Shared().Get(&mark); err != nil {
-		return "", err
+		return service.Mark{}, err
 	}
-	return mark.Hour, nil
+	return service.Mark{Hour: mark.Hour, Carry: mark.Carry}, nil
 }
 
 // Advance writes every mark that moves, then ships the coord DB once, so the
@@ -50,28 +51,28 @@ func (meterLedger) Through(machine string) (string, error) {
 // not returned: the marks are on this pod's disk, and a debit's id names its
 // machine and hour, which the ledger debits once, so a pod resuming from an
 // older copy re-sends ids already charged rather than charging them again.
-func (meterLedger) Advance(marks map[string]string) (map[string]bool, error) {
+func (meterLedger) Advance(marks map[string]service.Mark) (map[string]bool, error) {
 	moved := map[string]bool{}
 	now := time.Now().UTC().Format(time.RFC3339)
-	for machine, hour := range marks {
-		mark := MeterMark{Machine: machine}
+	for key, to := range marks {
+		mark := MeterMark{Machine: key}
 		existed, err := Shared().Get(&mark)
 		if err != nil {
 			return moved, err
 		}
-		if existed && mark.Hour >= hour {
+		if existed && mark.Hour >= to.Hour {
 			continue
 		}
-		mark.Hour, mark.UpdatedTime = hour, now
+		mark.Hour, mark.Carry, mark.UpdatedTime = to.Hour, to.Carry, now
 		if existed {
-			_, err = Shared().ID(machine).Cols("hour", "updated_time").Update(&mark)
+			_, err = Shared().ID(key).Cols("hour", "carry", "updated_time").Update(&mark)
 		} else {
 			_, err = Shared().Insert(&mark)
 		}
 		if err != nil {
 			return moved, err
 		}
-		moved[machine] = true
+		moved[key] = true
 	}
 	if len(moved) > 0 {
 		if err := pushShared(); err != nil {

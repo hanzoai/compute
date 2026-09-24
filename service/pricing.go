@@ -21,8 +21,11 @@ package service
 // by the hour while it is attached; and its root volume, gp3 storage billed by
 // the GB-month. A STOPPED machine releases the instance and the address and
 // keeps costing the volume. Hanzo sells each at cost plus the platform fee of one
-// third, rounded UP to the whole cent: the ledger debits whole cents and a paid
-// product never under-charges. All arithmetic is integer, so the price a quote
+// third, rounded UP to the whole cent per hour: the ledger debits whole cents and
+// a paid product never under-charges. Outbound transfer is the fourth cost, by
+// the GB rather than the hour: it is metered from the first byte at cost plus
+// the fee, and a part of a cent carries to the next hour instead of rounding, so
+// the total charged is exact. All arithmetic is integer, so the price a quote
 // shows is the price the meter debits, to the cent.
 const (
 	// feeNum/feeDen is the multiplier over cost: 4/3, list plus one third.
@@ -40,7 +43,18 @@ const (
 
 	// ipv4MicrosPerHour is one public IPv4 address in use: $0.005 per hour.
 	ipv4MicrosPerHour = 5_000
+
+	// transferMicrosPerGB is data transferred out of EC2 to the internet in
+	// us-east-1: $0.09 per GB.
+	transferMicrosPerGB = 90_000
+
+	// gbBytes is the GB transfer is counted in: 2^30 bytes, as AWS bills it.
+	gbBytes = 1 << 30
 )
+
+// TransferCentsPerGB is Hanzo's price for outbound transfer, in whole cents per
+// GB, from the first byte: cost plus the fee, which is exactly 12 cents.
+const TransferCentsPerGB = transferMicrosPerGB * feeNum / (feeDen * microsPerCent)
 
 // hourlyCents is Hanzo's price in whole cents per RUNNING hour for an instance
 // listed at listMicros micro-dollars per hour, with its public IPv4 address and a
@@ -68,4 +82,12 @@ func monthCents(monthMicros int64) int64 {
 	num := monthMicros * feeNum
 	den := int64(hoursPerMonth * feeDen * microsPerCent)
 	return (num + den - 1) / den
+}
+
+// transferCents is what bytes sent out cost, with carry — cent-bytes owed from
+// earlier hours, below one cent — added first: whole cents to debit now, and the
+// part of a cent carried on.
+func transferCents(bytes, carry int64) (cents, left int64) {
+	owed := carry + bytes*TransferCentsPerGB
+	return owed / gbBytes, owed % gbBytes
 }

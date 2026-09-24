@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -585,8 +586,8 @@ func TestAMachineItsOrgCannotPayForIsStopped(t *testing.T) {
 		t.Fatalf("stopped = %v", got)
 	}
 	// Hour 14 was not charged, so it is not recorded as billed.
-	if mark, _ := billed().Through("a1"); mark != "2026070213" {
-		t.Fatalf("a1 is billed through %q", mark)
+	if mark, _ := billed().Through("a1"); mark.Hour != "2026070213" {
+		t.Fatalf("a1 is billed through %+v", mark)
 	}
 }
 
@@ -628,5 +629,61 @@ func TestAnUnreadableBalanceStopsNothing(t *testing.T) {
 	}
 	if got := stopped(); len(got) != 0 {
 		t.Fatalf("stopped = %v", got)
+	}
+}
+
+// sends stands in for CloudWatch: bytes by instance and hour.
+func sends(t *testing.T, sent map[string]map[string]int64, fail error) {
+	t.Helper()
+	saved := outbound
+	outbound = func(_ context.Context, instances []string, from, to time.Time) (map[string]map[string]int64, error) {
+		if fail != nil {
+			return nil, fail
+		}
+		return sent, nil
+	}
+	t.Cleanup(func() { outbound = saved })
+}
+
+// A transfer hour whose debit fails is owed again, with the carry it had, and an
+// unreadable NetworkOut bills nothing and leaves every hour owed.
+func TestTransferThatWasNotChargedIsStillOwed(t *testing.T) {
+	var up bool
+	var ids []string
+	freshLedger(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/billing/usage", func(w http.ResponseWriter, r *http.Request) {
+		u := commercetest.Read(r)
+		if !up {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		ids = append(ids, u.ID+"="+u.Amount.Decimal)
+		_, _ = io.WriteString(w, `{"id":"`+u.ID+`"}`)
+	})
+	commercetest.Serve(t, mux)
+	seedCatalog(t, priced("s", 5))
+
+	at := func(h int) time.Time { return time.Date(2026, 7, 2, h, 20, 0, 0, time.UTC) }
+	m := &Machine{Id: "tx", Size: "s", Tag: "hanzo-org:acme", State: "Stopped", CreatedTime: at(10).Format(time.RFC3339), instance: "i-tx"}
+	MarkBilled("tx", at(10))
+	MarkBilled(diskKey("tx"), at(20))
+	sends(t, map[string]map[string]int64{"i-tx": {"2026070210": gbBytes, "2026070211": 2 * gbBytes}}, nil)
+
+	meterMachines(context.Background(), []*Machine{m}, at(12)) // commerce down: 10 and 11 stay owed
+	if mark, _ := billed().Through(transferKey("tx")); mark.Hour != "" {
+		t.Fatalf("a refused transfer debit was recorded: %+v", mark)
+	}
+	sends(t, nil, errors.New("cloudwatch unreachable"))
+	up = true
+	meterMachines(context.Background(), []*Machine{m}, at(13)) // metric unreadable: still owed
+	if len(ids) != 0 {
+		t.Fatalf("an unreadable metric charged %v", ids)
+	}
+	sends(t, map[string]map[string]int64{"i-tx": {"2026070210": gbBytes, "2026070211": 2 * gbBytes}}, nil)
+	meterMachines(context.Background(), []*Machine{m}, at(14))
+	want := []string{"compute-tx-transfer-2026070210=0.12", "compute-tx-transfer-2026070211=0.24"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("debits = %v, want %v", ids, want)
 	}
 }

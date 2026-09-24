@@ -44,6 +44,10 @@ type Machine struct {
 	PrivateIp string `xorm:"varchar(100)" json:"privateIp"`
 	CpuSize   string `xorm:"varchar(100)" json:"cpuSize"`
 	MemSize   string `xorm:"varchar(100)" json:"memSize"`
+
+	// instance is a hosted machine's EC2 instance id, which its metrics are
+	// kept under. It never leaves service: a caller addresses a machine by Id.
+	instance string
 }
 
 type MachineAliyunClient struct {
