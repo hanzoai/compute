@@ -113,6 +113,10 @@ func serve(ctx context.Context, zapAddr, httpAddr string) error {
 	// the compute* keys (service/ec2.go).
 	object.RegisterCloudCredentials(strings.TrimSpace(conf.GetConfigString("platformOwner")))
 
+	// Where each hosted machine's billed hours are kept: the shared store, so a
+	// restart resumes billing from the last hour charged instead of forgetting it.
+	object.RegisterMeterLedger()
+
 	// And how those accounts are reached: through hanzoai/egress when it is
 	// configured, so the cloud keys are not in this process at all.
 	if err := carry(); err != nil {

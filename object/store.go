@@ -55,6 +55,7 @@ func sharedModels() []any {
 		new(BillingLease),
 		new(FleetWorker),
 		new(CostCursor),
+		new(MeterMark),
 	}
 }
 

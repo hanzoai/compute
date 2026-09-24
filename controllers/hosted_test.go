@@ -219,8 +219,9 @@ func TestCloudLaunchesAHostedMachine(t *testing.T) {
 	}
 	money.mu.Lock()
 	defer money.mu.Unlock()
-	if len(money.debits) != 1 || money.debits[0].ID != m.Id || money.debits[0].Cents() != 138 || money.debits[0].Org != "acme" {
-		t.Fatalf("launch debits = %+v, want one 138-cent debit under the machine id", money.debits)
+	if len(money.debits) != 1 || !strings.HasPrefix(money.debits[0].ID, "compute-"+m.Id+"-") ||
+		money.debits[0].Cents() != 138 || money.debits[0].Org != "acme" {
+		t.Fatalf("launch debits = %+v, want one 138-cent debit under the launch hour's meter id", money.debits)
 	}
 }
 

@@ -428,9 +428,9 @@ func mintMachineName(kind string) string {
 // insufficient balance launches nothing and spends nothing. The caller sets the
 // spec's kind (service.SetKind) before calling; launchMetered is kind-agnostic.
 // Every SUBSEQUENT running hour is debited by service.MeterRunningMachines (the
-// hourly ticker) on this SAME commerce path; the launch owns the launch hour and
-// the sweep skips a machine created in the current clock hour, so the hour is
-// never double-billed.
+// hourly ticker) on this SAME commerce path; the launch debits its hour under
+// that hour's meter id and records it in the ledger, so neither the sweep nor a
+// start in the same hour charges it again.
 //
 // It composes the same three primitives every other provision path uses
 // (service.HourlyCents → AuthorizeCompute → RecordCompute), so a machine, a node
@@ -456,7 +456,7 @@ func launchMetered(ctx context.Context, org, project string, spec *service.Creat
 		// Roll a launched event into the analytics datastore (best-effort; never
 		// blocks or fails the launch) — the analytical mirror of the commerce debit.
 		service.EmitCompute(org, service.ComputeLaunched, m, firstHourCents)
-		return m.Id, nil
+		return service.LaunchCharge(m.Id, time.Now()), nil
 	})
 	if err != nil {
 		return nil, err

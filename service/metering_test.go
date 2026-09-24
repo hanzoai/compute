@@ -146,6 +146,7 @@ type recorded struct {
 // balance).
 func fakeCommerce(t *testing.T) (got *[]recorded, mu *sync.Mutex) {
 	t.Helper()
+	freshLedger(t)
 	var recs []recorded
 	var m sync.Mutex
 	mux := http.NewServeMux()
@@ -159,6 +160,15 @@ func fakeCommerce(t *testing.T) (got *[]recorded, mu *sync.Mutex) {
 	})
 	commercetest.Serve(t, mux)
 	return &recs, &m
+}
+
+// freshLedger gives one test a ledger of its own, so no hour another test billed
+// reads as billed here.
+func freshLedger(t *testing.T) {
+	t.Helper()
+	saved := billed()
+	RegisterLedger(newMemoryLedger())
+	t.Cleanup(func() { RegisterLedger(saved) })
 }
 
 // seedCatalog replaces the catalog for one test, so a size prices at exactly
@@ -376,5 +386,22 @@ func TestMetering_UnconfiguredIsNoop(t *testing.T) {
 	t.Setenv("clientSecret", "shh")
 	if !MeteringConfigured() {
 		t.Fatal("MeteringConfigured() = false with a full identity, want true")
+	}
+}
+
+// A start in an hour the launch already billed charges nothing, and a start in a
+// later hour charges that hour once.
+func TestAStartChargesOnlyAnUnbilledHour(t *testing.T) {
+	fakeCommerce(t)
+	at := time.Date(2026, 7, 2, 15, 5, 0, 0, time.UTC)
+	LaunchCharge("twice", at)
+	if id := startCharge("twice", at.Add(40*time.Minute)); id != "" {
+		t.Fatalf("a start in the launch hour charges %q", id)
+	}
+	if id := startCharge("twice", at.Add(2*time.Hour)); id != "compute-twice-2026070217" {
+		t.Fatalf("a later start charges %q", id)
+	}
+	if id := startCharge("twice", at.Add(2*time.Hour+time.Minute)); id != "" {
+		t.Fatalf("a second start in that hour charges %q", id)
 	}
 }

@@ -184,9 +184,10 @@ func DeleteOrgMachine(org, id string) error {
 // none by that id, answered without a call when id is not a hosted machine id.
 //
 // A start is a provision: the org is authorized for the machine's first hour
-// and debited it under the hour's meter id — the id the hourly sweep uses — so a
-// start and the sweep can never charge one hour twice. A stop charges nothing:
-// the hour the machine ran in is already paid.
+// and debited it under the hour's meter id — the id the hourly sweep uses — unless
+// the ledger already holds that hour billed (a launch or an earlier start in the
+// same clock hour), so no hour is charged twice. A stop charges nothing: the hour
+// the machine ran in is already paid.
 func SetOrgMachineState(ctx context.Context, org, id, state string) (bool, error) {
 	if !machineIDPattern.MatchString(id) {
 		return false, ErrNoMachine
@@ -224,7 +225,7 @@ func SetOrgMachineState(ctx context.Context, org, id, state string) (bool, error
 			if err := setState(ctx, api, inst, true); err != nil {
 				return "", err
 			}
-			return MeterID(m.Id, time.Now()), nil
+			return startCharge(m.Id, time.Now()), nil
 		})
 		return err == nil, err
 	case want == "Stopped" && m.State == "Running":

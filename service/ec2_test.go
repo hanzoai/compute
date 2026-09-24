@@ -45,6 +45,7 @@ import (
 func hostedFake(t *testing.T) *ec2test.Fake {
 	t.Helper()
 	f := ec2test.Serve(t)
+	freshLedger(t)
 	RegisterCarrier(func(c Credential) (*http.Client, error) { return f.Client(c.Provider, c.Name), nil })
 	t.Cleanup(func() { RegisterCarrier(nil) })
 	return f

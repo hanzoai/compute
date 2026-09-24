@@ -82,8 +82,7 @@ func CreatedInHour(createdTime, stamp string) bool {
 // EXACTLY-ONCE PER HOUR: cloud debits one usage id once, so a retried or
 // overlapping sweep of the same hour moves no more money; the ticker's per-hour
 // single-flight lease (object.ClaimMeterHour) keeps other replicas from sweeping,
-// and the LAUNCH hour is skipped here because the launch path already billed it
-// under a different id.
+// and the LAUNCH hour is skipped here because the launch path already billed it.
 //
 // No-op when metering is unconfigured or when the hosted account is unconfigured
 // — nothing to enumerate, nothing to debit.
@@ -125,9 +124,8 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		// attributable per project.
 		project := projectFromTag(m.Tag)
 		// Skip the LAUNCH hour: the launch path already debited this machine one
-		// hour at create time (usage id = machine id). Metering it again for the
-		// same wall-clock hour would double-charge the launch hour (the launch and
-		// sweep ids differ, so the ledger sees two acts). CreatedTime is the last
+		// hour at create time (LaunchCharge). Metering it again for the same
+		// wall-clock hour would double-charge the launch hour. CreatedTime is the last
 		// start, so a started machine's first hour — debited by the start under
 		// this very MeterID — is skipped too. A machine with no parseable create
 		// time is metered normally.
@@ -154,4 +152,32 @@ func meterMachines(ctx context.Context, machines []*Machine, now time.Time) (met
 		EmitCompute(org, ComputeRunning, m, cents)
 	}
 	return metered, skipped
+}
+
+// LaunchCharge names a launch's debit: its first hour, under the id the sweep
+// and a start use for that hour, recorded in the ledger so neither charges it
+// again. The launch hour is owed whatever the ledger says, so a ledger that
+// cannot be written still debits it, and the sweep then owes nothing for the
+// hour the machine started in.
+func LaunchCharge(machine string, now time.Time) string {
+	if _, err := billed().Advance(map[string]string{machine: hourOf(now)}); err != nil {
+		logs.Warning("compute metering: record launch hour of %s: %v", machine, err)
+	}
+	return MeterID(machine, now)
+}
+
+// startCharge names a start's debit, or "" when its hour is already billed: a
+// machine launched, stopped and started in one clock hour pays for that hour
+// once. A ledger that cannot be written charges nothing here, and the sweep
+// bills the hour from the machine's start.
+func startCharge(machine string, now time.Time) string {
+	moved, err := billed().Advance(map[string]string{machine: hourOf(now)})
+	if err != nil {
+		logs.Warning("compute metering: record start hour of %s: %v", machine, err)
+		return ""
+	}
+	if !moved[machine] {
+		return ""
+	}
+	return MeterID(machine, now)
 }
