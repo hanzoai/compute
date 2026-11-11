@@ -68,6 +68,12 @@ func pathTarget(path string) (string, string) {
 	if len(seg) < 3 || seg[0] != "v1" {
 		return "", ""
 	}
+	// Principal-scoped compute sub-surfaces carry no :owner segment in the path:
+	// /v1/k8s/{providers,clusters,nodes}[/:id] and /v1/machines/agents derive the
+	// tenant from the token / ?owner= in the controller (resolveComputeOrg / Scope).
+	if seg[1] == "k8s" || (len(seg) == 3 && seg[1] == "machines" && seg[2] == "agents") {
+		return "", ""
+	}
 	if len(seg) == 3 {
 		return seg[2], ""
 	}

@@ -37,6 +37,15 @@ func TestIsResellComputePath(t *testing.T) {
 		{"GET", "/v1/machines/acme/abc-123/agent"},
 		{"DELETE", "/v1/machines/acme/abc-123/agent"},
 		{"PUT", "/v1/machines/acme/abc-123/agent"},
+		// Org-scoped images + managed-k8s surface (scoped in controller via resolveComputeOrg / Scope).
+		{"GET", "/v1/images"},
+		{"POST", "/v1/images"},
+		{"GET", "/v1/k8s/providers"},
+		{"GET", "/v1/k8s/nodes"},
+		{"GET", "/v1/k8s/clusters"},
+		{"POST", "/v1/k8s/clusters"},
+		{"GET", "/v1/k8s/clusters/cls-123"},
+		{"DELETE", "/v1/k8s/clusters/cls-123"},
 	}
 	for _, c := range allow {
 		if !isResellComputePath(c.method, c.path) {
@@ -47,6 +56,13 @@ func TestIsResellComputePath(t *testing.T) {
 	deny := []struct{ method, path string }{
 		{"POST", "/v1/regions"},       // catalog is read-only
 		{"DELETE", "/v1/machines"},    // the collection takes GET and POST, nothing else
+		{"DELETE", "/v1/images"},      // images collection takes GET and POST only
+		{"POST", "/v1/k8s/providers"}, // providers list is read-only
+		{"POST", "/v1/k8s/nodes"},     // worker nodes list is read-only
+		{"DELETE", "/v1/k8s/clusters"},
+		{"POST", "/v1/k8s/clusters/cls-123"},
+		{"PUT", "/v1/k8s/clusters/cls-123"},
+		{"GET", "/v1/k8s/clusters/cls-123/extra"},
 		{"GET", "/v1/plans"},          // not a resell-compute route
 		{"POST", "/v1/start-session"}, // legacy surface, gated separately
 		{"GET", "/v1/get-account"},

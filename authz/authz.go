@@ -147,15 +147,26 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 //	GET    /v1/machines/<org>/<name>/agent    read a machine's agent binding
 //	DELETE /v1/machines/<org>/<name>/agent    unbind a machine's agent
 //	PUT    /v1/machines/<org>/<name>/agent    bind a cloud Agent to a machine
+//	GET    /v1/images                         list selectable + org custom images
+//	POST   /v1/images                         register an org custom image
+//	GET    /v1/k8s/providers                  list configured managed-k8s providers
+//	GET    /v1/k8s/nodes                      list the caller org's k8s worker nodes
+//	GET    /v1/k8s/clusters                   list the caller org's k8s clusters
+//	POST   /v1/k8s/clusters                   provision a k8s cluster for caller org
+//	GET    /v1/k8s/clusters/<id>              get one of the caller org's k8s clusters
+//	DELETE /v1/k8s/clusters/<id>              delete one of the caller org's k8s clusters
 func isResellComputePath(method string, urlPath string) bool {
 	switch urlPath {
-	case "/v1/regions", "/v1/sizes", "/v1/gpus":
+	case "/v1/regions", "/v1/sizes", "/v1/gpus", "/v1/k8s/providers", "/v1/k8s/nodes":
 		return method == "GET"
-	case "/v1/machines":
+	case "/v1/machines", "/v1/images", "/v1/k8s/clusters":
 		// The collection: read it, or add to it. Adding is the launch — a quote
 		// when dryRun, a metered provision otherwise — which is why the POST that
 		// spends money is admitted here and every other write is not.
 		return method == "GET" || method == "POST"
+	}
+	if isK8sClusterItem(urlPath) {
+		return method == "GET" || method == "DELETE"
 	}
 	// Agent↔machine binding: the bind is the ONE write admitted here, and only as
 	// PUT on the machine's own agent sub-resource. Every other write under
@@ -169,6 +180,11 @@ func isResellComputePath(method string, urlPath string) bool {
 		return method == "GET" || method == "DELETE"
 	}
 	return false
+}
+
+func isK8sClusterItem(urlPath string) bool {
+	seg := strings.Split(strings.Trim(urlPath, "/"), "/")
+	return len(seg) == 4 && seg[0] == "v1" && seg[1] == "k8s" && seg[2] == "clusters" && seg[3] != ""
 }
 
 func isAllowedInDemoMode(method string, urlPath string) bool {

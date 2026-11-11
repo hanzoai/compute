@@ -34,10 +34,6 @@ tmpFiles/
 lastupdate.tmp
 commentsRouter*.go
 /visor
+/compute
 /casvisor
 .DS_Store
-
-# Local symlinks to LLM.md
-CLAUDE.md
-AGENTS.md
-GEMINI.md

@@ -35,6 +35,12 @@ func TestPathTarget(t *testing.T) {
 		{"/v1", "", ""},
 		{"/health", "", ""},
 		{"/v2/assets/acme/db-1", "", ""},
+		// Principal-scoped compute sub-surfaces carry no :owner segment in the path.
+		{"/v1/k8s/providers", "", ""},
+		{"/v1/k8s/clusters", "", ""},
+		{"/v1/k8s/clusters/cls-123", "", ""},
+		{"/v1/k8s/nodes", "", ""},
+		{"/v1/machines/agents", "", ""},
 		// Trailing slash is the same address.
 		{"/v1/assets/acme/db-1/", "acme", "db-1"},
 	} {
