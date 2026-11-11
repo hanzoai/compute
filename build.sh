@@ -1,18 +1,35 @@
 #!/bin/bash
 set -e
 
-# Private Hanzo modules (e.g. github.com/hanzoai/commerce/metering) live in
-# private repos; go-mod's direct git fetch is authenticated with the BuildKit
-# BuildKit secret gh_token, mounted at /run/secrets/gh_token by the Dockerfile
-# (RUN --mount=type=secret,id=gh_token). GOPRIVATE routes those modules
-# direct-to-git (never through a public proxy).
-export GOPRIVATE="github.com/hanzoai/*,github.com/zooai/*,github.com/parsdao/*"
-if [ -f /run/secrets/gh_token ]; then
-  export GIT_CONFIG_COUNT=1 \
-         GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/gh_token)@github.com/.insteadOf" \
-         GIT_CONFIG_VALUE_0="https://github.com/"
+# Private Hanzo modules resolve from git.hanzo.ai when GIT_AUTH_TOKEN is mounted
+# (cloud /v1/build) or github.com when gh_token / GITHUB_TOKEN is mounted (CI),
+# while GONOPROXY=none lets proxy.golang.org serve published modules verified
+# against the committed go.sum.
+export GOPRIVATE="github.com/hanzoai/*,github.com/hanzo-inc/*,github.com/hanzozt/*,github.com/zap-proto/*,github.com/luxfi/*,github.com/zooai/*,github.com/parsdao/*"
+export GONOPROXY="none"
+export GOPROXY="${GOPROXY:-https://proxy.golang.org|direct}"
+
+n=0
+if [ -s /run/secrets/GIT_AUTH_TOKEN ]; then
+  tok="$(cat /run/secrets/GIT_AUTH_TOKEN)"
+  for org in hanzoai hanzo-inc hanzozt zap-proto; do
+    export "GIT_CONFIG_KEY_${n}=url.https://x:${tok}@git.hanzo.ai/${org}/.insteadOf"
+    export "GIT_CONFIG_VALUE_${n}=https://github.com/${org}/"
+    n=$((n + 1))
+  done
 fi
-export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
+if [ -s /run/secrets/gh_token ]; then
+  export "GIT_CONFIG_KEY_${n}=url.https://x-access-token:$(cat /run/secrets/gh_token)@github.com/.insteadOf"
+  export "GIT_CONFIG_VALUE_${n}=https://github.com/"
+  n=$((n + 1))
+elif [ -s /run/secrets/GITHUB_TOKEN ]; then
+  export "GIT_CONFIG_KEY_${n}=url.https://x-access-token:$(cat /run/secrets/GITHUB_TOKEN)@github.com/.insteadOf"
+  export "GIT_CONFIG_VALUE_${n}=https://github.com/"
+  n=$((n + 1))
+fi
+if [ "$n" -gt 0 ]; then
+  export GIT_CONFIG_COUNT="$n"
+fi
 
 # GOTOOLCHAIN is set by the Dockerfile (ENV GOTOOLCHAIN=auto in the BACK stage),
 # which is where every other Hanzo Go builder sets it. Outside a container Go

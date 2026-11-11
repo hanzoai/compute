@@ -16,7 +16,6 @@ import React from "react";
 import {Link} from "react-router-dom";
 import {Button, Table} from "antd";
 import BaseListPage from "./BaseListPage";
-import moment from "moment";
 import * as Setting from "./Setting";
 import * as MachineBackend from "./backend/MachineBackend";
 import i18next from "i18next";

@@ -17,10 +17,13 @@ ARG GO_EXPERIMENT=jsonv2
 ENV GOEXPERIMENT=${GO_EXPERIMENT}
 ARG TARGETOS TARGETARCH
 RUN chmod +x ./build.sh
-RUN --mount=type=secret,id=gh_token ./build.sh
+RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    --mount=type=secret,id=gh_token \
+    ./build.sh
 # The runtime directories, owned by the runtime user, made here because an
 # empty image has no mkdir and no chown.
-RUN mkdir -p /out/logs /out/conf /out/web \
+RUN mkdir -p /out/logs /out/conf /out/web /out/tmp \
     && cp compute /out/compute \
     && cp -r data /out/data \
     && cp conf/app.conf /out/conf/app.conf \

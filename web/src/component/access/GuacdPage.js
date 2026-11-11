@@ -81,8 +81,9 @@ const GuacdPage = (props) => {
   };
 
   const renderDisplay = (sessionId, protocol, width, height) => {
+    const [owner, name] = sessionId.split("/");
     const wsEndpoint = Setting.ServerUrl.replace("http://", "ws://");
-    const wsUrl = `${wsEndpoint}/v1/sessions/${owner}/${encodeURIComponent(name)}/connection`;
+    const wsUrl = `${wsEndpoint}/v1/sessions/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/connection`;
     const tunnel = new Guacamole.WebSocketTunnel(wsUrl);
     const client = new Guacamole.Client(tunnel);
 
