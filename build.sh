@@ -12,7 +12,7 @@ export GOPROXY="${GOPROXY:-https://proxy.golang.org|direct}"
 n=0
 if [ -s /run/secrets/GIT_AUTH_TOKEN ]; then
   tok="$(cat /run/secrets/GIT_AUTH_TOKEN)"
-  for org in hanzoai hanzo-inc hanzozt zap-proto; do
+  for org in hanzoai hanzo-inc hanzozt zap-proto luxfi zooai parsdao; do
     export "GIT_CONFIG_KEY_${n}=url.https://x:${tok}@git.hanzo.ai/${org}/.insteadOf"
     export "GIT_CONFIG_VALUE_${n}=https://github.com/${org}/"
     n=$((n + 1))
