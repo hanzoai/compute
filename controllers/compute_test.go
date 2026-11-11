@@ -338,7 +338,7 @@ func TestListKubernetesClustersEmptyWithoutProvider(t *testing.T) {
 	}
 
 	// Launching without a cloud provider still refuses with refuseNoProvider.
-	_, createBody := ask(t, app, http.MethodPost, "/v1/k8s/clusters", `{"name":"c1","region":"nyc3","nodePool":{"size":"s-2vcpu-4gb","count":1}}`, mint("acme"))
+	createBody := post(t, app, "/v1/k8s/clusters", mint("acme"), `{"name":"c1","region":"nyc3","nodePool":{"size":"s-2vcpu-4gb","count":1}}`)
 	if !strings.Contains(createBody, refuseNoProvider) {
 		t.Fatalf("cluster create without provider must refuse with refuseNoProvider, got %s", createBody)
 	}
