@@ -314,7 +314,7 @@ func (c *ApiController) ListComputeKubernetesClusters() {
 		return
 	}
 	if !service.KubernetesConfigured() {
-		c.ResponseError(refuseNoProvider)
+		c.ResponseOk([]*service.KubernetesCluster{})
 		return
 	}
 	clusters, err := service.ListOrgKubernetesClusters(org)

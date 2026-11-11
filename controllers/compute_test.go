@@ -313,3 +313,33 @@ func TestLaunchMeteredRefusesAnUnpriceableSize(t *testing.T) {
 		t.Fatalf("an unpriceable launch must ask commerce nothing, got %d reads and %d debits", reads, debits)
 	}
 }
+
+// Listing clusters when no cloud provider is configured is an empty list — the
+// same rule ListMachines and ListNodes follow — while creating a cluster without
+// a provider still refuses with refuseNoProvider.
+func TestListKubernetesClustersEmptyWithoutProvider(t *testing.T) {
+	mint := signer(t, "https://test.id")
+	app := zip.New(zip.Config{ReadBufferSize: 16384})
+	h := func(fn func(*ApiController)) zip.Handler {
+		return func(c *zip.Ctx) error { fn(New(c)); return nil }
+	}
+	app.Get("/v1/k8s/clusters", h((*ApiController).ListComputeKubernetesClusters))
+	app.Post("/v1/k8s/clusters", h((*ApiController).CreateComputeKubernetesCluster))
+
+	// Tenant-less read still fails closed.
+	if body := get(t, app, "/v1/k8s/clusters", ""); !strings.Contains(body, refuseNoOrg) {
+		t.Fatalf("tenant-less cluster list must refuse with refuseNoOrg, got %s", body)
+	}
+
+	// Signed-in org with no cloud provider configured gets status:ok and data:[].
+	body := get(t, app, "/v1/k8s/clusters", mint("acme"))
+	if !strings.Contains(body, `"status":"ok"`) || !strings.Contains(body, `"data":[]`) {
+		t.Fatalf("org with no cloud provider must get empty cluster list, got %s", body)
+	}
+
+	// Launching without a cloud provider still refuses with refuseNoProvider.
+	_, createBody := ask(t, app, http.MethodPost, "/v1/k8s/clusters", `{"name":"c1","region":"nyc3","nodePool":{"size":"s-2vcpu-4gb","count":1}}`, mint("acme"))
+	if !strings.Contains(createBody, refuseNoProvider) {
+		t.Fatalf("cluster create without provider must refuse with refuseNoProvider, got %s", createBody)
+	}
+}
