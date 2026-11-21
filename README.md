@@ -1,5 +1,7 @@
 # Hanzo Compute
 
+[![Open in Hanzo](https://hanzo.app/badges/open-in-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/compute&ref=main&action=open) [![Edit with Hanzo](https://hanzo.app/badges/edit-with-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/compute&ref=main&action=edit) [![Deploy with Hanzo](https://hanzo.app/badges/deploy-with-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/compute&ref=main&action=deploy)
+
 **The multi-cloud compute plane for Hanzo Cloud — machines, GPUs, and clusters across AWS, GCP, Azure, DigitalOcean, and bare metal.**
 
 ![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8) ![Compute](https://img.shields.io/badge/compute-AWS%20%C2%B7%20GCP%20%C2%B7%20Azure%20%C2%B7%20DO-informational) ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
