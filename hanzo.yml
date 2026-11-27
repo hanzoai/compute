@@ -26,6 +26,10 @@ images:
     context: .
     dockerfile: Dockerfile
     repo: ghcr.io/hanzoai/compute
+    # The Dockerfile's final stage is already scratch, with CA certs and
+    # zoneinfo copied from the build stage. Do not let the pack wrapper add a
+    # distroless base the runner cannot fetch.
+    base: scratch
     # amd64-only, carried over from the previous caller and still true: DOKS has
     # no arm64 droplets, so there is no arm64 deploy target, and a queued arm64
     # job would block the manifest step behind a runner that never claims it.
