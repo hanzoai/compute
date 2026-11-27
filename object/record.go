@@ -161,7 +161,15 @@ func NewRecord(c *zip.Ctx, respJSON any) (*Record, error) {
 
 	object := ""
 	if body := c.Body(); len(body) != 0 {
-		object = string(body)
+		// A machine's computer op carries the arguments to a click or a
+		// keystroke, screenshots, and possibly a credential. The audit row
+		// is durable and shared, so it must never hold that body: the route
+		// is recorded by method, path and outcome, with the object left
+		// empty. The SHAPE is matched, not a suffix, so a longer address
+		// cannot be quietly swept into the redaction by a future route.
+		if !util.IsMachineComputerPath(c.Path()) {
+			object = string(body)
+		}
 	}
 
 	respBytes, err := json.Marshal(respJSON)

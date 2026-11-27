@@ -48,11 +48,15 @@ import (
 var banned = map[string]string{
 	"github.com/hanzoai/iam-v1": "archived Casdoor fork — use github.com/hanzoai/iamsdk/v2/iamsdk",
 
-	"github.com/beego/beego":              "visor's old framework — it serves on github.com/zap-proto/zip",
-	"github.com/astaxie/beego":            "Beego's pre-rename import path — same framework, older address",
-	"github.com/gin-gonic/gin":            "second web framework — visor serves on github.com/zap-proto/zip",
-	"github.com/labstack/echo":            "second web framework — visor serves on github.com/zap-proto/zip",
-	"github.com/gofiber/fiber":            "second web framework — zip's engine is github.com/zap-proto/fiber, reached through zip",
+	"github.com/beego/beego":   "visor's old framework — it serves on github.com/zap-proto/zip",
+	"github.com/astaxie/beego": "Beego's pre-rename import path — same framework, older address",
+	"github.com/gin-gonic/gin": "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/labstack/echo": "second web framework — visor serves on github.com/zap-proto/zip",
+	"github.com/gofiber/fiber": "second web framework — zip's engine is github.com/zap-proto/fiber, reached through zip",
+	// gorilla/mux is banned as a DIRECT router. It is allowed only as an INDIRECT
+	// require, where github.com/hanzozt/sdk-golang's websocket transport uses it
+	// internally to reach .zt services — visor never registers a route on it.
+	// See allowedIndirect below.
 	"github.com/gorilla/mux":              "second router — visor serves on github.com/zap-proto/zip",
 	"github.com/go-chi/chi":               "second router — visor serves on github.com/zap-proto/zip",
 	"github.com/julienschmidt/httprouter": "second router — visor serves on github.com/zap-proto/zip",
@@ -61,6 +65,16 @@ var banned = map[string]string{
 	"github.com/revel/revel":              "second web framework — visor serves on github.com/zap-proto/zip",
 	"github.com/go-martini/martini":       "second web framework — visor serves on github.com/zap-proto/zip",
 	"github.com/urfave/negroni":           "second middleware stack — visor's chain is zip's",
+}
+
+// allowedIndirect is the narrow exception to the one-router rule: a module that
+// may be LINKED transitively but never IMPORTED by visor. The ZT Go SDK's wss
+// transport builds its own internal routes with gorilla/mux; that code is a
+// client-side link into the fabric, not a second place visor serves HTTP. The
+// exception is keyed on `// indirect` in go.mod, so `go get github.com/gorilla/mux`
+// as a direct dependency still fails the gate.
+var allowedIndirect = map[string]string{
+	"github.com/gorilla/mux": "internal to hanzozt/sdk-golang's websocket transport, not visor's router",
 }
 
 // covers reports whether module path f is banned path p, or a package/major
@@ -85,14 +99,21 @@ type hit struct{ path, why string }
 func bannedIn(goMod string) []hit {
 	var found []hit
 	for line := range strings.SplitSeq(goMod, "\n") {
-		if i := strings.Index(line, "//"); i >= 0 && !strings.Contains(line, "// indirect") {
+		indirect := strings.Contains(line, "// indirect")
+		if i := strings.Index(line, "//"); i >= 0 && !indirect {
 			line = line[:i]
 		}
 		for f := range strings.FieldsSeq(line) {
 			for p, why := range banned {
-				if covers(p, f) {
-					found = append(found, hit{path: f, why: why})
+				if !covers(p, f) {
+					continue
 				}
+				if indirect {
+					if _, ok := allowedIndirect[p]; ok {
+						continue
+					}
+				}
+				found = append(found, hit{path: f, why: why})
 			}
 		}
 	}
@@ -148,6 +169,7 @@ func TestBannedInSpares(t *testing.T) {
 		"\tgithub.com/valyala/fasthttp v1.72.0\n",
 		"\tgithub.com/fasthttp/websocket v1.5.12\n",
 		"\tgithub.com/gorilla/websocket v1.5.4\n",
+		"\tgithub.com/gorilla/mux v1.8.1 // indirect\n", // ZT SDK's wss transport, not visor's router
 		"\tgithub.com/gofiber/schema v1.7.1\n",
 		"\tgithub.com/gofiber/utils/v2 v2.0.4\n",
 	} {

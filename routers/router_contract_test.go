@@ -91,6 +91,9 @@ var apiContract = []route{
 	{"PUT", "/v1/machines/:owner/:name/agent", "BindAgent"},
 	{"GET", "/v1/machines/:owner/:name/agent", "GetAgent"},
 	{"DELETE", "/v1/machines/:owner/:name/agent", "UnbindAgent"},
+	// One machine's COMPUTE op: typed, so the contract line names a package
+	// function rather than an ApiController method.
+	{"POST", "/v1/machines/:owner/:name/computer", "Computer"},
 	{"GET", "/v1/k8s/providers", "ListComputeKubernetesProviders"},
 	{"GET", "/v1/k8s/clusters", "ListComputeKubernetesClusters"},
 	{"POST", "/v1/k8s/clusters", "CreateComputeKubernetesCluster"},
@@ -207,7 +210,7 @@ func TestAPIContractPreserved(t *testing.T) {
 // TestAPIContractCount pins the size of the surface, so a route added without a
 // contract line (or a duplicate registration) fails loudly.
 func TestAPIContractCount(t *testing.T) {
-	const wantRoutes = 69
+	const wantRoutes = 70
 	if len(apiContract) != wantRoutes {
 		t.Fatalf("contract table has %d routes, want %d", len(apiContract), wantRoutes)
 	}
@@ -246,7 +249,7 @@ func TestAPIContractVerbMix(t *testing.T) {
 	//
 	// GET falls for the first time in this migration, and only here — two
 	// addresses answered the same question and one of them is gone.
-	want := map[string]int{"GET": 31, "POST": 13, "DELETE": 12, "PUT": 13}
+	want := map[string]int{"GET": 31, "POST": 14, "DELETE": 12, "PUT": 13}
 
 	got := map[string]int{}
 	for k := range registeredRoutes(t) {

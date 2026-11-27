@@ -37,6 +37,7 @@ func TestIsResellComputePath(t *testing.T) {
 		{"GET", "/v1/machines/acme/abc-123/agent"},
 		{"DELETE", "/v1/machines/acme/abc-123/agent"},
 		{"PUT", "/v1/machines/acme/abc-123/agent"},
+		{"POST", "/v1/machines/acme/abc-123/computer"},
 		// Org-scoped images + managed-k8s surface (scoped in controller via resolveComputeOrg / Scope).
 		{"GET", "/v1/images"},
 		{"POST", "/v1/images"},
@@ -74,6 +75,9 @@ func TestIsResellComputePath(t *testing.T) {
 		{"PUT", "/v1/machines/agents"},                   // …and is not a bind target
 		{"GET", "/v1/agent-bindings"},                    // the old list address is gone
 		{"POST", "/v1/machines/acme/abc-123/bind-agent"}, // the old bind address is gone
+		{"GET", "/v1/machines/acme/abc-123/computer"},    // compute is a POST, not a read
+		{"POST", "/v1/machines/computer"},                // not the shape of a machine sub-resource
+		{"POST", "/v1/machines/acme/abc-123/x/computer"}, // a longer path is a different permission
 	}
 	for _, c := range deny {
 		if isResellComputePath(c.method, c.path) {
