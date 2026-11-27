@@ -20,8 +20,9 @@ import (
 	authz "github.com/hanzoai/authz"
 	"github.com/hanzoai/authz/model"
 	stringadapter "github.com/hanzoai/authz/persist/string-adapter"
-	"github.com/hanzoai/iamsdk/v2/iamsdk"
 	"github.com/hanzoai/compute/conf"
+	"github.com/hanzoai/compute/util"
+	"github.com/hanzoai/iamsdk/v2/iamsdk"
 )
 
 var Enforcer *authz.Enforcer
@@ -147,6 +148,7 @@ func IsAllowed(user *iamsdk.User, subOwner string, subName string, method string
 //	GET    /v1/machines/<org>/<name>/agent    read a machine's agent binding
 //	DELETE /v1/machines/<org>/<name>/agent    unbind a machine's agent
 //	PUT    /v1/machines/<org>/<name>/agent    bind a cloud Agent to a machine
+//	POST   /v1/machines/<org>/<name>/computer forward one computer-use op over ZT
 //	GET    /v1/images                         list selectable + org custom images
 //	POST   /v1/images                         register an org custom image
 //	GET    /v1/k8s/providers                  list configured managed-k8s providers
@@ -173,6 +175,13 @@ func isResellComputePath(method string, urlPath string) bool {
 	// /v1/machines/ stays denied — no blanket POST or PUT on the prefix.
 	if method == "PUT" && strings.HasPrefix(urlPath, "/v1/machines/") && strings.HasSuffix(urlPath, "/agent") {
 		return true
+	}
+	// A machine's COMPUTE surface is the ONE POST admitted below a machine item.
+	// The SHAPE is matched, not a suffix: a trailing "/computer" on a longer or
+	// shorter address is a different permission. Org-scoping is still the
+	// controller's job — it refuses a caller whose org is not the path's owner.
+	if util.IsMachineComputerPath(urlPath) {
+		return method == "POST"
 	}
 	// /v1/machines/<org>/<name>, its /agent, and /v1/machines/agents — read or
 	// delete one machine, its binding, or the org's binding list.

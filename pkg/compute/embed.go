@@ -32,6 +32,7 @@ import (
 	"github.com/hanzoai/compute/authz"
 	"github.com/hanzoai/compute/object"
 	"github.com/hanzoai/compute/routers"
+	"github.com/hanzoai/compute/service"
 	"github.com/hanzoai/compute/task"
 	"github.com/hanzoai/compute/util"
 )
@@ -52,6 +53,13 @@ func initState() {
 	util.InitIpDb()
 	util.InitParser()
 
+	// The fabric dialer for a machine's computer service. Registered here rather
+	// than in serve() so the embedded cloud mount gets the same one: both boot
+	// paths call Bootstrap, and a nil dialer (no IAM identity) fails the op closed
+	// with 503 instead of reaching for public DNS. Opening the controller is
+	// lazy, so boot makes no network call on the strength of config alone.
+	service.RegisterZTDialer(service.ZTDialerFromConfig())
+
 	task.NewTicker().SetupTicker()
 }
 
@@ -67,7 +75,12 @@ func Bootstrap() *zip.App {
 	app := zip.New(zip.Config{
 		AppName:               Name,
 		DisableStartupMessage: true,
-		MCP:                   zip.MCPConfig{Path: routers.MCPPath},
+		// A forwarded IAM Bearer plus an approval header and a computer-use
+		// body does not fit zip's 4 KiB default read buffer. The buffer is a
+		// request limit, not a second framework knob: raising it here keeps a
+		// long-lived token from turning into a 400 before authz runs.
+		ReadBufferSize: 16384,
+		MCP:            zip.MCPConfig{Path: routers.MCPPath},
 	})
 	routers.Route(app)
 	return app

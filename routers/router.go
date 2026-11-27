@@ -14,6 +14,8 @@
 
 package routers
 
+//go:generate go run github.com/zap-proto/zip/cmd/zipdoc
+
 import (
 	"github.com/zap-proto/zip"
 	"github.com/zap-proto/zip/middleware"
@@ -73,6 +75,11 @@ func Route(app *zip.App) {
 	app.Use(zip.H(TenantContextFilter))
 	app.Use(zip.H(ApiFilter))
 	app.Use(zip.H(RecordMessage))
+	// The computer op is typed like every other op, but its answer is hanzod's
+	// bytes, not zip's JSON envelope. This writer is installed on the chain
+	// (not on a per-route wrapper) so zipdoc can still see a typed registration
+	// made directly on the *zip.App.
+	app.Use(zip.H(controllers.RawComputerForMachine))
 
 	registerAPI(app)
 }
@@ -177,6 +184,11 @@ func registerAPI(app *zip.App) {
 	app.Get("/v1/machines", h((*controllers.ApiController).ListMachines))
 	app.Post("/v1/machines", h((*controllers.ApiController).LaunchComputeMachine))
 	registerAgent(app)
+	// A machine's COMPUTE surface: one TYPED op over the Zero Trust fabric,
+	// with a raw response writer so hanzod's status/Content-Type/body survive
+	// byte-for-byte. The address sits on the machine noun, not in a second
+	// controller family.
+	registerComputer(app)
 	app.Get("/v1/machines/:owner/:name", h((*controllers.ApiController).GetMachine))
 	app.Put("/v1/machines/:owner/:name", h((*controllers.ApiController).UpdateMachine))
 	app.Delete("/v1/machines/:owner/:name", h((*controllers.ApiController).DeleteMachine))

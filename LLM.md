@@ -362,6 +362,28 @@ row above — those four are TYPED ops with no envelope at all (see "Typed ops")
   hanzoai/egress, which holds it off-cluster; commerce token from
   `COMMERCE_SERVICE_TOKEN`. Never hardcoded; no carrier ⇒ fail closed.
 
+### A machine's COMPUTE surface: the ZT fabric, not DNS
+`POST /v1/machines/:owner/:name/computer` is a TYPED op (`controllers/computer.go`,
+`routers/computer_wire.go`) that tunnels one hanzod `/v1/computer` operation to a
+linked Mac over the Hanzo Zero Trust fabric. `hanzo link host` publishes
+`hanzod.<org>.zt → 127.0.0.1:3690`; host mode cannot intercept DNS, so the
+consumer dials the service through `github.com/hanzozt/sdk-golang` with visor's
+IAM identity (`service/zt.go`). Nothing is exposed publicly and no DNS is
+changed. Status, Content-Type and body are passed back byte-for-byte; a filter
+installed on the app chain replaces zip's typed JSON answer with the upstream
+bytes, while the op still projects into OpenAPI/MCP/CLI. The audit recorder
+redacts this address's request body (typed text, pixels, credentials).
+
+Config is the service IAM identity already in use plus one optional controller
+address: `IAM_CLIENT_ID`, `IAM_CLIENT_SECRET`, `iamEndpoint` (env wins over
+`conf/app.conf`, default `https://iam.hanzo.ai`), and `ZT_CONTROLLER_URL`
+(default `https://zt-api.hanzo.ai`, conf key `ztControllerUrl`). No second
+credential. With no identity, no dialer is installed and the op answers 503.
+The dialer opens the controller on FIRST use, so boot makes no network call.
+`go generate ./routers/...` lifts typed-op doc comments into
+`routers/zipdoc_gen.go`; `go run github.com/zap-proto/zip/cmd/zipdoc -check
+./routers/...` gates drift.
+
 ### How visor reaches a cloud — one seam, `service/transport.go`
 Every provider client is built over an `*http.Client` from `httpFor`, and that
 is the ONE place a cloud credential becomes an outbound request. Both SDKs take
