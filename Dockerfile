@@ -11,6 +11,12 @@ FROM --platform=$BUILDPLATFORM ghcr.io/hanzoai/mirror/golang:1.27.1-alpine@sha25
 ENV GOTOOLCHAIN=auto
 # build.sh is #!/bin/bash and fetches private modules over git (GOPRIVATE direct)
 RUN apk add --no-cache bash git ca-certificates tzdata
+# Manual builds get the deploy token as a build arg; configure git so private
+# module fetches never prompt. The token is never written into an image layer.
+ARG GITHUB_TOKEN
+RUN if [ -n "${GITHUB_TOKEN:-}" ]; then \
+      git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
+    fi
 WORKDIR /go/src/hanzo-compute
 COPY . .
 ARG GO_EXPERIMENT=jsonv2
